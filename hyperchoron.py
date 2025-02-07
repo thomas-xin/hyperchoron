@@ -287,8 +287,9 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, transpose=0):
 		)
 	if base.endswith("_head"):
 		return (
-			(coords[2], base),
+			(coords[0], "mangrove_roots"),
 			(coords[1], "note_block", dict(note=pitch, instrument=instrument_names[base])),
+			(coords[2], base),
 		)
 	return (
 		(coords[0], base),
