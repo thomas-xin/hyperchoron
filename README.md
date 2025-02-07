@@ -1,2 +1,37 @@
-# hyperchoron
-A small export script converting MIDI files to Minecraft note block songs
+# Instructions for use
+```ini
+py hyperchoron.py -h
+usage: [-h] [-i INPUT] [-o [OUTPUT]] [-t [TRANSPOSE]] [-s [SPEED]] [-sa [STRUM_AFFINITY]] [-d | --drums | --no-drums]
+
+MIDI to Minecraft Note Block Converter
+
+options:
+  -h, --help            show this help message and exit
+  -i, --input INPUT     Input file (.mid)
+  -o, --output [OUTPUT]
+                        Output file (.mcfunction | .litematic)
+  -t, --transpose [TRANSPOSE]
+                        Transposes song up/down a certain amount of semitones; higher = higher pitched
+  -s, --speed [SPEED]   Scales song speed up/down as a multiplier; higher = faster
+  -sa, --strum-affinity [STRUM_AFFINITY]
+                        Increases or decreases threshold for sustained notes to be cut into discrete segments; higher
+                        = more notes
+  -d, --drums, --no-drums
+                        Disables percussion channel
+```
+- The program takes one input and output file, and currently supports .mcfunction (a list of `/setblock` commands), and .litematic (used by the litematica mod) files.
+- At present, hyperchoron is only implemented to be run as an export script, and does not have interoperability as a library or with inbetween formats such as .nbs. This may change in the future.
+- The required libraries are `py_midi2csv`, and `litemapy` if exporting to .litematic files. They may be quick-installed using `pip install -r requirements.txt`.
+
+# What is the purpose of another exporter like this?
+- Converting music to minecraft note blocks programmatically has been a thing for a long time, the most popular program being Note Block Studio. This program is not intended to entirely replace them, and is meant to be a standalone feature.
+- Hyperchoron's intent is to expand on the exporting capabilities of note block programs, using a more adaptable algorithm to produce more accurate recreations of songs while still staying within the boundaries of vanilla Minecraft.
+  - Note Sustain: Automatically cut excessively long notes into segments to be replayed several times, preventing notes that are supposed to be sustained from fading out quickly. This adapts based on the volume of the current and adjacent notes, and will automatically offset chords into a strum to avoid excessive sudden loudness.
+  - Instrument Mapping: Rather than map all MIDI instruments to a list of blocks and call it a day, this program has the full 6-octave range for all instruments, automatically swapping the materials if a note exceeds the current range. This is very important for most songs as the default range of 2 octaves in vanilla Minecraft means notes will frequently fall out of range. Clipping, dropping or wrapping notes at the boundary are valid methods of handling this, but they do not permit an accurate recreation of the full song.
+  - Adding to the previous point, all drums are implemented separately, rather than using only the three drum instruments in vanilla (which end up drowning each other out), some percussion instruments are mapped to other instruments or mob heads, which allows for a greater variety of sound effects.
+  - Pitch Bends: Interpret pitch bends from MIDI files, and automatically convert them into grace notes. This is very important for any MIDI file that includes this mechanic, as the pitch of notes involved will often be very wrong without it.
+  - Polyphonic Budget: If there are too many notes being played at any given moment, the quietest notes and intermediate notes used for sustain will be discarded first.
+  - Full Tick Rate: Using the scaffolding-on-trapdoor circuit, a 3-gametick delay can be achieved, which allows offsetting from the (usual) even-numbered ticks redstone components are capable of operating at. This means the full 20Hz tick speed of vanilla Minecraft can be accessed, allowing much greater timing precision.
+  - Tempo Alignment: The tempo of songs is automatically synced to Minecraft's default tick rate not using the song's time signature, but rather the greatest common denominator of the notes' timestamps, pruning outliers as necessary. This allows keeping in sync with songs with triplets, quintuplets, or any other measurement not divisible by a power of 2. The algorithm falls back to unsynced playback if a good timing candidate cannot be found, which allows songs with tempo changes or that do not follow their defined time signature at all to still function.
+
+- Screenshots and example exported outputs are provided; credit goes out to the original creators of the songs as well as MIDI transcriptions where applicable. Links to video examples of hyperchoron in action will be added soon.

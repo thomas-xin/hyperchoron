@@ -1,0 +1,2 @@
+litemapy>=0.10.0b0
+py_midicsv>=4.1.2
