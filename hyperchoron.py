@@ -248,13 +248,35 @@ def get_note_mat(note, transpose=0):
 		ins = 5
 		mod += 12
 	mat = material[ins]
-	if note[3]:
+	if note[3] == 2:
+		replace = dict(
+			hay_block="snow_block",
+			emerald_block="snow_block",
+			snow_block="snow_block",
+			iron_block="snow_block",
+			soul_sand="snow_block+",
+			glowstone="snow_block",
+			clay="snow_block+"
+		)
+		replace.update({
+			"hay_block+": "snow_block+",
+			"emerald_block+": "snow_block+",
+			"snow_block+": "snow_block+",
+			"black_wool+": "snow_block",
+			"iron_block+": "snow_block+",
+			"glowstone+": "snow_block+",
+		})
+		try:
+			mat = replace[mat]
+		except KeyError:
+			return "PLACEHOLDER", 0
+	elif note[3]:
 		replace = dict(
 			bamboo_planks="pumpkin",
 			black_wool="pumpkin+",
 			bone_block="gold_block",
 			iron_block="snow_block",
-			soul_sand="glowstone",
+			soul_sand="glowstone+",
 			glowstone="snow_block",
 		)
 		replace.update({
@@ -263,7 +285,6 @@ def get_note_mat(note, transpose=0):
 			"gold_block+": "packed_ice+",
 			"bone_block+": "gold_block+",
 			"iron_block+": "snow_block+",
-			"soul_sand+": "glowstone+",
 			"glowstone+": "snow_block+",
 		})
 		try:
@@ -431,7 +452,7 @@ def convert_midi(midi_events, tps=20):
 							off = None
 							for i, e in enumerate(midi_events):
 								m = e[2].strip().casefold()
-								if m == "note_off_c":
+								if m == "note_off_c" or m == "note_on_c" and int(e[5]) <= 1:
 									c = int(e[3])
 									p = int(e[4])
 									if c == channel and p == pitch:
@@ -536,7 +557,7 @@ def convert_midi(midi_events, tps=20):
 				loud *= 0.5
 	while not played_notes[-1]:
 		played_notes.pop(-1)
-	return played_notes, note_candidates, step_ms, is_org
+	return played_notes, note_candidates, is_org
 
 MAIN = 4
 SIDE = 2
@@ -560,9 +581,9 @@ def render_minecraft(notes, transpose=0):
 				curr = beat[pulse]
 				if not curr:
 					continue
-				cap = MAIN * 2 + SIDE * 2 if pulse == 0 else SIDE * 4 if pulse == 2 else SIDE * 2
+				cap = MAIN * 2 + SIDE * 2 + 2 if pulse == 0 else SIDE * 4 if pulse == 2 else SIDE * 2
 				padding = (-1, 0, inf, 0, 0)
-				transparent = ("glowstone", "heavy_core", "blue_stained_glass")
+				transparent = ("glowstone", "heavy_core", "blue_stained_glass", "red_stained_glass")
 				lowest = min((note[1], note) for note in curr)[1]
 				ordered = sorted(curr, key=lambda note: (note[2], round(note[4] * 8), note[0] == -1, note[1]), reverse=True)[:cap]
 				if lowest != padding and lowest not in ordered:
@@ -629,6 +650,24 @@ def render_minecraft(notes, transpose=0):
 							transpose=transpose,
 						)
 					ordered = ordered[MAIN * 2:] + remainder
+					while True:
+						try:
+							ordered.remove(padding)
+						except ValueError:
+							break
+					taken = False
+					for note in ordered[SIDE * 2:]:
+						note = list(note)
+						note[3] = 2
+						note = tuple(note)
+						mat, pitch = get_note_mat(note, transpose=transpose)
+						if mat != "PLACEHOLDER":
+							yield ((-x if taken else x, y + 2, z - 1), "note_block", dict(note=pitch, instrument="harp"))
+							if taken:
+								break
+							else:
+								taken = True
+					ordered = ordered[:SIDE * 2]
 				for y in elevations[pulse]:
 					cap = SIDE
 					left, right, ordered = ordered[:cap], ordered[cap:cap * 2], ordered[cap * 2:]
@@ -644,7 +683,7 @@ def render_minecraft(notes, transpose=0):
 					for w, note in enumerate(left):
 						yield from get_note_block(
 							note,
-							[x, y + v, z + w],
+							[x, y + v, z - w],
 							transpose=transpose,
 						)
 					if i >= 8:
@@ -658,7 +697,7 @@ def render_minecraft(notes, transpose=0):
 					for w, note in enumerate(right):
 						yield from get_note_block(
 							note,
-							[x, y + v, z + w],
+							[x, y + v, z - w],
 							transpose=transpose,
 						)
 
@@ -755,7 +794,8 @@ def render_minecraft(notes, transpose=0):
 			)
 
 	def ensure_layer(direction="right", offset=0):
-		x = -1 if direction == "right" else 1
+		right = direction == "right"
+		x = -1 if right else 1
 		z = offset
 		mirrored = offset % 8 >= 4
 		x2 = x * 19 if mirrored else x * 2
@@ -776,7 +816,8 @@ def render_minecraft(notes, transpose=0):
 		)
 
 	def ensure_top(direction="right", offset=0):
-		x = -1 if direction == "right" else 1
+		right = direction == "right"
+		x = -1 if right else 1
 		z = offset
 		mirrored = offset % 8 >= 4
 		if mirrored:
@@ -808,7 +849,6 @@ def render_minecraft(notes, transpose=0):
 
 	print("Preparing output...")
 	bars = ceil(len(notes) / BAR / DIV)
-	maxz = bars * 8 + 256
 	elevations = ((-3,), (6,), (-6, -9), (9,))
 	for b in tqdm.trange(bars):
 		inverted = not b & 1
@@ -874,30 +914,8 @@ def render_minecraft(notes, transpose=0):
 		((0, 0, 0), "crying_obsidian"),
 		((0, 1, 0), "lever", dict(facing="north", face="floor", powered="false")),
 	)
-	# lines.append(f"setblock ~ ~ ~{offset + 1} " + 'command_block[facing=down]{Command:"kill @e[type=minecart,sort=nearest,limit=1,distance=..8]"}')
-	# lines.append(f"setblock ~ ~-1 ~{offset + 1} " + 'command_block[facing=up]{Command:"tp @p ~ ~2 ~' + str(-offset) + '"}')
-	# lines.append(f"setblock ~ ~1 ~{offset + 1} polished_blackstone_button[facing=west,face=floor]")
-	# lines.append(f"execute positioned ~ ~ ~{maxz // 2} run kill @e[type=item,distance=..{maxz // 2 + 8}]")
-	# lines.append("forceload remove all")
-	# for i, line in enumerate(lines):
-	# 	if (line.startswith("fill ") or line.startswith("setblock ")) and line.rsplit(None, 1)[-1] not in ("air", "strict", "destroy", "hollow", "outline", "replace", "keep"):
-	# 		lines[i] = line + " strict"
-	# return "\n".join(lines)
 
-
-if __name__ == "__main__":
-	import argparse
-	parser = argparse.ArgumentParser(
-		prog="",
-		description="MIDI to Minecraft Note Block Converter",
-	)
-	parser.add_argument("-i", "--input", help="Input file (.mid)")
-	parser.add_argument("-o", "--output", nargs="?", help="Output file (.mcfunction | .litematic)")
-	parser.add_argument("-t", "--transpose", nargs="?", type=int, help="Transposes song up/down a certain amount of semitones; higher = higher pitched")
-	parser.add_argument("-s", "--speed", nargs="?", type=float, help="Scales song speed up/down as a multiplier; higher = faster")
-	parser.add_argument("-sa", "--strum-affinity", nargs="?", type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes")
-	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Disables percussion channel")
-	args = parser.parse_args()
+def convert_file(args):
 	if not args.output:
 		path, name = args.input.replace("\\", "/").rsplit("/", 1)
 		args.output = path + "/" + name.rsplit(".", 1)[0] + ".litematic"
@@ -912,18 +930,20 @@ if __name__ == "__main__":
 	print("Converting midi...")
 	csv_list = py_midicsv.midi_to_csv(args.input)
 	midi_events = list(csv.reader(csv_list))
-	notes, note_candidates, step_ms, is_org = convert_midi(midi_events)
+	notes, note_candidates, is_org = convert_midi(midi_events)
 	print("Note candidates:", note_candidates)
 	print("Note count:", sum(map(len, notes)))
-	print("Max detected polyphony (will be reduced to <=12):", max(map(len, notes)))
+	print("Max detected polyphony (will be reduced to <=14):", max(map(len, notes)))
 	print("Lowest note:", min(min(n[1] for n in b) for b in notes if b))
 	print("Highest note:", max(max(n[1] for n in b) for b in notes if b))
 	lazy = render_minecraft(notes, transpose=globals()["TRANSPOSE"] + 12 if is_org else globals()["TRANSPOSE"])
 	bars = ceil(len(notes) / BAR / DIV)
 	depth = bars * 8 + 8
+	nc = 0
 	if args.output.endswith(".mcfunction"):
 		with open(args.output, "w") as f:
 			for (x, y, z), block, *kwargs in lazy:
+				nc += block == "note_block"
 				if kwargs:
 					extra = "[" + ",".join(f"{k}={v}" for k, v in kwargs[0].items()) + "]"
 				else:
@@ -939,9 +959,27 @@ if __name__ == "__main__":
 			description="Exported MIDI",
 		)
 		for (x, y, z), block, *kwargs in lazy:
+			nc += block == "note_block"
 			if kwargs:
 				block = litemapy.BlockState("minecraft:" + block, **{k: str(v) for k, v in kwargs[0].items()})
 			else:
 				block = litemapy.BlockState("minecraft:" + block)
 			reg[x + mx, y + my, z] = block
 		schem.save(args.output)
+	print("Final note count:", nc)
+
+
+if __name__ == "__main__":
+	import argparse
+	parser = argparse.ArgumentParser(
+		prog="",
+		description="MIDI to Minecraft Note Block Converter",
+	)
+	parser.add_argument("-i", "--input", required=True, help="Input file (.mid)")
+	parser.add_argument("-o", "--output", nargs="?", help="Output file (.mcfunction | .litematic)")
+	parser.add_argument("-t", "--transpose", nargs="?", type=int, help="Transposes song up/down a certain amount of semitones; higher = higher pitched")
+	parser.add_argument("-s", "--speed", nargs="?", type=float, help="Scales song speed up/down as a multiplier; higher = faster")
+	parser.add_argument("-sa", "--strum-affinity", nargs="?", type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes")
+	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Disables percussion channel")
+	args = parser.parse_args()
+	convert_file(args)
