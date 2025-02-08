@@ -36,4 +36,4 @@ options:
   - Tempo Alignment: The tempo of songs is automatically synced to Minecraft's default tick rate not using the song's time signature, but rather the greatest common denominator of the notes' timestamps, pruning outliers as necessary. This allows keeping in sync with songs with triplets, quintuplets, or any other measurement not divisible by a power of 2. The algorithm falls back to unsynced playback if a good timing candidate cannot be found, which allows songs with tempo changes or that do not follow their defined time signature at all to still function.
 
 - Screenshots and example exported outputs are provided; credit goes out to the original creators of the songs as well as MIDI transcriptions where applicable.
-  - Here is a video showcasing examples of the program's output: https://youtu.be/Vtmh1Qi0w9s
+  - Here is a video showcasing some of the examples: https://youtu.be/Vtmh1Qi0w9s
