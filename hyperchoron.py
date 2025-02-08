@@ -75,8 +75,8 @@ instrument_mapping = [
 	7, 7, 7, 7, 7, 2, 2, 3, # Reed
 	2, 2, 2, 2, 2, 2, 2, 2, # Pipe
 	3, 3, 3, 3, 3, 3, 3, 3, # SL
-	1, 1, 1, 1, 1, 1, 1, 1, # SP
-	6, 6, 6, 6, 6, 6, 6, 6, # SE
+	2, 2, 2, 2, 2, 2, 2, 2, # SP
+	2, 2, 2, 2, 2, 2, 2, 2, # SE
 	0, 7, 2, 0, 1, 3, 3, 7, # Ethnic
 	0, 6, 6, 6, 6, 6, 6, 6, # Percussive
 	6, 6, 6, 6, 6, 6, 6, 6, # Percussive
@@ -365,11 +365,16 @@ def get_step_speed(midi_events, tps=20):
 			use_exact = True
 		else:
 			print("Finding closest speed...", exclusions, len(timestamps))
-			speed /= max(1, round(speed / min_value - 0.25))
+			div = max(1, round(speed / min_value - 0.25) / 2)
+			if div == 1:
+				speed *= 0.75
+			else:
+				speed /= div
 	sm = globals()["SPEED_MULTIPLIER"]
 	if sm != 1:
 		print("Speed manually scaled up by", sm)
 		speed *= sm
+		use_exact = True
 	if use_exact:
 		real_ms_per_clock = milliseconds_per_clock
 	else:
@@ -390,6 +395,7 @@ def convert_midi(midi_events, tps=20):
 		print("Using Org mapping...")
 		is_org = True
 	played_notes = []
+	pitchbend_ranges = {}
 	instrument_map = {}
 	last_timestamp = 0
 	for event in midi_events:
@@ -407,6 +413,11 @@ def convert_midi(midi_events, tps=20):
 			last_timestamp = max(last_timestamp, int(event[1]))
 		elif mode == "note_off_c":
 			last_timestamp = max(last_timestamp, int(event[1]))
+		elif mode == "control_c":
+			control = int(event[4])
+			if control == 6:
+				channel = int(event[3])
+				pitchbend_ranges[channel] = int(event[5])
 	active_notes = {i: [] for i in range(len(material_map))}
 	active_notes[-1] = []
 	print("Instrument mapping:", instrument_map)
@@ -471,17 +482,17 @@ def convert_midi(midi_events, tps=20):
 					note_candidates += 1
 					channel = int(event[3])
 					value = int(event[4])
-					offset = round((value - 8192) / 4096)
+					offset = round((value - 8192) / 8192 * pitchbend_ranges.get(channel, 2))
 					if offset != channel_stats.get(channel, {}).get("bend", 0):
 						instrument = instrument_map[channel]
 						channel_stats.setdefault(channel, {})["bend"] = offset
 						candidate = None
 						for note in active_notes[instrument]:
 							if note.channel == channel:
+								note.updated = True
 								if not candidate or note.start > candidate.start:
 									candidate = note
 						if candidate:
-							candidate.updated = True
 							candidate.end += 50
 				elif mode == "control_c" and event[4] == "7":
 					channel = int(event[3])
