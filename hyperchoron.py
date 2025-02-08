@@ -5,7 +5,11 @@ import itertools
 from math import ceil, inf, isqrt, sqrt, gcd
 from types import SimpleNamespace
 import py_midicsv
-import tqdm
+try:
+	import tqdm
+except ImportError:
+	import contextlib
+	tqdm = None
 
 
 TRANSPOSE = 0
@@ -430,7 +434,8 @@ def convert_midi(midi_events, tps=20):
 	loud = 0
 	note_candidates = 0
 	print("Processing notes...")
-	with tqdm.tqdm(total=ceil(last_timestamp * real_ms_per_clock / scale / 1000), bar_format="{l_bar}{bar}| {n:.3g}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]") as bar:
+	ctx = tqdm.tqdm(total=ceil(last_timestamp * real_ms_per_clock / scale / 1000), bar_format="{l_bar}{bar}| {n:.3g}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]") if tqdm else contextlib.nullcontext()
+	with ctx as bar:
 		while midi_events:
 			event = midi_events[0]
 			event_timestamp = int(event[1])
@@ -564,7 +569,8 @@ def convert_midi(midi_events, tps=20):
 				if beat or played_notes:
 					played_notes.append(beat)
 				timestamp += curr_step
-				bar.update(curr_step / 1000)
+				if bar:
+					bar.update(curr_step / 1000)
 				loud *= 0.5
 	while not played_notes[-1]:
 		played_notes.pop(-1)
@@ -861,7 +867,7 @@ def render_minecraft(notes, transpose=0):
 	print("Preparing output...")
 	bars = ceil(len(notes) / BAR / DIV)
 	elevations = ((-3,), (6,), (-6, -9), (9,))
-	for b in tqdm.trange(bars):
+	for b in (tqdm.trange(bars) if tqdm else range(bars)):
 		inverted = not b & 1
 		left, right = ("left", "right") if not inverted else ("right", "left")
 		offset = b * 8 + 1
