@@ -21,7 +21,7 @@ options:
 ```
 - The program takes one input and output file, and currently supports .mcfunction (a list of `/setblock` commands), and .litematic (used by the litematica mod) files.
 - At present, hyperchoron is only implemented to be run as an export script, and does not have interoperability as a library or with inbetween formats such as .nbs. This may change in the future.
-- The required libraries are `py_midi2csv`, and `litemapy` if exporting to .litematic files. They may be quick-installed using `pip install -r requirements.txt`.
+- The required libraries are `py_midicsv`, and `litemapy` if exporting to .litematic files. They may be quick-installed using `pip install -r requirements.txt`.
 - Note that if exporting to `.mcfunction`, you will need to make some sort of template datapack to be able to load it in. It is recommended to perform the `/gamerule maxCommandChainLength 2147483647` command prior to pasting the note blocks to avoid longer songs being cut off.
 
 # What is the purpose of another exporter like this?
