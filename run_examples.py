@@ -1,30 +1,25 @@
 import os
-from hyperchoron import convert_file
+import subprocess
+import sys
 
-class Args:
-	def __getattr__(self, k):
-		return object.__getattribute__(self, "__dict__").get(k)
+procs = []
+def run_conversion(fi, fo, fo2):
+	return subprocess.Popen([sys.executable, "hyperchoron.py", "-i", fi, "-o", fo, fo2])
 
 if not os.path.exists("examples/litematic"):
 	os.mkdir("examples/litematic")
-for fn in os.listdir("examples/midi"):
-	name = fn.rsplit(".", 1)[0] + ".litematic"
-	fi = f"examples/midi/{fn}"
-	fo = f"examples/litematic/{name}"
-	if not os.path.exists(fo) or not os.path.getsize(fo) or os.path.getmtime(fo) < os.path.getmtime(fi):
-		args = Args()
-		args.input = fi
-		args.output = fo
-		convert_file(args)
-
 if not os.path.exists("examples/mcfunction"):
 	os.mkdir("examples/mcfunction")
 for fn in os.listdir("examples/midi"):
-	name = fn.rsplit(".", 1)[0] + ".mcfunction"
+	name = fn.rsplit(".", 1)[0] + ".litematic"
+	name2 = fn.rsplit(".", 1)[0] + ".mcfunction"
 	fi = f"examples/midi/{fn}"
-	fo = f"examples/mcfunction/{name}"
+	fo = f"examples/litematic/{name}"
+	fo2 = f"examples/mcfunction/{name2}"
 	if not os.path.exists(fo) or not os.path.getsize(fo) or os.path.getmtime(fo) < os.path.getmtime(fi):
-		args = Args()
-		args.input = fi
-		args.output = fo
-		convert_file(args)
+		while len(procs) >= 8:
+			procs.pop(0).wait()
+		procs.append(run_conversion(fi, fo, fo2))
+
+for proc in procs:
+	proc.wait()
