@@ -1,7 +1,8 @@
 # Instructions for use
 ```ini
 py hyperchoron.py -h
-usage: [-h] [-i INPUT] [-o [OUTPUT]] [-t [TRANSPOSE]] [-s [SPEED]] [-sa [STRUM_AFFINITY]] [-d | --drums | --no-drums]
+usage:  [-h] -i INPUT [-o [OUTPUT]] [-t [TRANSPOSE]] [-s [SPEED]] [-sa [STRUM_AFFINITY]] [-d | --drums | --no-drums]
+        [-c | --cheap | --no-cheap]
 
 MIDI to Minecraft Note Block Converter
 
@@ -17,12 +18,18 @@ options:
                         Increases or decreases threshold for sustained notes to be cut into discrete segments; higher
                         = more notes
   -d, --drums, --no-drums
-                        Disables percussion channel
+                        Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as
+                        a regular instrument channel. Defaults to TRUE
+  -c, --cheap, --no-cheap
+                        Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables
+                        compatibility with previous versions of minecraft. May cause spacing issues with the
+                        sand/snare drum instruments. Defaults to FALSE
 ```
 - The program takes one input and output file, and currently supports .mcfunction (a list of `/setblock` commands), and .litematic (used by the litematica mod) files.
 - At present, hyperchoron is only implemented to be run as an export script, and does not have interoperability as a library or with inbetween formats such as .nbs. This may change in the future.
 - The required libraries are `py_midicsv`, and `litemapy` if exporting to .litematic files. They may be quick-installed using `pip install -r requirements.txt`.
 - Note that if exporting to `.mcfunction`, you will need to make some sort of template datapack to be able to load it in. It is recommended to perform the `/gamerule maxCommandChainLength 2147483647` command prior to pasting the note blocks to avoid longer songs being cut off.
+- If you are intending to build the output schematic in vanilla survival mode, the `-c` option will force the program to use cobblestone for most of the structure. This removes the excessive use of decorative blocks such as beacons, crying obsidian and froglights, as well as heavy core as an instrument. Note that the latter may cause alignment issues arbitrarily depending on the complexity of the song, as sand requires a supporting block, and there are no blocks (besides customised player heads) in vanilla that can perform this role without also possibly silencing a note block that happens to be directly below.
 
 # What is the purpose of another exporter like this?
 - Converting music to minecraft note blocks programmatically has been a thing for a long time, the most popular program being Note Block Studio. This program is not intended to entirely replace them, and is meant to be a standalone feature.
