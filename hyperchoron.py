@@ -369,8 +369,9 @@ def get_step_speed(midi_events, tps=20):
 			use_exact = True
 		elif speed > min_value * sqrt(2):
 			print("Finding closest speed...", exclusions, len(timestamps))
-			div = max(1, round(speed / min_value - 0.25) / 2)
-			if div == 1:
+			div = round(speed / min_value - 0.25)
+			if div <= 1:
+				print("Speed too high for autoscale!")
 				speed *= 0.75
 			else:
 				speed /= div
@@ -928,7 +929,7 @@ def render_minecraft(notes, transpose=0):
 		yield ((i, 0, 0), "activator_rail", dict(shape="east_west", powered="false"))
 	yield from (
 		((0, 0, offset), "powered_rail", dict(shape="north_south")),
-		((0, 0, 0), "crying_obsidian"),
+		((0, 0, 0), "netherite_block"),
 		((0, 1, 0), "lever", dict(facing="north", face="floor", powered="false")),
 	)
 
@@ -960,6 +961,7 @@ def convert_file(args):
 	block_replacements = {}
 	if args.cheap:
 		block_replacements.update(dict(
+			netherite_block="cobblestone",
 			obsidian="cobblestone",
 			crying_obsidian="cobblestone",
 			pearlescent_froglight="cobblestone",
