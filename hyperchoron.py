@@ -19,11 +19,6 @@ else:
 	warnings.filterwarnings("ignore", category=tqdm.TqdmWarning)
 
 
-TRANSPOSE = 0
-SPEED_MULTIPLIER = 1
-STRUM_AFFINITY = 1
-NO_DRUMS = 0
-
 # Predefined list attempting to match instruments across pitch ranges
 material_map = [
 	["bamboo_planks", "black_wool", "black_wool+", "amethyst_block+", "gold_block", "gold_block+"], # Plucked
@@ -233,7 +228,7 @@ it = binary_map()
 binary_fracs = [next(it) for i in range(64)]
 
 @functools.lru_cache(maxsize=256)
-def get_note_mat(note, transpose=0):
+def get_note_mat(note, transpose):
 	material = material_map[note[0]]
 	pitch = note[1]
 	if not material:
@@ -307,8 +302,8 @@ def get_note_mat(note, transpose=0):
 		mod += 12
 	return mat, mod
 
-def get_note_block(note, positioning=[0, 0, 0], replace=None, transpose=0):
-	base, pitch = get_note_mat(note, transpose=transpose)
+def get_note_block(note, positioning=[0, 0, 0], replace=None, ctx=None):
+	base, pitch = get_note_mat(note, transpose=ctx.transpose if ctx else 0)
 	x, y, z = positioning
 	coords = [(x, y, z), (x, y + 1, z), (x, y + 2, z)]
 	if replace and base in replace:
@@ -328,7 +323,7 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, transpose=0):
 		(coords[1], "note_block", dict(note=pitch, instrument=instrument_names[base])),
 	)
 
-def get_step_speed(midi_events, tps=20):
+def get_step_speed(midi_events, tps=20, ctx=None):
 	orig_tempo = 0
 	clocks_per_crotchet = 0
 	milliseconds_per_clock = 0
@@ -382,7 +377,7 @@ def get_step_speed(midi_events, tps=20):
 				speed *= 0.75
 			else:
 				speed /= div
-	sm = globals()["SPEED_MULTIPLIER"]
+	sm = ctx.speed
 	if sm != 1:
 		print("Speed manually scaled up by", sm)
 		speed *= sm
@@ -394,7 +389,7 @@ def get_step_speed(midi_events, tps=20):
 	print("Speed scale:", speed, real_ms_per_clock)
 	return real_ms_per_clock, speed, step_ms, orig_tempo
 
-def convert_midi(midi_events, tps=20):
+def convert_midi(midi_events, tps=20, ctx=None):
 	title = None
 	is_org = False
 	for event in midi_events[:20]:
@@ -414,14 +409,14 @@ def convert_midi(midi_events, tps=20):
 		mode = event[2].strip().casefold()
 		if mode == "program_c":
 			channel = int(event[3])
-			if channel == 9 and not globals()["NO_DRUMS"]:
+			if channel == 9 and ctx.drums:
 				continue
 			value = int(event[4])
 			instrument_map[channel] = org_instrument_mapping[value] if is_org else instrument_mapping[value]
 		elif mode == "note_on_c":
 			channel = int(event[3])
 			if channel not in instrument_map:
-				instrument_map[channel] = -1 if channel == 9 and not globals()["NO_DRUMS"] else 0
+				instrument_map[channel] = -1 if channel == 9 and ctx.drums else 0
 			last_timestamp = max(last_timestamp, int(event[1]))
 		elif mode == "note_off_c":
 			last_timestamp = max(last_timestamp, int(event[1]))
@@ -435,15 +430,15 @@ def convert_midi(midi_events, tps=20):
 	print("Instrument mapping:", instrument_map)
 	channel_stats = {}
 	midi_events.sort(key=lambda x: (int(x[1]), x[2].strip().casefold() not in ("tempo", "header"))) # Sort events by timestamp
-	real_ms_per_clock, scale, orig_step_ms, orig_tempo = get_step_speed(midi_events, tps=tps)
+	real_ms_per_clock, scale, orig_step_ms, orig_tempo = get_step_speed(midi_events, tps=tps, ctx=ctx)
 	step_ms = orig_step_ms
 	midi_events = deque(midi_events)
 	timestamp = 0
 	loud = 0
 	note_candidates = 0
 	print("Processing notes...")
-	ctx = tqdm.tqdm(total=ceil(last_timestamp * real_ms_per_clock / scale / 1000), bar_format="{l_bar}{bar}| {n:.3g}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]") if tqdm else contextlib.nullcontext()
-	with ctx as bar:
+	progress = tqdm.tqdm(total=ceil(last_timestamp * real_ms_per_clock / scale / 1000), bar_format="{l_bar}{bar}| {n:.3g}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]") if tqdm else contextlib.nullcontext()
+	with progress as bar:
 		while midi_events:
 			event = midi_events[0]
 			event_timestamp = int(event[1])
@@ -543,7 +538,7 @@ def convert_midi(midi_events, tps=20):
 						note = notes[i]
 						volume = note.volume
 						length = note.end - note.start
-						sa = globals()["STRUM_AFFINITY"]
+						sa = ctx.strum_affinity
 						long = note.sustain and length > 150 / sa and volume >= min(80, max_volume) / sa
 						needs_sustain = note.sustain and length > 200 / sa and (length > 400 / sa or long and (volume >= 120 / sa or note.sustain == 1 and length >= 300 / sa))
 						recur = inf
@@ -588,7 +583,7 @@ MAIN = 4
 SIDE = 2
 DIV = 4
 BAR = 32
-def render_minecraft(notes, transpose=0):
+def render_minecraft(notes, ctx):
 	def extract_notes(notes, offset, direction=1, invert=False, elevations=()):
 		for i in range(16):
 			beat = []
@@ -618,10 +613,10 @@ def render_minecraft(notes, transpose=0):
 					y = 0
 					z = offset
 					ordered, remainder = ordered[:MAIN * 2], ordered[MAIN * 2:]
-					required_padding = sum(get_note_mat(note, transpose=transpose)[0] in transparent for note in ordered) * 2 - len(ordered)
+					required_padding = sum(get_note_mat(note, transpose=ctx.transpose)[0] in transparent for note in ordered) * 2 - len(ordered)
 					for p in range(required_padding):
 						ordered.append(padding)
-					ordered.sort(key=lambda note: get_note_mat(note, transpose=transpose)[0] in transparent)
+					ordered.sort(key=lambda note: get_note_mat(note, transpose=ctx.transpose)[0] in transparent)
 					while ordered and ordered[-1] == padding:
 						ordered.pop(-1)
 					if ordered:
@@ -635,7 +630,7 @@ def render_minecraft(notes, transpose=0):
 					if len(ordered) & 1:
 						note = ordered[-1]
 						ordered = list(itertools.chain.from_iterable(zip(ordered[:len(ordered) // 2], ordered[len(ordered) // 2:-1])))
-						if get_note_mat(note, transpose=transpose)[0] in transparent:
+						if get_note_mat(note, transpose=ctx.transpose)[0] in transparent:
 							ordered.append(padding)
 						ordered.append(note)
 					else:
@@ -672,7 +667,7 @@ def render_minecraft(notes, transpose=0):
 							note,
 							positioning,
 							replace,
-							transpose=transpose,
+							ctx=ctx,
 						)
 					ordered = ordered[MAIN * 2:] + remainder
 					while True:
@@ -685,7 +680,7 @@ def render_minecraft(notes, transpose=0):
 						note = list(note)
 						note[3] = 2
 						note = tuple(note)
-						mat, pitch = get_note_mat(note, transpose=transpose)
+						mat, pitch = get_note_mat(note, transpose=ctx.transpose)
 						if mat != "PLACEHOLDER":
 							yield ((-x if taken else x, y + 2, z - 1), "note_block", dict(note=pitch, instrument="harp"))
 							if taken:
@@ -709,7 +704,7 @@ def render_minecraft(notes, transpose=0):
 						yield from get_note_block(
 							note,
 							[x, y + v, z - w],
-							transpose=transpose,
+							ctx=ctx,
 						)
 					if i >= 8:
 						x = (1 - (17 - i) * 2 if direction == 1 else -22 + (17 - i) * 2) * (1 if invert else -1)
@@ -723,7 +718,7 @@ def render_minecraft(notes, transpose=0):
 						yield from get_note_block(
 							note,
 							[x, y + v, z - w],
-							transpose=transpose,
+							ctx=ctx,
 						)
 
 	def generate_layer(direction="right", offset=0, elevation=0):
@@ -941,36 +936,30 @@ def render_minecraft(notes, transpose=0):
 	)
 
 def convert_file(args):
-	if not args.output:
-		path, name = args.input.replace("\\", "/").rsplit("/", 1)
-		args.output = path + "/" + name.rsplit(".", 1)[0] + ".litematic"
-	if args.transpose is not None:
-		globals()["TRANSPOSE"] = args.transpose
-	if args.speed is not None:
-		globals()["SPEED_MULTIPLIER"] = args.speed
-	if args.strum_affinity is not None:
-		globals()["STRUM_AFFINITY"] = args.strum_affinity
-	if args.drums is False:
-		globals()["NO_DRUMS"] = 1
+	ctx = args
+	if not ctx.output:
+		path, name = ctx.input.replace("\\", "/").rsplit("/", 1)
+		ctx.output = [path + "/" + name.rsplit(".", 1)[0] + ".litematic"]
 	print("Converting midi...")
 	if py_midicsv:
-		csv_list = py_midicsv.midi_to_csv(args.input)
+		csv_list = py_midicsv.midi_to_csv(ctx.input)
 	else:
 		import subprocess
-		csv_list = subprocess.check_output(["Midicsv.exe", args.input, "-"]).decode("utf-8", "replace").splitlines()
+		csv_list = subprocess.check_output(["Midicsv.exe", ctx.input, "-"]).decode("utf-8", "replace").splitlines()
 	midi_events = list(csv.reader(csv_list))
-	notes, note_candidates, is_org = convert_midi(midi_events)
+	notes, note_candidates, is_org = convert_midi(midi_events, ctx=ctx)
+	if is_org:
+		ctx.transpose += 12
 	print("Note candidates:", note_candidates)
 	print("Note count:", sum(map(len, notes)))
 	print("Max detected polyphony (will be reduced to <=14):", max(map(len, notes)))
 	print("Lowest note:", min(min(n[1] for n in b) for b in notes if b))
 	print("Highest note:", max(max(n[1] for n in b) for b in notes if b))
-	lazy = render_minecraft(notes, transpose=globals()["TRANSPOSE"] + 12 if is_org else globals()["TRANSPOSE"])
 	bars = ceil(len(notes) / BAR / DIV)
 	depth = bars * 8 + 8
 	nc = 0
 	block_replacements = {}
-	if args.cheap:
+	if ctx.cheap:
 		block_replacements.update(dict(
 			netherite_block="cobblestone",
 			obsidian="cobblestone",
@@ -1006,45 +995,47 @@ def convert_file(args):
 			piglin_head="air",
 			zombie_head="air",
 		))
-	if args.output.endswith(".mcfunction"):
-		with open(args.output, "w") as f:
-			for (x, y, z), block, *kwargs in lazy:
+	blocks = list(render_minecraft(notes, ctx=ctx))
+	for output in ctx.output:
+		if output.endswith(".mcfunction"):
+			with open(output, "w") as f:
+				for (x, y, z), block, *kwargs in blocks:
+					if block in block_replacements:
+						block = block_replacements[block]
+						if block == "cobblestone_slab":
+							kwargs = [dict(type="top")]
+					if block == "sand":
+						f.write(f"setblock ~{x} ~{y - 1} ~{z} dirt keep\n")
+					nc += block == "note_block"
+					if kwargs:
+						extra = "[" + ",".join(f"{k}={v}" for k, v in kwargs[0].items()) + "]"
+					else:
+						extra = ""
+					f.write(f"setblock ~{x} ~{y} ~{z} {block}{extra}\n")
+		else:
+			import litemapy
+			air = litemapy.BlockState("minecraft:air")
+			mx, my = 20, 11
+			reg = litemapy.Region(-mx, -my, 0, mx * 2 + 1, my * 2 + 1, depth)
+			schem = reg.as_schematic(
+				name=output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0],
+				author="Hyperchoron",
+				description="Exported MIDI",
+			)
+			for (x, y, z), block, *kwargs in blocks:
 				if block in block_replacements:
 					block = block_replacements[block]
 					if block == "cobblestone_slab":
 						kwargs = [dict(type="top")]
-				if block == "sand":
-					f.write(f"setblock ~{x} ~{y - 1} ~{z} dirt keep\n")
+				if block == "sand" and reg[x + mx, y + my - 1, z] == air:
+					reg[x + mx, y + my - 1, z] = litemapy.BlockState("minecraft:dirt")
 				nc += block == "note_block"
 				if kwargs:
-					extra = "[" + ",".join(f"{k}={v}" for k, v in kwargs[0].items()) + "]"
+					block = litemapy.BlockState("minecraft:" + block, **{k: str(v) for k, v in kwargs[0].items()})
 				else:
-					extra = ""
-				f.write(f"setblock ~{x} ~{y} ~{z} {block}{extra}\n")
-	else:
-		import litemapy
-		air = litemapy.BlockState("minecraft:air")
-		mx, my = 20, 11
-		reg = litemapy.Region(-mx, -my, 0, mx * 2 + 1, my * 2 + 1, depth)
-		schem = reg.as_schematic(
-			name=args.output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0],
-			author="Hyperchoron",
-			description="Exported MIDI",
-		)
-		for (x, y, z), block, *kwargs in lazy:
-			if block in block_replacements:
-				block = block_replacements[block]
-				if block == "cobblestone_slab":
-					kwargs = [dict(type="top")]
-			if block == "sand" and reg[x + mx, y + my - 1, z] == air:
-				reg[x + mx, y + my - 1, z] = litemapy.BlockState("minecraft:dirt")
-			nc += block == "note_block"
-			if kwargs:
-				block = litemapy.BlockState("minecraft:" + block, **{k: str(v) for k, v in kwargs[0].items()})
-			else:
-				block = litemapy.BlockState("minecraft:" + block)
-			reg[x + mx, y + my, z] = block
-		schem.save(args.output)
+					block = litemapy.BlockState("minecraft:" + block)
+				reg[x + mx, y + my, z] = block
+			schem.save(output)
 	print("Final note count:", nc)
 
 
@@ -1055,10 +1046,10 @@ if __name__ == "__main__":
 		description="MIDI to Minecraft Note Block Converter",
 	)
 	parser.add_argument("-i", "--input", required=True, help="Input file (.mid)")
-	parser.add_argument("-o", "--output", nargs="?", help="Output file (.mcfunction | .litematic)")
-	parser.add_argument("-t", "--transpose", nargs="?", type=int, help="Transposes song up/down a certain amount of semitones; higher = higher pitched")
-	parser.add_argument("-s", "--speed", nargs="?", type=float, help="Scales song speed up/down as a multiplier; higher = faster")
-	parser.add_argument("-sa", "--strum-affinity", nargs="?", type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes")
+	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mcfunction | .litematic)")
+	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones; higher = higher pitched")
+	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier; higher = faster")
+	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as a regular instrument channel. Defaults to TRUE")
 	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
 	args = parser.parse_args()
