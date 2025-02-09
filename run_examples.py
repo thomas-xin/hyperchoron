@@ -2,7 +2,8 @@ import os
 from hyperchoron import convert_file
 
 class Args:
-	pass
+	def __getattr__(self, k):
+		return object.__getattribute__(self, "__dict__").get(k)
 
 for fn in os.listdir("examples/midi"):
 	name = fn.rsplit(".", 1)[0] + ".litematic"
@@ -12,10 +13,6 @@ for fn in os.listdir("examples/midi"):
 		args = Args()
 		args.input = fi
 		args.output = fo
-		args.transpose = None
-		args.speed = None
-		args.strum_affinity = None
-		args.drums = None
 		convert_file(args)
 
 for fn in os.listdir("examples/midi"):
@@ -26,8 +23,4 @@ for fn in os.listdir("examples/midi"):
 		args = Args()
 		args.input = fi
 		args.output = fo
-		args.transpose = None
-		args.speed = None
-		args.strum_affinity = None
-		args.drums = None
 		convert_file(args)

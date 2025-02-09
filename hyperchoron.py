@@ -19,18 +19,18 @@ NO_DRUMS = 0
 
 # Predefined list attempting to match instruments across pitch ranges
 material_map = [
-	["bamboo_planks", "black_wool", "black_wool+", "snow_block+", "gold_block", "gold_block+"], # Plucked
+	["bamboo_planks", "black_wool", "black_wool+", "amethyst_block+", "gold_block", "gold_block+"], # Plucked
 	["bamboo_planks", "bamboo_planks+", "glowstone", "glowstone+", "gold_block", "gold_block+"], # Keyboards
-	["pumpkin", "pumpkin+", "snow_block", "clay", "clay+", "packed_ice+"], # Wind
+	["pumpkin", "pumpkin+", "amethyst_block", "clay", "clay+", "packed_ice+"], # Wind
 	["pumpkin", "pumpkin+", "emerald_block", "emerald_block+", "gold_block", "gold_block+"], # Synth
 	["bamboo_planks", "bamboo_planks+", "iron_block", "iron_block+", "gold_block", "gold_block+"], # Pitched Percussion
-	["bamboo_planks", "black_wool", "snow_block", "snow_block+", "packed_ice", "packed_ice+"], # Bell
+	["bamboo_planks", "black_wool", "amethyst_block", "amethyst_block+", "packed_ice", "packed_ice+"], # Bell
 	["cobblestone", "cobblestone+", "red_stained_glass", "red_stained_glass+", "heavy_core", "heavy_core+"], # Unpitched Percussion
 	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "bone_block", "bone_block+"], # String
 	None # Drumset
 ]
 instrument_names = dict(
-	snow_block="harp",
+	amethyst_block="harp",
 	bamboo_planks="bass",
 	heavy_core="snare",
 	black_concrete_powder="snare",
@@ -254,21 +254,21 @@ def get_note_mat(note, transpose=0):
 	mat = material[ins]
 	if note[3] == 2:
 		replace = dict(
-			hay_block="snow_block",
-			emerald_block="snow_block",
-			snow_block="snow_block",
-			iron_block="snow_block",
-			soul_sand="snow_block+",
-			glowstone="snow_block",
-			clay="snow_block+"
+			hay_block="amethyst_block",
+			emerald_block="amethyst_block",
+			amethyst_block="amethyst_block",
+			iron_block="amethyst_block",
+			soul_sand="amethyst_block+",
+			glowstone="amethyst_block",
+			clay="amethyst_block+"
 		)
 		replace.update({
-			"hay_block+": "snow_block+",
-			"emerald_block+": "snow_block+",
-			"snow_block+": "snow_block+",
-			"black_wool+": "snow_block",
-			"iron_block+": "snow_block+",
-			"glowstone+": "snow_block+",
+			"hay_block+": "amethyst_block+",
+			"emerald_block+": "amethyst_block+",
+			"amethyst_block+": "amethyst_block+",
+			"black_wool+": "amethyst_block",
+			"iron_block+": "amethyst_block+",
+			"glowstone+": "amethyst_block+",
 		})
 		try:
 			mat = replace[mat]
@@ -279,17 +279,17 @@ def get_note_mat(note, transpose=0):
 			bamboo_planks="pumpkin",
 			black_wool="pumpkin+",
 			bone_block="gold_block",
-			iron_block="snow_block",
+			iron_block="amethyst_block",
 			soul_sand="glowstone+",
-			glowstone="snow_block",
+			glowstone="amethyst_block",
 		)
 		replace.update({
 			"bamboo_planks+": "pumpkin+",
-			"black_wool+": "snow_block",
+			"black_wool+": "amethyst_block",
 			"gold_block+": "packed_ice+",
 			"bone_block+": "gold_block+",
-			"iron_block+": "snow_block+",
-			"glowstone+": "snow_block+",
+			"iron_block+": "amethyst_block+",
+			"glowstone+": "amethyst_block+",
 		})
 		try:
 			mat = replace[mat]
@@ -312,7 +312,7 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, transpose=0):
 		)
 	if base.endswith("_head"):
 		return (
-			(coords[0], "mangrove_roots"),
+			(coords[0], "magma_block"),
 			(coords[1], "note_block", dict(note=pitch, instrument=instrument_names[base])),
 			(coords[2], base),
 		)
@@ -636,24 +636,24 @@ def render_minecraft(notes, transpose=0):
 						replace = {}
 						if j == 0:
 							positioning = [x, y, z + 2]
-							replace["glowstone"] = "snow_block"
+							replace["glowstone"] = "amethyst_block"
 						elif j == 1:
 							positioning = [x, y - 1, z + 3]
 						elif j == 2:
 							positioning = [x, y + 2, z]
-							replace["glowstone"] = "snow_block"
+							replace["glowstone"] = "amethyst_block"
 							replace["heavy_core"] = "black_concrete_powder"
 						elif j == 3:
 							positioning = [x, y + 1, z + 1]
 							replace["heavy_core"] = "black_concrete_powder"
 						elif j == 4:
 							positioning = [-x, y, z + 2]
-							replace["glowstone"] = "snow_block"
+							replace["glowstone"] = "amethyst_block"
 						elif j == 5:
 							positioning = [-x, y - 1, z + 3]
 						elif j == 6:
 							positioning = [-x, y + 2, z]
-							replace["glowstone"] = "snow_block"
+							replace["glowstone"] = "amethyst_block"
 							replace["heavy_core"] = "black_concrete_powder"
 						elif j == 7:
 							positioning = [-x, y + 1, z + 1]
@@ -957,9 +957,51 @@ def convert_file(args):
 	bars = ceil(len(notes) / BAR / DIV)
 	depth = bars * 8 + 8
 	nc = 0
+	block_replacements = {}
+	if args.cheap:
+		block_replacements.update(dict(
+			obsidian="cobblestone",
+			crying_obsidian="cobblestone",
+			pearlescent_froglight="cobblestone",
+			slime_block="sand",
+			gilded_blackstone="cobblestone",
+			sculk="cobblestone",
+			polished_blackstone_slab="cobblestone_slab",
+			beacon="cobblestone_slab",
+			acacia_trapdoor="cobblestone_slab",
+			crimson_trapdoor="cobblestone_slab",
+			bamboo_mosaic_slab="cobblestone_slab",
+			resin_brick_slab="cobblestone_slab",
+			prismarine_slab="cobblestone_slab",
+			dark_prismarine_slab="cobblestone_slab",
+			dark_prismarine="cobblestone",
+			prismarine_wall="cobblestone_wall",
+			oxidized_copper_trapdoor="bamboo_trapdoor",
+			white_stained_glass="glass",
+			blue_stained_glass="glass",
+			red_stained_glass="glass",
+			black_stained_glass="glass",
+			tinted_glass="glass",
+			mangrove_roots="cobblestone",
+			black_wool="white_wool",
+			black_concrete_powder="sand",
+			heavy_core="sand",
+			amethyst_block="dirt",
+			wither_skeleton_skull="air",
+			skeleton_skull="air",
+			creeper_head="air",
+			piglin_head="air",
+			zombie_head="air",
+		))
 	if args.output.endswith(".mcfunction"):
 		with open(args.output, "w") as f:
 			for (x, y, z), block, *kwargs in lazy:
+				if block in block_replacements:
+					block = block_replacements[block]
+					if block == "cobblestone_slab":
+						kwargs = [dict(type="top")]
+				if block == "sand":
+					f.write(f"setblock ~{x} ~{y - 1} ~{z} dirt keep\n")
 				nc += block == "note_block"
 				if kwargs:
 					extra = "[" + ",".join(f"{k}={v}" for k, v in kwargs[0].items()) + "]"
@@ -968,6 +1010,7 @@ def convert_file(args):
 				f.write(f"setblock ~{x} ~{y} ~{z} {block}{extra}\n")
 	else:
 		import litemapy
+		air = litemapy.BlockState("minecraft:air")
 		mx, my = 20, 11
 		reg = litemapy.Region(-mx, -my, 0, mx * 2 + 1, my * 2 + 1, depth)
 		schem = reg.as_schematic(
@@ -976,6 +1019,12 @@ def convert_file(args):
 			description="Exported MIDI",
 		)
 		for (x, y, z), block, *kwargs in lazy:
+			if block in block_replacements:
+				block = block_replacements[block]
+				if block == "cobblestone_slab":
+					kwargs = [dict(type="top")]
+			if block == "sand" and reg[x + mx, y + my - 1, z] == air:
+				reg[x + mx, y + my - 1, z] = litemapy.BlockState("minecraft:dirt")
 			nc += block == "note_block"
 			if kwargs:
 				block = litemapy.BlockState("minecraft:" + block, **{k: str(v) for k, v in kwargs[0].items()})
@@ -997,6 +1046,7 @@ if __name__ == "__main__":
 	parser.add_argument("-t", "--transpose", nargs="?", type=int, help="Transposes song up/down a certain amount of semitones; higher = higher pitched")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, help="Scales song speed up/down as a multiplier; higher = faster")
 	parser.add_argument("-sa", "--strum-affinity", nargs="?", type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes")
-	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Disables percussion channel")
+	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as a regular instrument channel. Defaults to TRUE")
+	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
 	args = parser.parse_args()
 	convert_file(args)
