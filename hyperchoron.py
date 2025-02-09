@@ -367,7 +367,7 @@ def get_step_speed(midi_events, tps=20):
 			print("Discarding tempo...", exclusions, len(timestamps))
 			speed = 1
 			use_exact = True
-		else:
+		elif speed > min_value * sqrt(2):
 			print("Finding closest speed...", exclusions, len(timestamps))
 			div = max(1, round(speed / min_value - 0.25) / 2)
 			if div == 1:
