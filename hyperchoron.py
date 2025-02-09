@@ -3,13 +3,20 @@ import csv
 import functools
 import itertools
 from math import ceil, inf, isqrt, sqrt, gcd
+import os
 from types import SimpleNamespace
-import py_midicsv
+if os.name == "nt" and os.path.exists("Midicsv.exe"):
+	py_midicsv = None
+else:
+	import py_midicsv
 try:
 	import tqdm
 except ImportError:
 	import contextlib
 	tqdm = None
+else:
+	import warnings
+	warnings.filterwarnings("ignore", category=tqdm.TqdmWarning)
 
 
 TRANSPOSE = 0
@@ -946,7 +953,11 @@ def convert_file(args):
 	if args.drums is False:
 		globals()["NO_DRUMS"] = 1
 	print("Converting midi...")
-	csv_list = py_midicsv.midi_to_csv(args.input)
+	if py_midicsv:
+		csv_list = py_midicsv.midi_to_csv(args.input)
+	else:
+		import subprocess
+		csv_list = subprocess.check_output(["Midicsv.exe", args.input, "-"]).decode("utf-8", "replace").splitlines()
 	midi_events = list(csv.reader(csv_list))
 	notes, note_candidates, is_org = convert_midi(midi_events)
 	print("Note candidates:", note_candidates)
