@@ -227,6 +227,11 @@ def binary_map():
 it = binary_map()
 binary_fracs = [next(it) for i in range(64)]
 
+# Remapping of midi note range to note block note range
+c4 = 60
+fs4 = c4 + 6
+fs1 = fs4 - 36
+
 @functools.lru_cache(maxsize=256)
 def get_note_mat(note, transpose):
 	material = material_map[note[0]]
@@ -238,16 +243,11 @@ def get_note_mat(note, transpose):
 			print("WARNING: Note", pitch, "not yet supported for drums, discarding...")
 			return "PLACEHOLDER", 0
 	pitch += transpose
-	c4 = 60
-	fs4 = c4 + 6
-	fs1 = fs4 - 36
 	normalised = pitch - fs1
 	if normalised < 0:
 		normalised += 12
-	if normalised < 0:
-		normalised = 0
 	elif normalised > 72:
-		normalised = 72
+		normalised -= 12
 	assert 0 <= normalised <= 72, normalised
 	ins, mod = divmod(normalised, 12)
 	if ins > 5:
@@ -373,7 +373,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 			print("Finding closest speed...", exclusions, len(timestamps))
 			div = round(speed / min_value - 0.25)
 			if div <= 1:
-				print("Speed too high for autoscale!")
+				print("Speed too close for rounding, autoscaling by 75%...")
 				speed *= 0.75
 			else:
 				speed /= div
@@ -560,6 +560,11 @@ def convert_midi(midi_events, tps=20, ctx=None):
 								recur += offset
 						if note.updated or (timestamp >= note.timestamp and timestamp + recur < note.end):
 							pitch = channel_stats.get(note.channel, {}).get("bend", 0) + note.pitch
+							normalised = pitch + ctx.transpose - fs1
+							if normalised > 84:
+								pitch = 84 - ctx.transpose + fs1
+							elif normalised < -12:
+								pitch = -12 - ctx.transpose + fs1
 							block = (instrument, pitch, note.updated, long, volume)
 							if block not in beat:
 								beat.append(block)
@@ -601,7 +606,7 @@ def render_minecraft(notes, ctx):
 				curr = beat[pulse]
 				if not curr:
 					continue
-				cap = MAIN * 2 + SIDE * 2 + 2 if pulse == 0 else SIDE * 4 if pulse == 2 else SIDE * 2
+				cap = MAIN * 2 + SIDE * 2 + 2 if pulse == 0 else SIDE * 4 if pulse == 2 else SIDE * 3
 				padding = (-1, 0, inf, 0, 0)
 				transparent = ("glowstone", "heavy_core", "blue_stained_glass", "red_stained_glass")
 				lowest = min((note[1], note) for note in curr)[1]
@@ -688,33 +693,20 @@ def render_minecraft(notes, ctx):
 							else:
 								taken = True
 					ordered = ordered[:SIDE * 2]
-				for y in elevations[pulse]:
-					cap = SIDE
-					left, right, ordered = ordered[:cap], ordered[cap:cap * 2], ordered[cap * 2:]
-					v = 0
+				cap = SIDE
+				for y, r in elevations[pulse]:
+					if not ordered:
+						break
+					taken, ordered = ordered[:cap], ordered[cap:]
 					if i >= 8:
-						x = (1 - (17 - i) * 2 if direction == 1 else -22 + (17 - i) * 2) * (-1 if invert else 1)
+						x = (1 - (17 - i) * 2 if direction == 1 else -22 + (17 - i) * 2) * (-1 if invert ^ r else 1)
 						v = 0 if y < 0 else -2
 						z = offset + 2
 					else:
-						x = (-4 - i * 2 if direction == 1 else -17 + i * 2) * (-1 if invert else 1)
+						x = (-4 - i * 2 if direction == 1 else -17 + i * 2) * (-1 if invert ^ r else 1)
 						v = -1
 						z = offset
-					for w, note in enumerate(left):
-						yield from get_note_block(
-							note,
-							[x, y + v, z - w],
-							ctx=ctx,
-						)
-					if i >= 8:
-						x = (1 - (17 - i) * 2 if direction == 1 else -22 + (17 - i) * 2) * (1 if invert else -1)
-						v = 0 if y < 0 else -2
-						z = offset + 2
-					else:
-						x = (-4 - i * 2 if direction == 1 else -17 + i * 2) * (1 if invert else -1)
-						v = -1
-						z = offset
-					for w, note in enumerate(right):
+					for w, note in enumerate(taken):
 						yield from get_note_block(
 							note,
 							[x, y + v, z - w],
@@ -845,6 +837,7 @@ def render_minecraft(notes, ctx):
 		else:
 			x1, x2 = x, x * 2
 		z2 = z + 1
+		opposing = offset % 16 >= 8
 		yield from (
 			((x1, 1, z2), "glass"),
 			((x1, 2, z2), "scaffolding", dict(distance=0)),
@@ -852,27 +845,57 @@ def render_minecraft(notes, ctx):
 			((x2, 2, z2), "scaffolding", dict(distance=0)),
 			((x2, 3, z2), "observer", dict(facing="down")),
 			((x2, 4, z2), "redstone_lamp"),
-			((x2, 5, z), "white_stained_glass"),
-			((x2, 6, z2), "white_stained_glass"),
-			((x2, 7, z), "white_stained_glass"),
-			((x2, 8, z2), "white_stained_glass"),
-			((x2, 9, z), "observer", dict(facing="south")),
-			((x2, 5, z2), "redstone_wire", dict(north="up")),
-			((x2, 6, z), "redstone_wire", dict(south="up")),
-			((x2, 7, z2), "redstone_wire", dict(north="up")),
-			((x2, 8, z), "redstone_wire", dict(south="up")),
-			((x2, 9, z2), "redstone_wire", dict(north="side")),
 		)
+		if right ^ opposing:
+			yield from (
+				((x2, 5, z2), "redstone_wire", dict(north="up", south="side")),
+				((x2, 5, z), "white_stained_glass"),
+				((x2, 6, z), "redstone_wire", dict(south="up", north="side")),
+				((x2, 6, z2), "white_stained_glass"),
+				((x2, 7, z2), "redstone_wire", dict(north="up", south="side")),
+				((x2, 7, z), "white_stained_glass"),
+				((x2, 8, z), "redstone_wire", dict(south="up", north="side")),
+				((x2, 8, z2), "white_stained_glass"),
+				((x2, 9, z2), "redstone_wire", dict(north="up", south="side")),
+				((x2, 9, z), "oxidized_copper_bulb", dict(lit="false")),
+				((x2, 10, z), "redstone_wire", dict(south="up", north="side")),
+				((x2, 10, z2), "white_stained_glass"),
+				((x2, 11, z2), "redstone_wire", dict(north="up", south="side")),
+				((x2, 11, z), "white_stained_glass"),
+				((x2, 12, z), "redstone_wire", dict(south="side", north="side")),
+			)
+		else:
+			yield from (
+				((x2, 5, z2), "warped_fence_gate", dict(facing="west")),
+				((x2, 6, z2), "observer", dict(facing="down")),
+				((x2, 6, z), "oxidized_copper_bulb", dict(lit="false")),
+				((x2, 7, z2), "mangrove_roots"),
+				((x2, 7, z), "redstone_wire", dict(south="up", north="side")),
+				((x2, 8, z), "white_stained_glass"),
+				((x2, 8, z2), "redstone_wire", dict(north="up", south="side")),
+				((x2, 9, z2), "white_stained_glass"),
+				((x2, 9, z), "redstone_wire", dict(south="up", north="side")),
+				((x2, 10, z), "white_stained_glass"),
+				((x2, 10, z2), "redstone_wire", dict(north="up", south="side")),
+				((x2, 11, z2), "white_stained_glass"),
+				((x2, 11, z), "redstone_wire", dict(south="up", north="side")),
+				((x2, 12, z), "oxidized_copper_bulb", dict(lit="false")),
+				((x2, 12, z2), "redstone_wire", dict(north="side", south="side")),
+			)
 
 	def profile_notes(notes):
 		return (max(map(len, notes[i:64:4]), default=0) for i in range(4))
 
 	print("Preparing output...")
 	bars = ceil(len(notes) / BAR / DIV)
-	elevations = ((-3,), (6,), (-6, -9), (9,))
+	elevations = (
+		((-3, 0), (-3, 1)),
+		((6, 1), (9, 1), (12, 1)),
+		((-6, 0), (-6, 1), (-9, 0), (-9, 1)),
+		((6, 0), (9, 0), (12, 0)),
+	)
 	for b in (tqdm.trange(bars) if tqdm else range(bars)):
 		inverted = not b & 1
-		left, right = ("left", "right") if not inverted else ("right", "left")
 		offset = b * 8 + 1
 		for i in range(offset, offset + 8):
 			yield from (
@@ -882,26 +905,29 @@ def render_minecraft(notes, ctx):
 				((0, 0, i), "rail", dict(shape="north_south")),
 			)
 
-		def iter_half(main=True):
+		def iter_half(inverted=False, main=True):
+			left, right = ("left", "right") if not inverted else ("right", "left")
 			strong, weak1, mid, weak2 = profile_notes(notes)
 			if not main and not strong and not weak1 and not mid and not weak2:
 				return
 			yield from generate_layer(right, offset, 0)
 			if strong > MAIN or mid > SIDE or weak1 > SIDE or weak2 > SIDE:
 				yield from generate_layer(left, offset, 0)
-			if weak1 or weak2:
+			if weak1:
+				yield from ensure_top(left, offset)
+				yield from generate_layer(left, offset, 6)
+				if weak1 > SIDE:
+					yield from generate_layer(left, offset, 9)
+					if weak1 > SIDE * 2:
+						yield from generate_layer(left, offset, 12)
+			if weak2:
 				yield from ensure_top(right, offset)
-				if weak1:
-					yield from generate_layer(right, offset, 6)
-				if weak2:
+				yield from generate_layer(right, offset, 6)
+				if weak2 > SIDE:
 					yield from generate_layer(right, offset, 9)
-				if weak1 > SIDE or weak2 > SIDE:
-					yield from ensure_top(left, offset)
-					if weak1 > SIDE:
-						yield from generate_layer(left, offset, 6)
-					if weak2 > SIDE:
-						yield from generate_layer(left, offset, 9)
-			if strong > MAIN * 2 or mid:
+					if weak2 > SIDE * 2:
+						yield from generate_layer(right, offset, 12)
+			if strong > MAIN * 2 or mid or weak2:
 				yield from ensure_layer(right, offset)
 				if strong > MAIN * 2 + SIDE or mid > SIDE:
 					yield from ensure_layer(left, offset)
@@ -918,11 +944,11 @@ def render_minecraft(notes, ctx):
 							if mid > SIDE * 3:
 								yield from generate_layer(left, offset, -9)
 
-		yield from iter_half()
+		yield from iter_half(inverted)
 		yield from extract_notes(notes, offset, 1, inverted, elevations)
 
 		offset += 4
-		yield from iter_half()
+		yield from iter_half(inverted)
 		yield from extract_notes(notes, offset, -1, inverted, elevations)
 
 	offset = b * 8 + 8
@@ -965,7 +991,7 @@ def convert_file(args):
 			obsidian="cobblestone",
 			crying_obsidian="cobblestone",
 			pearlescent_froglight="cobblestone",
-			slime_block="sand",
+			slime_block="cobblestone",
 			gilded_blackstone="cobblestone",
 			sculk="cobblestone",
 			polished_blackstone_slab="cobblestone_slab",
@@ -988,6 +1014,7 @@ def convert_file(args):
 			black_wool="white_wool",
 			black_concrete_powder="sand",
 			heavy_core="sand",
+			magma_block="sand",
 			amethyst_block="dirt",
 			wither_skeleton_skull="air",
 			skeleton_skull="air",
@@ -1015,7 +1042,7 @@ def convert_file(args):
 		else:
 			import litemapy
 			air = litemapy.BlockState("minecraft:air")
-			mx, my = 20, 11
+			mx, my = 20, 13
 			reg = litemapy.Region(-mx, -my, 0, mx * 2 + 1, my * 2 + 1, depth)
 			schem = reg.as_schematic(
 				name=output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0],
