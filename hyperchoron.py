@@ -910,14 +910,11 @@ def render_minecraft(notes, ctx):
 				((0, 0, i), "rail", dict(shape="north_south")),
 			)
 
-		def iter_half(inverted=False, main=True):
+		def iter_half(inverted=False):
 			left, right = ("left", "right") if not inverted else ("right", "left")
 			strong, weak1, mid, weak2 = profile_notes(notes)
-			if not main and not strong and not weak1 and not mid and not weak2:
-				return
 			yield from generate_layer(right, offset, 0)
-			if strong > MAIN or mid > SIDE or weak1 > SIDE or weak2 > SIDE:
-				yield from generate_layer(left, offset, 0)
+			yield from generate_layer(left, offset, 0)
 			if weak1:
 				yield from ensure_top(left, offset)
 				yield from generate_layer(left, offset, 6)
