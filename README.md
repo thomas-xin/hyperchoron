@@ -1,3 +1,4 @@
+![thumbnail](https://raw.githubusercontent.com/thomas-xin/hyperchoron/refs/heads/main/thumb.jpg)
 # Instructions for use
 ### Installation
 - Install [git](https://github.com/git-guides/install-git) and [python](https://www.python.org).
