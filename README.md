@@ -1,4 +1,11 @@
 # Instructions for use
+### Installation
+- Install [git](https://github.com/git-guides/install-git) and [python](https://www.python.org).
+- Clone this repo:
+`git clone https://github.com/thomas-xin/hyperchoron`
+- Install dependencies:
+`py -m pip install -r requirements.txt`
+### Usage
 ```ini
 py hyperchoron.py -h
 usage:  [-h] -i INPUT [-o [OUTPUT]] [-t [TRANSPOSE]] [-s [SPEED]] [-sa [STRUM_AFFINITY]] [-d | --drums | --no-drums]
@@ -25,9 +32,9 @@ options:
                         compatibility with previous versions of minecraft. May cause spacing issues with the
                         sand/snare drum instruments. Defaults to FALSE
 ```
+### Additional info
 - The program takes one input and output file, and currently supports .mcfunction (a list of `/setblock` commands), and .litematic (used by the litematica mod) files.
 - At present, hyperchoron is only implemented to be run as an export script, and does not have interoperability as a library or with inbetween formats such as .nbs. This may change in the future.
-- The required libraries are `py_midicsv`, and `litemapy` if exporting to .litematic files. They may be quick-installed using `pip install -r requirements.txt`.
 - Note that if exporting to `.mcfunction`, you will need to make some sort of template datapack to be able to load it in. It is recommended to perform the `/gamerule maxCommandChainLength 2147483647` command prior to pasting the note blocks to avoid longer songs being cut off.
 - If you are intending to build the output schematic in vanilla survival mode, the `-c` option will force the program to use cobblestone for most of the structure. This removes the excessive use of decorative blocks such as beacons, crying obsidian and froglights, as well as heavy core as an instrument. Note that the latter may cause alignment issues arbitrarily depending on the complexity of the song, as sand requires a supporting block, and there are no blocks (besides customised player heads) in vanilla that can perform this role without also possibly silencing a note block that happens to be directly below.
 
