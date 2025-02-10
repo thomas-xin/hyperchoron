@@ -373,8 +373,13 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 			print("Finding closest speed...", exclusions, len(timestamps))
 			div = round(speed / min_value - 0.25)
 			if div <= 1:
-				print("Speed too close for rounding, autoscaling by 75%...")
-				speed *= 0.75
+				if speed % 3 == 0:
+					print("Speed too close for rounding, autoscaling by 2/3...")
+					speed *= 2
+					speed //= 3
+				else:
+					print("Speed too close for rounding, autoscaling by 75%...")
+					speed *= 0.75
 			else:
 				speed /= div
 	sm = ctx.speed
