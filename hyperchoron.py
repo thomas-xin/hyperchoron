@@ -968,12 +968,21 @@ def convert_file(args):
 	if not ctx.output:
 		path, name = ctx.input.replace("\\", "/").rsplit("/", 1)
 		ctx.output = [path + "/" + name.rsplit(".", 1)[0] + ".litematic"]
+	if ctx.input.endswith(".zip"):
+		import zipfile
+		z = zipfile.ZipFile(ctx.input)
+		ctx.input = z.open(z.filelist[0])
 	print("Converting midi...")
 	if py_midicsv:
 		csv_list = py_midicsv.midi_to_csv(ctx.input)
 	else:
 		import subprocess
-		csv_list = subprocess.check_output(["Midicsv.exe", ctx.input, "-"]).decode("utf-8", "replace").splitlines()
+		if isinstance(ctx.input, str):
+			csv_list = subprocess.check_output(["Midicsv.exe", ctx.input, "-"]).decode("utf-8", "replace").splitlines()
+		else:
+			p = subprocess.Popen(["Midicsv.exe", "-", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+			b = ctx.input.read()
+			csv_list = p.communicate(b)[0].decode("utf-8", "replace").splitlines()
 	midi_events = list(csv.reader(csv_list))
 	notes, note_candidates, is_org = convert_midi(midi_events, ctx=ctx)
 	if is_org:
@@ -1074,7 +1083,7 @@ if __name__ == "__main__":
 		prog="",
 		description="MIDI to Minecraft Note Block Converter",
 	)
-	parser.add_argument("-i", "--input", required=True, help="Input file (.mid)")
+	parser.add_argument("-i", "--input", required=True, help="Input file (.mid | .zip)")
 	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mcfunction | .litematic)")
 	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones; higher = higher pitched")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier; higher = faster")
