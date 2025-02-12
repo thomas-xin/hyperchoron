@@ -9,15 +9,15 @@
 ### Usage
 ```ini
 py hyperchoron.py -h
-usage:  [-h] -i INPUT [-o [OUTPUT]] [-t [TRANSPOSE]] [-s [SPEED]] [-sa [STRUM_AFFINITY]] [-d | --drums | --no-drums]
-        [-c | --cheap | --no-cheap]
+usage:  [-h] -i INPUT [-o [OUTPUT ...]] [-t [TRANSPOSE]] [-s [SPEED]] [-sa [STRUM_AFFINITY]]
+        [-d | --drums | --no-drums] [-c | --cheap | --no-cheap]
 
 MIDI to Minecraft Note Block Converter
 
 options:
   -h, --help            show this help message and exit
-  -i, --input INPUT     Input file (.mid)
-  -o, --output [OUTPUT]
+  -i, --input INPUT     Input file (.mid | .zip)
+  -o, --output [OUTPUT ...]
                         Output file (.mcfunction | .litematic)
   -t, --transpose [TRANSPOSE]
                         Transposes song up/down a certain amount of semitones; higher = higher pitched
