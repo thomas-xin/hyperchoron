@@ -6,17 +6,20 @@ procs = []
 def run_conversion(fi, *fo):
 	return subprocess.Popen([sys.executable, "hyperchoron.py", "-i", fi, "-o", *fo])
 def wait_procs():
-	for i in range(len(procs) - 1, -1, -1):
-		if procs[i].returncode:
-			procs.pop(i)
 	while len(procs) >= 8:
-		procs.pop(0).wait()
+		try:
+			procs[0].wait(timeout=2)
+		except subprocess.TimeoutExpired:
+			pass
+		for i in range(len(procs) - 1, -1, -1):
+			if procs[i].poll() is not None:
+				procs.pop(i)
 
 OUTPUT_FORMATS = ("litematic",)
 for fmt in OUTPUT_FORMATS:
 	if not os.path.exists(f"examples/{fmt}"):
 		os.mkdir(f"examples/{fmt}")
-for fn in os.listdir("examples/midi"):
+for fn in sorted(os.listdir("examples/midi"), key=lambda fn: (fn.endswith(".zip"), os.path.getsize(f"examples/midi/{fn}")), reverse=True):
 	names = [fn.rsplit(".", 1)[0] + "." + fmt for fmt in OUTPUT_FORMATS]
 	fi = f"examples/midi/{fn}"
 	fo = [f"examples/{fmt}/{n}" for fmt, n in zip(OUTPUT_FORMATS, names)]

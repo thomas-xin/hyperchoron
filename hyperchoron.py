@@ -2,7 +2,7 @@ from collections import deque
 import csv
 import functools
 import itertools
-from math import ceil, inf, isqrt, sqrt, gcd
+from math import ceil, inf, isqrt, sqrt, log2, gcd
 import os
 from types import SimpleNamespace
 if os.name == "nt" and os.path.exists("Midicsv.exe"):
@@ -165,7 +165,7 @@ def approximate_gcd(arr, min_value=8):
 	# Check if any element is >= min_value
 	has_element_above_min = any(x >= min_value for x in arr)
 	if not has_element_above_min:
-		return gcd(arr), len(arr)
+		return gcd(*arr), len(arr)
 
 	# Collect non-zero elements
 	non_zero = [x for x in arr if x != 0]
@@ -187,7 +187,7 @@ def approximate_gcd(arr, min_value=8):
 
 	# If there are no divisors >= min_value, return the GCD of all elements
 	if not divisors:
-		return gcd(arr), len(arr)
+		return gcd(*arr), len(arr)
 
 	# Sort divisors in descending order
 	sorted_divisors = sorted(divisors, reverse=True)
@@ -215,7 +215,7 @@ def approximate_gcd(arr, min_value=8):
 		if current_gcd > max_gcd:
 			max_gcd = current_gcd
 
-	return (max_gcd, len(arr) - max_count) if max_gcd >= min_value else (gcd(arr), len(arr))
+	return (max_gcd, len(arr) - max_count) if max_gcd >= min_value else (gcd(*arr), len(arr))
 
 def binary_map():
 	yield 0
@@ -328,6 +328,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 	clocks_per_crotchet = 0
 	milliseconds_per_clock = 0
 	timestamps = {}
+	time_diffs = {}
 	started = False
 	for event in midi_events:
 		mode = event[2].strip().casefold()
@@ -335,11 +336,24 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 		if mode == "note_on_c":
 			if int(event[5]) == 1:
 				continue
+			targets = []
 			started = True
-		try:
-			timestamps[timestamp] += 1
-		except KeyError:
-			timestamps[timestamp] = 1
+			channel = int(event[3])
+			for last_timestamp in time_diffs.get(channel, (0,)):
+				target = timestamp - last_timestamp
+				if target <= 0:
+					continue
+				targets.append(target)
+		elif mode == "note_off_c":
+			channel = int(event[3])
+			time_diffs.setdefault(channel, deque(maxlen=4)).append(timestamp)
+		else:
+			targets = [timestamp]
+		for target in targets:
+			try:
+				timestamps[target] += 1
+			except KeyError:
+				timestamps[target] = 1
 		if started:
 			continue
 		if mode == "header":
@@ -357,19 +371,21 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 	step_ms = 1000 // tps
 	rev = deque(sorted(timestamps, key=lambda k: timestamps[k]))
 	mode = timestamps[rev[-1]]
-	while len(timestamps) > 4096 or timestamps[rev[0]] < mode / 64:
+	while len(timestamps) > 1024 or timestamps[rev[0]] < mode / 64:
 		timestamps.pop(rev.popleft())
+	timestamp_collection = list(itertools.chain.from_iterable([k] * ceil(log2(v / 2)) for k, v in timestamps.items()))
 	min_value = step_ms / milliseconds_per_clock
-	print("Estimating true resolution...", len(timestamps), milliseconds_per_clock, step_ms, min_value)
-	speed, exclusions = approximate_gcd(timestamps, min_value=min_value - 1)
+	print("Estimating true resolution...", len(timestamp_collection), clocks_per_crotchet, milliseconds_per_clock, step_ms, min_value)
+	speed, exclusions = approximate_gcd(timestamp_collection, min_value=min_value - 1)
 	use_exact = False
-	if speed > min_value * sqrt(2) or exclusions > len(timestamps) / 8:
+	print("Confidence:", 1 - exclusions / len(timestamp_collection))
+	if speed > min_value * 1.25 or exclusions > len(timestamp_collection) / 8:
 		print("Rejecting first estimate:", speed, min_value, exclusions)
-		if exclusions >= len(timestamps) * 3 / 4:
+		if exclusions >= len(timestamp_collection) * 3 / 4:
 			print("Discarding tempo...", exclusions, len(timestamps))
 			speed = 1
 			use_exact = True
-		elif speed > min_value * sqrt(2):
+		elif speed > min_value * 1.25:
 			print("Finding closest speed...", exclusions, len(timestamps))
 			div = round(speed / min_value - 0.25)
 			if div <= 1:
@@ -482,19 +498,18 @@ def convert_midi(midi_events, tps=20, ctx=None):
 						note_candidates += 1
 						sustain = sustain_map[instrument]
 						end = inf
-						if sustain:
-							off = None
-							for i, e in enumerate(midi_events):
-								m = e[2].strip().casefold()
-								if m == "note_off_c" or m == "note_on_c" and int(e[5]) <= 1:
-									c = int(e[3])
-									p = int(e[4])
-									if c == channel and p == pitch:
-										off = i
-										end = int(e[1]) * real_ms_per_clock / scale
-										break
-							if off is not None:
-								del midi_events[off]
+						off = None
+						for i, e in enumerate(midi_events):
+							m = e[2].strip().casefold()
+							if m == "note_off_c" or m == "note_on_c" and int(e[5]) <= 1:
+								c = int(e[3])
+								p = int(e[4])
+								if c == channel and p == pitch:
+									off = i
+									end = int(e[1]) * real_ms_per_clock / scale
+									break
+						if off is not None:
+							del midi_events[off]
 						if end == inf:
 							end = timestamp + step_ms
 							sustain = False
@@ -584,7 +599,7 @@ def convert_midi(midi_events, tps=20, ctx=None):
 							if block not in beat:
 								beat.append(block)
 								note.timestamp = timestamp + recur
-						if not note.sustain or timestamp + step_ms * 2 >= note.end:
+						if timestamp + step_ms * 2 >= note.end:
 							notes.pop(i)
 						else:
 							note.updated = False
@@ -714,16 +729,17 @@ def render_minecraft(notes, ctx):
 							break
 					ordered = ordered[:SIDE * 2]
 				cap = SIDE
+				flipped = False # direction == 1
 				for y, r in elevations[pulse]:
 					if not ordered:
 						break
 					taken, ordered = ordered[:cap], ordered[cap:]
 					if i >= 8:
-						x = (1 - (17 - i) * 2 if direction == 1 else -22 + (17 - i) * 2) * (-1 if invert ^ r else 1)
+						x = (1 - (17 - i) * 2 if flipped else -22 + (17 - i) * 2) * (-1 if invert ^ r else 1)
 						v = 0 if y < 0 else -2
 						z = offset + 2
 					else:
-						x = (-4 - i * 2 if direction == 1 else -17 + i * 2) * (-1 if invert ^ r else 1)
+						x = (-4 - i * 2 if flipped else -17 + i * 2) * (-1 if invert ^ r else 1)
 						v = -1
 						z = offset
 					for w, note in enumerate(taken):
@@ -738,7 +754,7 @@ def render_minecraft(notes, ctx):
 		x = -1 if right else 1
 		y = elevation
 		z = offset
-		mirrored = offset % 8 >= 4
+		mirrored = offset % 8 < 4
 		if y == 0:
 			yield ((x * 19, y - 1, z), "black_stained_glass")
 			if mirrored:
@@ -797,40 +813,57 @@ def render_minecraft(notes, ctx):
 			for i in range(3, 18):
 				yield ((x * (i if mirrored else i + 1), y, z), "repeater", dict(facing="east" if right ^ mirrored else "west", delay=2))
 		elif y != 0:
+			reverse = True
 			lower = y < 0
 			mid = y == -3
 			block = "crying_obsidian" if mid else "slime_block" if lower else "pearlescent_froglight"
 			slab = "oxidized_cut_copper_slab" if mid else "bamboo_mosaic_slab" if lower else "prismarine_slab"
 			edge = "purpur_slab" if mid else "resin_brick_slab" if lower else "dark_prismarine_slab"
-			o1 = 3 + mirrored
-			o2 = 4 - mirrored
+			o1 = 3 + reverse
+			o2 = 4 - reverse
 			for i in range(8):
 				yield from (
 					((x * (i * 2 + o2), y, z), block),
 					((x * (i * 2 + o2 - 1), y - 1, z), slab, dict(type="top")),
-					((x * (i * 2 + o2 - 1), y, z), "repeater", dict(facing="east" if right ^ mirrored else "west", delay=2)),
+					((x * (i * 2 + o2 - 1), y, z), "repeater", dict(facing="east" if right ^ reverse else "west", delay=2)),
 					((x * (i * 2 + o1), y + (1 if lower else -1), z + 2), block),
 				)
 				if i < 7:
 					yield ((x * (i * 2 + o1 + 1), y + (0 if lower else -2), z + 2), slab, dict(type="top"))
-					yield ((x * (i * 2 + o1 + 1), y + (1 if lower else -1), z + 2), "repeater", dict(facing="west" if right ^ mirrored else "east", delay=2))
-			x2 = x * 2 if mirrored else x * 19 
+					yield ((x * (i * 2 + o1 + 1), y + (1 if lower else -1), z + 2), "repeater", dict(facing="west" if right ^ reverse else "east", delay=2))
+			x2 = x * 2 if reverse else x * 19 
 			yield from (
-				((x * (18 if mirrored else 3), y, z), "observer", dict(facing="east" if right ^ mirrored else "west")),
-				((x * (3 if mirrored else 18), y + (1 if lower else -1), z + 2), "observer", dict(facing="west" if right ^ mirrored else "east")),
+				((x * (18 if reverse else 3), y, z), "observer", dict(facing="east" if right ^ reverse else "west")),
+				((x * (3 if reverse else 18), y + (1 if lower else -1), z + 2), "observer", dict(facing="west" if right ^ reverse else "east")),
 				((x2, y + (1 if lower else -1), z + 2), "observer", dict(facing="north")),
 				((x2, y - 1, z), edge, dict(type="top")),
 				((x2, y + (0 if lower else -2), z + 1), edge, dict(type="top")),
-				((x2, y + (0 if lower else -2), z + 2), edge, dict(type="top")),
 				((x2, y + (1 if lower else -1), z + 1), "powered_rail", dict(shape="north_south" if lower else "ascending_north")),
 				((x2, y, z), "powered_rail", dict(shape="ascending_south" if lower else "north_south")),
 			)
+			if not mirrored:
+				x3 = x * 19
+				x4 = x * 18
+				yield ((x3, y, z), "observer", dict(facing="north"))
+				yield ((x3, y - 1, z - 1), edge, dict(type="top"))
+				if lower:
+					yield from (
+						((x4, y + (0 if lower else -2), z - 1), edge, dict(type="top")),
+						((x4, y + (1 if lower else -1), z - 1), "powered_rail", dict(shape="east_west")),
+						((x3, y, z - 1), "powered_rail", dict(shape="ascending_east" if right else "ascending_west")),
+					)
+				else:
+					yield from (
+						((x4, y + (0 if lower else -2), z - 1), edge, dict(type="top")),
+						((x4, y + (1 if lower else -1), z - 1), "powered_rail", dict(shape="ascending_west" if right else "ascending_east")),
+						((x3, y, z - 1), "powered_rail", dict(shape="east_west")),
+					)
 
 	def ensure_layer(direction="right", offset=0):
 		right = direction == "right"
 		x = -1 if right else 1
 		z = offset
-		mirrored = offset % 8 >= 4
+		mirrored = offset % 8 < 4
 		x2 = x * 19 if mirrored else x * 2
 		yield from (
 			((x2, -1, z + 1), "oxidized_copper_trapdoor", dict(facing="south", half="top")),
@@ -852,7 +885,7 @@ def render_minecraft(notes, ctx):
 		right = direction == "right"
 		x = -1 if right else 1
 		z = offset
-		mirrored = offset % 8 >= 4
+		mirrored = offset % 8 < 4
 		if mirrored:
 			x1, x2 = x * 20, x * 19
 		else:
@@ -904,8 +937,8 @@ def render_minecraft(notes, ctx):
 				((x2, 12, z2), "redstone_wire", dict(north="side", south="side")),
 			)
 
-	def profile_notes(notes):
-		return (max(map(len, notes[i:64:4]), default=0) for i in range(4))
+	def profile_notes(notes, early=False):
+		return (max(map(len, notes[i:(128 if early else 64):4]), default=0) for i in range(4))
 
 	print("Preparing output...")
 	bars = ceil(len(notes) / BAR / DIV)
@@ -926,29 +959,32 @@ def render_minecraft(notes, ctx):
 				((0, 0, i), "rail", dict(shape="north_south")),
 			)
 
-		def iter_half(inverted=False):
+		def iter_half(inverted=False, ensure=False):
 			left, right = ("left", "right") if not inverted else ("right", "left")
-			strong, weak1, mid, weak2 = profile_notes(notes)
+			strong, weak1, mid, weak2 = profile_notes(notes, early=ensure)
 			yield from generate_layer(right, offset, 0)
 			yield from generate_layer(left, offset, 0)
 			if weak1:
-				yield from ensure_top(left, offset)
+				if ensure:
+					yield from ensure_top(left, offset)
 				yield from generate_layer(left, offset, 6)
 				if weak1 > SIDE:
 					yield from generate_layer(left, offset, 9)
 					if weak1 > SIDE * 2:
 						yield from generate_layer(left, offset, 12)
 			if weak2:
-				yield from ensure_top(right, offset)
+				if ensure:
+					yield from ensure_top(right, offset)
 				yield from generate_layer(right, offset, 6)
 				if weak2 > SIDE:
 					yield from generate_layer(right, offset, 9)
 					if weak2 > SIDE * 2:
 						yield from generate_layer(right, offset, 12)
 			if strong > MAIN * 2 or mid or weak2:
-				yield from ensure_layer(right, offset)
-				if strong > MAIN * 2 + SIDE or mid > SIDE:
-					yield from ensure_layer(left, offset)
+				if ensure:
+					yield from ensure_layer(right, offset)
+					if strong > MAIN * 2 + SIDE or mid > SIDE:
+						yield from ensure_layer(left, offset)
 				if strong > MAIN * 2:
 					yield from generate_layer(right, offset, -3)
 					if strong > MAIN * 2 + SIDE:
@@ -962,22 +998,96 @@ def render_minecraft(notes, ctx):
 							if mid > SIDE * 3:
 								yield from generate_layer(left, offset, -9)
 
-		yield from iter_half(inverted)
-		yield from extract_notes(notes, offset, 1, inverted, elevations)
+		yield from iter_half(inverted, ensure=True)
+		yield from extract_notes(notes, offset, -1, inverted, elevations)
 
 		offset += 4
 		yield from iter_half(inverted)
-		yield from extract_notes(notes, offset, -1, inverted, elevations)
+		yield from extract_notes(notes, offset, 1, inverted, elevations)
 
 	offset = b * 8 + 8
-	for i in range(-2, 3):
-		yield ((i, -1, 0), "dark_prismarine")
-		yield ((i, 0, 0), "activator_rail", dict(shape="east_west", powered="false"))
 	yield from (
-		((0, 0, offset), "powered_rail", dict(shape="north_south")),
+		((0, -1, 1), "hopper"),
+		((0, 0, 1), "powered_rail", dict(shape="north_south")),
 		((0, 0, 0), "netherite_block"),
-		((0, 1, 0), "lever", dict(facing="north", face="floor", powered="false")),
+		((0, -1, 0), "honey_block"),
+		((0, 1, 0), "calibrated_sculk_sensor", dict(face="floor", facing="south")),
+		((1, 0, 0), "oxidized_copper_bulb", dict(lit="false")),
+		((-1, 0, 0), "oxidized_copper_bulb", dict(lit="false")),
+		((1, -1, 0), "obsidian"),
+		((-1, -1, 0), "obsidian"),
+		((1, 1, 0), "redstone_wire", dict(north="side", west="side")),
+		((-1, 1, 0), "redstone_wire", dict(east="side", west="side")),
+		((0, 2, 0), "purple_wool"),
+		((1, 0, -1), "obsidian"),
+		((-1, 0, -1), "obsidian"),
+		((0, 1, -1), "obsidian"),
+		((2, 1, -1), "composter", dict(level=6)),
+		((1, 1, -1), "comparator", dict(facing="east", powered="true")),
+		((0, -1, -2), "sticky_piston", dict(facing="south", extended="true")),
+		((0, -1, -1), "piston_head", dict(facing="south", short="false", type="sticky")),
+		((0, -3, -2), "cobbled_deepslate"),
+		((0, -2, -2), "redstone_torch"),
+		((1, -4, -2), "cobbled_deepslate"),
+		((1, -3, -2), "redstone_wire", dict(east="side", north="side", south="side", west="side")),
+		((0, -4, -1), "cobbled_deepslate"),
+		((1, -5, -1), "cobbled_deepslate"),
+		((1, -4, -1), "repeater", dict(delay=4, facing="south")),
+		((1, -4, 0), "observer", dict(facing="south")),
+		((1, -4, 1), "observer", dict(facing="west")),
+		((1, -6, -2), "cobbled_deepslate"),
+		((1, -5, -2), "redstone_wire"),
+		((1, -7, -2), "note_block"),
+		((0, -7, -2), "observer", dict(facing="east")),
+		((0, -7, -1), "observer", dict(facing="north")),
+		((0, -7, 0), "sticky_piston", dict(facing="up")),
+		((0, -6, 0), "slime_block"),
+		((1, -5, 0), "crying_obsidian"),
+		((-1, -5, 0), "crying_obsidian"),
+		((0, -5, 1), "crying_obsidian"),
+		((0, -5, -1), "crying_obsidian"),
+		((0, -4, 1), "detector_rail", dict(shape="north_south")),
 	)
+	for i in range(2, offset):
+		if i <= 4 or i >= offset - 3 or not i & 15:
+			yield ((0, -4, i), "powered_rail", dict(shape="north_south", powered="true"))
+		else:
+			yield ((0, -4, i), "rail", dict(shape="north_east"))
+		yield ((0, -5, i), "redstone_block")
+	yield from (
+		((0, -5, offset), "redstone_block"),
+		((0, -4, offset), "powered_rail", dict(shape="ascending_south", powered="true")),
+		((0, -4, offset + 1), "red_wool"),
+		((0, -3, offset + 1), "powered_rail", dict(shape="ascending_south", powered="true")),
+		((0, -3, offset + 2), "red_wool"),
+		((0, -2, offset + 2), "powered_rail", dict(shape="ascending_south", powered="true")),
+		((0, -2, offset + 3), "red_wool"),
+		((0, -1, offset + 3), "powered_rail", dict(shape="north_south", powered="true")),
+		((0, -1, offset + 4), "red_wool"),
+	)
+	for x in (-1, 1):
+		for n in range(2, 20):
+			yield ((x * n, -1, 0), "tinted_glass")
+		yield from (
+			((x * 2, 0, 0), "yellow_wool"),
+			((x * 3, 0, 0), "comparator", dict(facing="east" if x == -1 else "west")),
+			((x * 4, 0, 0), "magma_block"),
+			((x * 5, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 6, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 7, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 8, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 9, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 10, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 11, 0, 0), "observer", dict(facing="east" if x == -1 else "west")),
+			((x * 12, 0, 0), "magma_block"),
+			((x * 13, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 14, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 15, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 16, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 17, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 18, 0, 0), "activator_rail", dict(shape="east_west")),
+			((x * 19, 0, 0), "activator_rail", dict(shape="east_west")),
+		)
 
 def convert_file(args):
 	ctx = args
@@ -1038,7 +1148,9 @@ def convert_file(args):
 			black_stained_glass="glass",
 			tinted_glass="glass",
 			mangrove_roots="cobblestone",
+			cobbled_deepslate="cobblestone",
 			black_wool="white_wool",
+			yellow_wool="cobblestone",
 			black_concrete_powder="sand",
 			heavy_core="sand",
 			magma_block="sand",
@@ -1048,6 +1160,10 @@ def convert_file(args):
 			creeper_head="air",
 			piglin_head="air",
 			zombie_head="air",
+		))
+	else:
+		block_replacements.update(dict(
+			hopper="beacon",
 		))
 	blocks = list(render_minecraft(notes, ctx=ctx))
 	for output in ctx.output:
@@ -1069,8 +1185,8 @@ def convert_file(args):
 		else:
 			import litemapy
 			air = litemapy.BlockState("minecraft:air")
-			mx, my = 20, 13
-			reg = litemapy.Region(-mx, -my, 0, mx * 2 + 1, my * 2 + 1, depth)
+			mx, my, mz = 20, 13, 2
+			reg = litemapy.Region(-mx, -my, -mz, mx * 2 + 1, my * 2 + 1, depth + mz)
 			schem = reg.as_schematic(
 				name=output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0],
 				author="Hyperchoron",
@@ -1081,16 +1197,16 @@ def convert_file(args):
 					block = block_replacements[block]
 					if block == "cobblestone_slab":
 						kwargs = [dict(type="top")]
-				if block == "sand" and reg[x + mx, y + my - 1, z] == air:
-					reg[x + mx, y + my - 1, z] = litemapy.BlockState("minecraft:dirt")
+				if block == "sand" and reg[x + mx, y + my - 1, z + mz] == air:
+					reg[x + mx, y + my - 1, z + mz] = litemapy.BlockState("minecraft:dirt")
 				nc += block == "note_block"
 				if kwargs:
 					block = litemapy.BlockState("minecraft:" + block, **{k: str(v) for k, v in kwargs[0].items()})
 				else:
 					block = litemapy.BlockState("minecraft:" + block)
-				reg[x + mx, y + my, z] = block
+				reg[x + mx, y + my, z + mz] = block
 			schem.save(output)
-	print("Final note count:", nc)
+	print("Final note block count:", nc)
 
 
 if __name__ == "__main__":
