@@ -336,7 +336,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 		if mode == "note_on_c":
 			if int(event[5]) == 1:
 				continue
-			targets = []
+			targets = [timestamp]
 			started = True
 			channel = int(event[3])
 			for last_timestamp in time_diffs.get(channel, (0,)):
@@ -344,9 +344,11 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 				if target <= 0:
 					continue
 				targets.append(target)
+			td = time_diffs.setdefault(channel, deque(maxlen=4))
+			if not td or timestamp != td[-1]:
+				td.append(timestamp)
 		elif mode == "note_off_c":
 			channel = int(event[3])
-			time_diffs.setdefault(channel, deque(maxlen=4)).append(timestamp)
 		else:
 			targets = [timestamp]
 		for target in targets:
@@ -373,7 +375,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 	mode = timestamps[rev[-1]]
 	while len(timestamps) > 1024 or timestamps[rev[0]] < mode / 64:
 		timestamps.pop(rev.popleft())
-	timestamp_collection = list(itertools.chain.from_iterable([k] * ceil(log2(v / 2)) for k, v in timestamps.items()))
+	timestamp_collection = list(itertools.chain.from_iterable([k] * ceil(max(1, log2(v / 2))) for k, v in timestamps.items()))
 	min_value = step_ms / milliseconds_per_clock
 	print("Estimating true resolution...", len(timestamp_collection), clocks_per_crotchet, milliseconds_per_clock, step_ms, min_value)
 	speed, exclusions = approximate_gcd(timestamp_collection, min_value=min_value - 1)
@@ -1020,7 +1022,7 @@ def render_minecraft(notes, ctx):
 		((-1, -1, 0), "obsidian"),
 		((1, 1, 0), "redstone_wire", dict(north="side", west="side")),
 		((-1, 1, 0), "redstone_wire", dict(east="side", west="side")),
-		((0, 2, 0), "purple_wool"),
+		# ((0, 2, 0), "purple_wool"),
 		((1, 0, -1), "obsidian"),
 		((-1, 0, -1), "obsidian"),
 		((0, 1, -1), "obsidian"),
