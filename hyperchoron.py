@@ -448,10 +448,7 @@ def convert_midi(midi_events, tps=20, ctx=None):
 			last_timestamp = max(last_timestamp, int(event[1]))
 		elif mode == "control_c":
 			control = int(event[4])
-			if control == 6:
-				channel = int(event[3])
-				pitchbend_ranges[channel] = int(event[5])
-			elif control == 7:
+			if control == 7:
 				channel = int(event[3])
 				value = int(event[5])
 				volume = value / 127
@@ -498,18 +495,19 @@ def convert_midi(midi_events, tps=20, ctx=None):
 						note_candidates += 1
 						sustain = sustain_map[instrument]
 						end = inf
-						off = None
-						for i, e in enumerate(midi_events):
-							m = e[2].strip().casefold()
-							if m == "note_off_c" or m == "note_on_c" and int(e[5]) <= 1:
-								c = int(e[3])
-								p = int(e[4])
-								if c == channel and p == pitch:
-									off = i
-									end = int(e[1]) * real_ms_per_clock / scale
-									break
-						if off is not None:
-							del midi_events[off]
+						if sustain or len(active_notes[instrument]) <= 4 and pitchbend_ranges.get(channel):
+							off = None
+							for i, e in enumerate(midi_events):
+								m = e[2].strip().casefold()
+								if m == "note_off_c" or m == "note_on_c" and int(e[5]) <= 1:
+									c = int(e[3])
+									p = int(e[4])
+									if c == channel and p == pitch:
+										off = i
+										end = int(e[1]) * real_ms_per_clock / scale
+										break
+							if off is not None:
+								del midi_events[off]
 						if end == inf:
 							end = timestamp + step_ms
 							sustain = False
@@ -522,6 +520,7 @@ def convert_midi(midi_events, tps=20, ctx=None):
 					value = int(event[4])
 					offset = round((value - 8192) / 8192 * pitchbend_ranges.get(channel, 2))
 					if offset != channel_stats.get(channel, {}).get("bend", 0):
+						pitchbend_ranges.setdefault(channel, 2)
 						instrument = instrument_map[channel]
 						channel_stats.setdefault(channel, {})["bend"] = offset
 						candidate = None
@@ -532,6 +531,9 @@ def convert_midi(midi_events, tps=20, ctx=None):
 									candidate = note
 						if candidate:
 							candidate.end += 50
+				elif mode == "control_c" and event[4] == "6":
+					channel = int(event[3])
+					pitchbend_ranges[channel] = int(event[5])
 				elif mode == "control_c" and event[4] == "7":
 					channel = int(event[3])
 					value = int(event[5])
@@ -816,8 +818,8 @@ def render_minecraft(notes, ctx):
 			reverse = True
 			lower = y < 0
 			mid = y == -3
-			block = "crying_obsidian" if mid else "slime_block" if lower else "pearlescent_froglight"
-			slab = "oxidized_cut_copper_slab" if mid else "bamboo_mosaic_slab" if lower else "prismarine_slab"
+			block = "ochre_froglight" if mid else "verdant_froglight" if lower else "pearlescent_froglight"
+			slab = "waxed_cut_copper_slab" if mid else "bamboo_mosaic_slab" if lower else "prismarine_slab"
 			edge = "purpur_slab" if mid else "resin_brick_slab" if lower else "dark_prismarine_slab"
 			o1 = 3 + reverse
 			o2 = 4 - reverse
@@ -1126,9 +1128,10 @@ def convert_file(args):
 		block_replacements.update(dict(
 			netherite_block="cobblestone",
 			obsidian="cobblestone",
-			crying_obsidian="cobblestone",
+			crying_obsidian="obsidian",
 			pearlescent_froglight="cobblestone",
-			slime_block="cobblestone",
+			verdant_froglight="cobblestone",
+			ochre_froglight="cobblestone",
 			gilded_blackstone="cobblestone",
 			sculk="cobblestone",
 			polished_blackstone_slab="cobblestone_slab",
@@ -1138,6 +1141,8 @@ def convert_file(args):
 			bamboo_mosaic_slab="cobblestone_slab",
 			resin_brick_slab="cobblestone_slab",
 			prismarine_slab="cobblestone_slab",
+			waxed_cut_copper_slab="cobblestone_slab",
+			purpur_slab="cobblestone_slab",
 			dark_prismarine_slab="cobblestone_slab",
 			dark_prismarine="cobblestone",
 			prismarine_wall="cobblestone_wall",
