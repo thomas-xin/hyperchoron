@@ -89,7 +89,7 @@ instrument_mapping = [
 ]
 org_instrument_mapping = [
 	0, 0, 1, 3, 2, 2, 2, 3, 3, 7,
-	0, 1, 3, 3, 2, 2, 3, 7, 7, 7,
+	1, 2, 3, 3, 2, 2, 3, 7, 7, 7,
 	3, 3, 3, 3, 3, 3, 3, 7, 7, 7,
 	1, 1, 1, 7, 2, 2, 2, 3, 7, 7,
 	7, 3, 3, 3, 3, 3, 7, 2, 3, 2,
@@ -409,7 +409,9 @@ def convert_midi(midi_events, tps=20, ctx=None):
 	played_notes = []
 	pitchbend_ranges = {}
 	instrument_map = {}
+	channel_stats = {}
 	last_timestamp = 0
+	max_vel = 0
 	for event in midi_events:
 		mode = event[2].strip().casefold()
 		if mode == "program_c":
@@ -420,9 +422,12 @@ def convert_midi(midi_events, tps=20, ctx=None):
 			instrument_map[channel] = org_instrument_mapping[value] if is_org else instrument_mapping[value]
 		elif mode == "note_on_c":
 			channel = int(event[3])
+			velocity = int(event[5])
 			if channel not in instrument_map:
 				instrument_map[channel] = -1 if channel == 9 and ctx.drums else 0
 			last_timestamp = max(last_timestamp, int(event[1]))
+			volume = velocity * channel_stats.setdefault(channel, {}).get("volume", 1)
+			max_vel = max(max_vel, volume)
 		elif mode == "note_off_c":
 			last_timestamp = max(last_timestamp, int(event[1]))
 		elif mode == "control_c":
@@ -430,10 +435,14 @@ def convert_midi(midi_events, tps=20, ctx=None):
 			if control == 6:
 				channel = int(event[3])
 				pitchbend_ranges[channel] = int(event[5])
+			elif control == 7:
+				channel = int(event[3])
+				value = int(event[5])
+				volume = value / 127
+				channel_stats.setdefault(channel, {})["volume"] = volume
 	active_notes = {i: [] for i in range(len(material_map))}
 	active_notes[-1] = []
 	print("Instrument mapping:", instrument_map)
-	channel_stats = {}
 	midi_events.sort(key=lambda x: (int(x[1]), x[2].strip().casefold() not in ("tempo", "header"))) # Sort events by timestamp
 	real_ms_per_clock, scale, orig_step_ms, orig_tempo = get_step_speed(midi_events, tps=tps, ctx=ctx)
 	step_ms = orig_step_ms
@@ -441,6 +450,7 @@ def convert_midi(midi_events, tps=20, ctx=None):
 	timestamp = 0
 	loud = 0
 	note_candidates = 0
+	print("Max volume:", max_vel)
 	print("Processing notes...")
 	progress = tqdm.tqdm(total=ceil(last_timestamp * real_ms_per_clock / scale / 1000), bar_format="{l_bar}{bar}| {n:.3g}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]") if tqdm else contextlib.nullcontext()
 	with progress as bar:
@@ -459,7 +469,7 @@ def convert_midi(midi_events, tps=20, ctx=None):
 					channel = int(event[3])
 					instrument = instrument_map[channel]
 					pitch = int(event[4])
-					velocity = int(event[5]) # Note velocity currently not fully supported, used only for note off
+					velocity = int(event[5])
 					if velocity == 0:
 						notec = len(active_notes[instrument])
 						for i in range(notec):
@@ -510,7 +520,7 @@ def convert_midi(midi_events, tps=20, ctx=None):
 				elif mode == "control_c" and event[4] == "7":
 					channel = int(event[3])
 					value = int(event[5])
-					volume = value / 100
+					volume = value / 127
 					orig_volume = channel_stats.setdefault(channel, {}).get("volume", 1)
 					if volume >= orig_volume * 1.1:
 						note_candidates += 1
@@ -534,7 +544,7 @@ def convert_midi(midi_events, tps=20, ctx=None):
 				max_volume = 0
 				for notes in active_notes.values():
 					for note in notes:
-						note.volume = channel_stats.get(note.channel, {}).get("volume", 1) * note.velocity
+						note.volume = channel_stats.get(note.channel, {}).get("volume", 1) * note.velocity / max_vel * 127
 						if note.volume > max_volume:
 							max_volume = note.volume
 				for instrument, notes in active_notes.items():
@@ -622,6 +632,23 @@ def render_minecraft(notes, ctx):
 					x = (-3 - i if direction == 1 else -18 + i) * (-1 if invert else 1)
 					y = 0
 					z = offset
+					if len(ordered) > MAIN * 2 + SIDE * 2:
+						found = []
+						taken = False
+						for k, note in enumerate(reversed(ordered)):
+							note = list(note)
+							note[3] = 2
+							note = tuple(note)
+							mat, pitch = get_note_mat(note, transpose=ctx.transpose)
+							if mat != "PLACEHOLDER":
+								found.append(k)
+								yield ((-x if taken else x, y + 2, z - 1), "note_block", dict(note=pitch, instrument="harp"))
+								if taken:
+									break
+								else:
+									taken = True
+						if found:
+							ordered = [note for k, note in enumerate(reversed(ordered)) if k not in found][::-1]
 					ordered, remainder = ordered[:MAIN * 2], ordered[MAIN * 2:]
 					required_padding = sum(get_note_mat(note, transpose=ctx.transpose)[0] in transparent for note in ordered) * 2 - len(ordered)
 					for p in range(required_padding):
@@ -685,18 +712,6 @@ def render_minecraft(notes, ctx):
 							ordered.remove(padding)
 						except ValueError:
 							break
-					taken = False
-					for note in ordered[SIDE * 2:]:
-						note = list(note)
-						note[3] = 2
-						note = tuple(note)
-						mat, pitch = get_note_mat(note, transpose=ctx.transpose)
-						if mat != "PLACEHOLDER":
-							yield ((-x if taken else x, y + 2, z - 1), "note_block", dict(note=pitch, instrument="harp"))
-							if taken:
-								break
-							else:
-								taken = True
 					ordered = ordered[:SIDE * 2]
 				cap = SIDE
 				for y, r in elevations[pulse]:
@@ -795,9 +810,10 @@ def render_minecraft(notes, ctx):
 					((x * (i * 2 + o2 - 1), y - 1, z), slab, dict(type="top")),
 					((x * (i * 2 + o2 - 1), y, z), "repeater", dict(facing="east" if right ^ mirrored else "west", delay=2)),
 					((x * (i * 2 + o1), y + (1 if lower else -1), z + 2), block),
-					((x * (i * 2 + o1 + 1), y + (0 if lower else -2), z + 2), slab, dict(type="top")),
-					((x * (i * 2 + o1 + 1), y + (1 if lower else -1), z + 2), "repeater", dict(facing="west" if right ^ mirrored else "east", delay=2)),
 				)
+				if i < 7:
+					yield ((x * (i * 2 + o1 + 1), y + (0 if lower else -2), z + 2), slab, dict(type="top"))
+					yield ((x * (i * 2 + o1 + 1), y + (1 if lower else -1), z + 2), "repeater", dict(facing="west" if right ^ mirrored else "east", delay=2))
 			x2 = x * 2 if mirrored else x * 19 
 			yield from (
 				((x * (18 if mirrored else 3), y, z), "observer", dict(facing="east" if right ^ mirrored else "west")),
