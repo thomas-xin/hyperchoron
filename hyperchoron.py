@@ -237,16 +237,6 @@ def approximate_gcd(arr, min_value=8):
 
 	return (max_gcd, len(arr) - max_count) if max_gcd >= min_value else (gcd(*arr), len(arr))
 
-def binary_map():
-	yield 0
-	denominator = 2
-	while True:
-		for numerator in range(1, denominator, 2):
-			yield numerator / denominator
-		denominator *= 2
-it = binary_map()
-binary_fracs = [next(it) for i in range(64)]
-
 # Remapping of midi note range to note block note range
 c4 = 60
 fs4 = c4 + 6
@@ -597,19 +587,19 @@ def convert_midi(midi_events, speed_info, ctx=None):
 						needs_sustain = note.sustain and length > 200 / sa and (length > 400 / sa or long and (volume >= 120 / sa or note.sustain == 1 and length >= 300 / sa))
 						recur = inf
 						if needs_sustain:
-							if volume >= 110 / sa and volume == max_volume:
+							if volume > 100 / sa and volume == max_volume:
 								recur = 50
-							elif volume >= 80 / sa:
+							elif volume >= 60 / sa:
 								recur = 100
-							elif volume >= 40 / sa:
-								recur = 200
 							elif volume >= 20 / sa:
-								recur = 400
-							if note.sustain > 1 and recur < 200:
-								recur *= 2
+								recur = 200
 							if note.updated and recur > 50 and recur < 800:
 								h = (note.channel, recur)
-								offset = round(recur * binary_fracs[started.setdefault(h, 0)] / 50) * 50
+								n = started.setdefault(h, 0)
+								if recur == 200:
+									offset = bool(n & 1) * 100 + bool(n & 2) * 50
+								else:
+									offset = bool(n & 1) * 50
 								started[h] += 1
 								recur += offset
 						if note.updated or (timestamp >= note.timestamp and timestamp + recur < note.end):
