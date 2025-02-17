@@ -9,16 +9,17 @@
 ### Usage
 ```ini
 py hyperchoron.py -h
-usage:  [-h] -i INPUT [-o [OUTPUT ...]] [-t [TRANSPOSE]] [-s [SPEED]] [-sa [STRUM_AFFINITY]]
+usage:  [-h] [-i INPUT [INPUT ...]] [-o [OUTPUT ...]] [-t [TRANSPOSE]] [-s [SPEED]] [-sa [STRUM_AFFINITY]]
         [-d | --drums | --no-drums] [-c | --cheap | --no-cheap]
 
 MIDI to Minecraft Note Block Converter
 
 options:
   -h, --help            show this help message and exit
-  -i, --input INPUT     Input file (.mid | .zip)
+  -i, --input INPUT [INPUT ...]
+                        Input file (.mid | .zip)
   -o, --output [OUTPUT ...]
-                        Output file (.mcfunction | .litematic)
+                        Output file (.mcfunction | .litematic | .nbs)
   -t, --transpose [TRANSPOSE]
                         Transposes song up/down a certain amount of semitones; higher = higher pitched
   -s, --speed [SPEED]   Scales song speed up/down as a multiplier; higher = faster
@@ -34,10 +35,11 @@ options:
                         sand/snare drum instruments. Defaults to FALSE
 ```
 ### Additional info
-- The program takes one input and output file, and currently supports .mcfunction (a list of `/setblock` commands), and .litematic (used by the litematica mod) files.
-- At present, hyperchoron is only implemented to be run as an export script, and does not have interoperability as a library or with inbetween formats such as .nbs, such as [nbs-converter](https://github.com/jazziiRed/nbs-converter). This may change in the future.
+- The program takes one or more input and output files, and currently supports outputting to `.mcfunction` (a list of `/setblock` commands), `.litematic` (used by the litematica mod), or `.nbs` (Note Block Studio project).
+- Multiple MIDI inputs (or a single zip input containing multiple MIDI files) will be treated as a stacked MIDI project, and the exported notes will be combined into a single output stream.
 - Note that if exporting to `.mcfunction`, you will need to make some sort of template datapack to be able to load it in. It is recommended to perform the `/gamerule maxCommandChainLength 2147483647` command prior to pasting the note blocks to avoid longer songs being cut off.
 - If you are intending to build the output schematic in vanilla survival mode, the `-c` option will force the program to use cobblestone for most of the structure. This removes the excessive use of decorative blocks such as beacons, crying obsidian and froglights, as well as heavy core as an instrument. Note that the latter may cause alignment issues arbitrarily depending on the complexity of the song, as sand requires a supporting block, and there are no blocks (besides customised player heads) in vanilla that can perform this role without also possibly silencing a note block that happens to be directly below.
+- If you are exporting to `.nbs`, the output will be intercepted immediately before the schematic formatting stage, and the raw note blocks will be written. The file will be playable in Note Block Studio, however please note that its export feature does not support exporting 20Hz songs, meaning you will not be able to use it in vanilla Minecraft. Support for importing `.nbs` files into Hyperchoron is currently in progress.
 
 # What is the purpose of another exporter like this?
 - Converting music to minecraft note blocks programmatically has been a thing for a long time, the most popular program being Note Block Studio. This program is not intended to entirely replace them, and is meant to be a standalone feature.

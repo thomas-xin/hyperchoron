@@ -1,3 +1,4 @@
 litemapy>=0.10.0b0
 py_midicsv>=4.1.2
+pynbs>=1.1.0
 tqdm>=4.67.1

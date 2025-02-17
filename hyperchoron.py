@@ -2,7 +2,7 @@ from collections import deque
 import csv
 import functools
 import itertools
-from math import ceil, inf, isqrt, sqrt, log2, gcd
+from math import ceil, inf, isqrt, log2, gcd
 import os
 from types import SimpleNamespace
 if os.name == "nt" and os.path.exists("Midicsv.exe"):
@@ -58,6 +58,26 @@ instrument_names = dict(
 	creeper_head="creeper",
 	piglin_head="piglin",
 )
+nbs_names = {k: i for i, k in enumerate([
+	"harp",
+	"bass",
+	"basedrum",
+	"snare",
+	"hat",
+	"guitar",
+	"flute",
+	"bell",
+	"chime",
+	"xylophone",
+	"iron_xylophone",
+	"cow_bell",
+	"didgeridoo",
+	"bit",
+	"banjo",
+	"pling",
+])}
+for unsupported in ("skeleton", "wither_skeleton", "zombie", "creeper", "piglin"):
+	nbs_names[unsupported] = nbs_names["snare"]
 sustain_map = [
 	0,
 	0,
@@ -412,7 +432,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 	print("Speed scale:", speed, real_ms_per_clock)
 	return real_ms_per_clock, speed, step_ms, orig_tempo
 
-def convert_midi(midi_events, tps=20, ctx=None):
+def convert_midi(midi_events, speed_info, ctx=None):
 	title = None
 	is_org = False
 	for event in midi_events[:20]:
@@ -459,7 +479,7 @@ def convert_midi(midi_events, tps=20, ctx=None):
 	active_notes[-1] = []
 	print("Instrument mapping:", instrument_map)
 	midi_events.sort(key=lambda x: (int(x[1]), x[2].strip().casefold() not in ("tempo", "header"))) # Sort events by timestamp
-	real_ms_per_clock, scale, orig_step_ms, orig_tempo = get_step_speed(midi_events, tps=tps, ctx=ctx)
+	real_ms_per_clock, scale, orig_step_ms, orig_tempo = speed_info
 	step_ms = orig_step_ms
 	midi_events = deque(midi_events)
 	timestamp = 0
@@ -533,10 +553,10 @@ def convert_midi(midi_events, tps=20, ctx=None):
 									candidate = note
 						if candidate:
 							candidate.end += 50
-				elif mode == "control_c" and event[4] == "6":
+				elif mode == "control_c" and event[4].strip() == "6":
 					channel = int(event[3])
 					pitchbend_ranges[channel] = int(event[5])
-				elif mode == "control_c" and event[4] == "7":
+				elif mode == "control_c" and event[4].strip() == "7":
 					channel = int(event[3])
 					value = int(event[5])
 					volume = value / 127
@@ -608,15 +628,14 @@ def convert_midi(midi_events, tps=20, ctx=None):
 						else:
 							note.updated = False
 					notes.reverse()
-				if beat or played_notes:
-					played_notes.append(beat)
+				played_notes.append(beat)
 				timestamp += curr_step
 				if bar:
 					bar.update(curr_step / 1000)
 				loud *= 0.5
 	while not played_notes[-1]:
 		played_notes.pop(-1)
-	return played_notes, note_candidates, is_org
+	return played_notes, note_candidates, is_org, speed_info
 
 MAIN = 4
 SIDE = 2
@@ -1095,34 +1114,58 @@ def render_minecraft(notes, ctx):
 
 def convert_file(args):
 	ctx = args
+	inputs = ctx.input
 	if not ctx.output:
-		path, name = ctx.input.replace("\\", "/").rsplit("/", 1)
+		path, name = inputs[0].replace("\\", "/").rsplit("/", 1)
 		ctx.output = [path + "/" + name.rsplit(".", 1)[0] + ".litematic"]
-	if ctx.input.endswith(".zip"):
+	if inputs[0].endswith(".zip"):
 		import zipfile
-		z = zipfile.ZipFile(ctx.input)
-		ctx.input = z.open(z.filelist[0])
-	print("Converting midi...")
-	if py_midicsv:
-		csv_list = py_midicsv.midi_to_csv(ctx.input)
-	else:
-		import subprocess
-		if isinstance(ctx.input, str):
-			csv_list = subprocess.check_output(["Midicsv.exe", ctx.input, "-"]).decode("utf-8", "replace").splitlines()
+		z = zipfile.ZipFile(inputs.pop(0))
+		inputs.extend(z.open(f) for f in z.filelist)
+	event_list = []
+	note_candidates = 0
+	for midi in inputs:
+		print("Converting midi...")
+		if py_midicsv:
+			csv_list = py_midicsv.midi_to_csv(midi)
 		else:
-			p = subprocess.Popen(["Midicsv.exe", "-", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-			b = ctx.input.read()
-			csv_list = p.communicate(b)[0].decode("utf-8", "replace").splitlines()
-	midi_events = list(csv.reader(csv_list))
-	notes, note_candidates, is_org = convert_midi(midi_events, ctx=ctx)
+			import subprocess
+			if isinstance(midi, str):
+				csv_list = subprocess.check_output(["Midicsv.exe", midi, "-"]).decode("utf-8", "replace").splitlines()
+			else:
+				p = subprocess.Popen(["Midicsv.exe", "-", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+				b = midi.read()
+				csv_list = p.communicate(b)[0].decode("utf-8", "replace").splitlines()
+		midi_events = list(csv.reader(csv_list))
+		event_list.append(midi_events)
+	interm = []
+	speed_info = get_step_speed(list(itertools.chain.from_iterable(event_list)), tps=20, ctx=ctx)
+	for midi_events in event_list:
+		notes, nc, is_org, speed_info = convert_midi(midi_events, speed_info, ctx=ctx)
+		note_candidates += nc
+		if len(inputs) == 1:
+			interm = notes
+			break
+		for i, beat in enumerate(notes):
+			if len(interm) <= i:
+				interm.append(beat)
+			else:
+				interm[i].extend(beat)
 	if is_org:
 		ctx.transpose += 12
+	if not interm[0]:
+		interm = deque(interm)
+		while interm and not interm[0]:
+			interm.popleft()
+		interm = list(interm)
+	poly = max(map(len, interm), default=0)
 	print("Note candidates:", note_candidates)
-	print("Note count:", sum(map(len, notes)))
-	print("Max detected polyphony (will be reduced to <=14):", max(map(len, notes)))
-	print("Lowest note:", min(min(n[1] for n in b) for b in notes if b))
-	print("Highest note:", max(max(n[1] for n in b) for b in notes if b))
-	bars = ceil(len(notes) / BAR / DIV)
+	print("Note count:", sum(map(len, interm)))
+	print("Max detected polyphony (will be reduced to <=14):", poly)
+	print("Lowest note:", min(min(n[1] for n in b) for b in interm if b))
+	print("Highest note:", max(max(n[1] for n in b) for b in interm if b))
+
+	bars = ceil(len(interm) / BAR / DIV)
 	depth = bars * 8 + 8
 	nc = 0
 	block_replacements = {}
@@ -1172,9 +1215,31 @@ def convert_file(args):
 		block_replacements.update(dict(
 			hopper="beacon",
 		))
-	blocks = list(render_minecraft(notes, ctx=ctx))
+	blocks = None
 	for output in ctx.output:
-		if output.endswith(".mcfunction"):
+		if output.endswith(".nbs"):
+			import pynbs
+			nbs = pynbs.new_file(
+				song_name=output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0],
+				tempo=20,
+			)
+			for i, beat in enumerate(interm):
+				for j, note in enumerate(beat):
+					base, pitch = get_note_mat(note, transpose=ctx.transpose)
+					instrument = instrument_names[base]
+					nbi = nbs_names[instrument]
+					rendered = pynbs.Note(
+						tick=i,
+						layer=j,
+						key=pitch + 33,
+						instrument=nbi,
+					)
+					nbs.notes.append(rendered)
+					nc += 1
+			nbs.save(output)
+		elif output.endswith(".mcfunction"):
+			if blocks is None:
+				blocks = list(render_minecraft(interm, ctx=ctx))
 			with open(output, "w") as f:
 				for (x, y, z), block, *kwargs in blocks:
 					if block in block_replacements:
@@ -1190,6 +1255,8 @@ def convert_file(args):
 						extra = ""
 					f.write(f"setblock ~{x} ~{y} ~{z} {block}{extra}\n")
 		else:
+			if blocks is None:
+				blocks = list(render_minecraft(interm, ctx=ctx))
 			import litemapy
 			air = litemapy.BlockState("minecraft:air")
 			mx, my, mz = 20, 13, 2
@@ -1222,8 +1289,8 @@ if __name__ == "__main__":
 		prog="",
 		description="MIDI to Minecraft Note Block Converter",
 	)
-	parser.add_argument("-i", "--input", required=True, help="Input file (.mid | .zip)")
-	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mcfunction | .litematic)")
+	parser.add_argument("-i", "--input", nargs="+", help="Input file (.mid | .zip)")
+	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mcfunction | .litematic | .nbs)")
 	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones; higher = higher pitched")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier; higher = faster")
 	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes")
