@@ -312,7 +312,7 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, ctx=None):
 		return (
 			(coords[0], "mangrove_roots"),
 		)
-	if base.endswith("_head"):
+	if base.endswith("_head") or base.endswith("_skull"):
 		return (
 			(coords[0], "magma_block"),
 			(coords[1], "note_block", dict(note=pitch, instrument=instrument_names[base])),
