@@ -619,10 +619,17 @@ def convert_midi(midi_events, speed_info, ctx=None):
 								pitch = 84 - ctx.transpose + fs1
 							elif normalised < -12:
 								pitch = -12 - ctx.transpose + fs1
-							block = (instrument, pitch, note.updated, long, volume)
-							if block not in beat:
+							used = False
+							for j, b2 in enumerate(beat):
+								if b2[1] != pitch or b2[0] != instrument:
+									continue
+								beat[j] = (instrument, pitch, note.updated or b2[2], long or b2[3], min(volume + b2[4], 127))
+								used = True
+								break
+							if not used:
+								block = (instrument, pitch, note.updated, long, volume)
 								beat.append(block)
-								note.timestamp = timestamp + recur
+							note.timestamp = timestamp + recur
 						if timestamp + step_ms * 2 >= note.end:
 							notes.pop(i)
 						else:
@@ -1153,11 +1160,16 @@ def convert_file(args):
 				interm[i].extend(beat)
 	if is_org:
 		ctx.transpose += 12
-	if not interm[0] and not interm[1]:
+	if interm and not interm[0]:
 		interm = deque(interm)
-		while interm and not interm[0] and not interm[1]:
+		while interm and not interm[0]:
 			interm.popleft()
 		interm = list(interm)
+	maxima = [(sum(map(len, interm[i::4])), i) for i in range(4)]
+	strongest_beat = max(maxima)[1]
+	if strongest_beat != 0:
+		buffer = [[]] * (4 - strongest_beat)
+		interm = buffer + interm
 	poly = max(map(len, interm), default=0)
 	print("Note candidates:", note_candidates)
 	print("Note count:", sum(map(len, interm)))
@@ -1236,6 +1248,7 @@ def convert_file(args):
 						layer=j,
 						key=pitch + 33,
 						instrument=nbi,
+						velocity=round(note[4] / 127 * 100),
 					)
 					nbs.notes.append(rendered)
 					j += 1
