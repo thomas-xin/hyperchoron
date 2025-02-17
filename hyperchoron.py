@@ -349,7 +349,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 	milliseconds_per_clock = 0
 	timestamps = {}
 	time_diffs = {}
-	started = False
+	nc = 0
 	for event in midi_events:
 		mode = event[2].strip().casefold()
 		timestamp = int(event[1])
@@ -357,7 +357,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 			if int(event[5]) == 1:
 				continue
 			targets = [timestamp]
-			started = True
+			nc += 1
 			channel = int(event[3])
 			for last_timestamp in time_diffs.get(channel, (0,)):
 				target = timestamp - last_timestamp
@@ -376,7 +376,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 				timestamps[target] += 1
 			except KeyError:
 				timestamps[target] = 1
-		if started:
+		if nc > 1:
 			continue
 		if mode == "header":
 			# Header tempo directly specifies clock pulses per quarter note
@@ -405,8 +405,8 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 		print("Rejecting first estimate:", speed, min_value, exclusions)
 		if exclusions >= len(timestamp_collection) * 3 / 4:
 			print("Discarding tempo...", exclusions, len(timestamps))
-			speed = 1
-			use_exact = True
+			speed = round(min_value)
+			# use_exact = True
 		elif speed > min_value * 1.25:
 			print("Finding closest speed...", exclusions, len(timestamps))
 			div = round(speed / min_value - 0.25)
@@ -1153,9 +1153,9 @@ def convert_file(args):
 				interm[i].extend(beat)
 	if is_org:
 		ctx.transpose += 12
-	if not interm[0]:
+	if not interm[0] and not interm[1]:
 		interm = deque(interm)
-		while interm and not interm[0]:
+		while interm and not interm[0] and not interm[1]:
 			interm.popleft()
 		interm = list(interm)
 	poly = max(map(len, interm), default=0)
@@ -1224,8 +1224,11 @@ def convert_file(args):
 				tempo=20,
 			)
 			for i, beat in enumerate(interm):
-				for j, note in enumerate(beat):
+				j = 0
+				for note in beat:
 					base, pitch = get_note_mat(note, transpose=ctx.transpose)
+					if base == "PLACEHOLDER":
+						continue
 					instrument = instrument_names[base]
 					nbi = nbs_names[instrument]
 					rendered = pynbs.Note(
@@ -1235,11 +1238,12 @@ def convert_file(args):
 						instrument=nbi,
 					)
 					nbs.notes.append(rendered)
-					nc += 1
+					j += 1
+				nc += j
 			nbs.save(output)
 		elif output.endswith(".mcfunction"):
 			if blocks is None:
-				blocks = list(render_minecraft(interm, ctx=ctx))
+				blocks = list(render_minecraft(list(interm), ctx=ctx))
 			with open(output, "w") as f:
 				for (x, y, z), block, *kwargs in blocks:
 					if block in block_replacements:
@@ -1256,7 +1260,7 @@ def convert_file(args):
 					f.write(f"setblock ~{x} ~{y} ~{z} {block}{extra}\n")
 		else:
 			if blocks is None:
-				blocks = list(render_minecraft(interm, ctx=ctx))
+				blocks = list(render_minecraft(list(interm), ctx=ctx))
 			import litemapy
 			air = litemapy.BlockState("minecraft:air")
 			mx, my, mz = 20, 13, 2

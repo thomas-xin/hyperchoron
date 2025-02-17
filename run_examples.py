@@ -15,7 +15,7 @@ def wait_procs():
 			if procs[i].poll() is not None:
 				procs.pop(i)
 
-OUTPUT_FORMATS = ("litematic",)
+OUTPUT_FORMATS = ("litematic", "mcfunction", "nbs")
 for fmt in OUTPUT_FORMATS:
 	if not os.path.exists(f"examples/{fmt}"):
 		os.mkdir(f"examples/{fmt}")
