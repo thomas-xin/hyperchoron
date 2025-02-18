@@ -450,11 +450,6 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 					speed *= 0.75
 			else:
 				speed /= div
-	sm = ctx.speed
-	if sm != 1:
-		print("Speed manually scaled up by", sm)
-		speed *= sm
-		use_exact = True
 	if use_exact:
 		real_ms_per_clock = milliseconds_per_clock
 	else:
@@ -656,7 +651,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 									continue
 								vol = isqrt(ceil(volume ** 2 + b2[4] ** 2))
 								if vol > 127:
-									block = (instrument, pitch, note.updated or b2[2], long or b2[3], 127)
+									block = (instrument, pitch, False, long or b2[3], 127)
 									beat.append(block)
 									vol -= 127
 								beat[j] = (instrument, pitch, note.updated or b2[2], long or b2[3], min(vol, 127))
@@ -1381,7 +1376,7 @@ def convert_file(args):
 		midi_events = list(csv.reader(csv_list))
 		event_list.append(midi_events)
 	if event_list:
-		speed_info = get_step_speed(list(itertools.chain.from_iterable(event_list)), tps=20, ctx=ctx)
+		speed_info = get_step_speed(list(itertools.chain.from_iterable(event_list)), tps=20 / ctx.speed, ctx=ctx)
 		for midi_events in event_list:
 			notes, nc, is_org, speed_info = convert_midi(midi_events, speed_info, ctx=ctx)
 			note_candidates += nc
