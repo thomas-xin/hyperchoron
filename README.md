@@ -21,18 +21,19 @@ options:
   -o, --output [OUTPUT ...]
                         Output file (.mcfunction | .litematic | .nbs)
   -t, --transpose [TRANSPOSE]
-                        Transposes song up/down a certain amount of semitones; higher = higher pitched
-  -s, --speed [SPEED]   Scales song speed up/down as a multiplier; higher = faster
+                        Transposes song up/down a certain amount of semitones, applied before instrument material mapping;
+                        higher = higher pitched
+  -s, --speed [SPEED]   Scales song speed up/down as a multiplier, overrides sync algorithm; higher = faster
   -sa, --strum-affinity [STRUM_AFFINITY]
-                        Increases or decreases threshold for sustained notes to be cut into discrete segments; higher
-                        = more notes
+                        Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more
+                        notes
   -d, --drums, --no-drums
-                        Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as
-                        a regular instrument channel. Defaults to TRUE
+                        Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as a
+                        regular instrument channel. Defaults to TRUE
   -c, --cheap, --no-cheap
-                        Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables
-                        compatibility with previous versions of minecraft. May cause spacing issues with the
-                        sand/snare drum instruments. Defaults to FALSE
+                        Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility
+                        with previous versions of minecraft. May cause spacing issues with the sand/snare drum instruments.
+                        Defaults to FALSE
 ```
 ### Additional info
 - The program takes one or more input and output files, and currently supports outputting to `.mcfunction` (a list of `/setblock` commands), `.litematic` (used by the litematica mod), or `.nbs` (Note Block Studio project).
