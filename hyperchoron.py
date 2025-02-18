@@ -21,16 +21,37 @@ else:
 
 # Predefined list attempting to match instruments across pitch ranges
 material_map = [
-	["bamboo_planks", "black_wool", "black_wool+", "amethyst_block+", "gold_block", "gold_block+"], # Plucked
-	["bamboo_planks", "bamboo_planks+", "glowstone", "glowstone+", "gold_block", "gold_block+"], # Keyboards
-	["pumpkin", "pumpkin+", "amethyst_block", "clay", "clay+", "packed_ice+"], # Wind
-	["pumpkin", "pumpkin+", "emerald_block", "emerald_block+", "gold_block", "gold_block+"], # Synth
-	["bamboo_planks", "bamboo_planks+", "iron_block", "iron_block+", "gold_block", "gold_block+"], # Pitched Percussion
-	["bamboo_planks", "black_wool", "amethyst_block", "amethyst_block+", "packed_ice", "packed_ice+"], # Bell
-	["cobblestone", "cobblestone+", "red_stained_glass", "red_stained_glass+", "heavy_core", "heavy_core+"], # Unpitched Percussion
-	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "bone_block", "bone_block+"], # String
-	None # Drumset
+	["bamboo_planks", "black_wool", "black_wool+", "amethyst_block+", "gold_block", "gold_block+"],
+	["bamboo_planks", "bamboo_planks+", "glowstone", "glowstone+", "gold_block", "gold_block+"],
+	["pumpkin", "pumpkin+", "amethyst_block", "clay", "clay+", "packed_ice+"],
+	["pumpkin", "pumpkin+", "emerald_block", "emerald_block+", "gold_block", "gold_block+"],
+	["bamboo_planks", "bamboo_planks+", "iron_block", "iron_block+", "gold_block", "gold_block+"],
+	["bamboo_planks", "black_wool", "amethyst_block", "amethyst_block+", "packed_ice", "packed_ice+"],
+	["cobblestone", "cobblestone+", "red_stained_glass", "red_stained_glass+", "heavy_core", "heavy_core+"],
+	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "bone_block", "bone_block+"],
+	None
 ]
+default_instruments = dict(
+	harp="Plucked",
+	pling="Keyboard",
+	flute="Wind",
+	bit="Synth",
+	iron_xylophone="Pitched Percussion",
+	chime="Bell",
+	basedrum="Unpitched Percussion",
+	banjo="String",
+	creeper="Drumset",
+)
+instrument_codelist = list(default_instruments.values())
+default_instruments.update(dict(
+	snare="Unpitched Percussion",
+	hat="Unpitched Percussion",
+	bell="Plucked",
+	cow_bell="Pitched Percussion",
+	didgeridoo="Wind",
+	guitar="Plucked",
+	bass="Plucked",
+))
 instrument_names = dict(
 	amethyst_block="harp",
 	bamboo_planks="bass",
@@ -76,8 +97,27 @@ nbs_names = {k: i for i, k in enumerate([
 	"banjo",
 	"pling",
 ])}
+nbs_values = {v: k for k, v in nbs_names.items()}
 for unsupported in ("skeleton", "wither_skeleton", "zombie", "creeper", "piglin"):
 	nbs_names[unsupported] = nbs_names["snare"]
+pitches = dict(
+	harp=24,
+	bass=0,
+	basedrum=0,
+	snare=48,
+	hat=24,
+	guitar=12,
+	flute=36,
+	bell=48,
+	chime=48,
+	xylophone=48,
+	iron_xylophone=24,
+	cow_bell=36,
+	didgeridoo=0,
+	bit=24,
+	banjo=24,
+	pling=24,
+)
 sustain_map = [
 	0,
 	0,
@@ -243,7 +283,7 @@ fs4 = c4 + 6
 fs1 = fs4 - 36
 
 @functools.lru_cache(maxsize=256)
-def get_note_mat(note, transpose):
+def get_note_mat(note, transpose, odd=False):
 	material = material_map[note[0]]
 	pitch = note[1]
 	if not material:
@@ -260,8 +300,8 @@ def get_note_mat(note, transpose):
 		normalised -= 12
 	assert 0 <= normalised <= 72, normalised
 	ins, mod = divmod(normalised, 12)
-	if ins > 5:
-		ins = 5
+	if mod == 0 and (ins > 5 or ins > 0 and not odd):
+		ins -= 1
 		mod += 12
 	mat = material[ins]
 	if note[3] == 2:
@@ -312,8 +352,8 @@ def get_note_mat(note, transpose):
 		mod += 12
 	return mat, mod
 
-def get_note_block(note, positioning=[0, 0, 0], replace=None, ctx=None):
-	base, pitch = get_note_mat(note, transpose=ctx.transpose if ctx else 0)
+def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=None):
+	base, pitch = get_note_mat(note, transpose=ctx.transpose if ctx else 0, odd=odd)
 	x, y, z = positioning
 	coords = [(x, y, z), (x, y + 1, z), (x, y + 2, z)]
 	if replace and base in replace:
@@ -393,7 +433,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 	print("Confidence:", 1 - exclusions / len(timestamp_collection))
 	if speed > min_value * 1.25 or exclusions > len(timestamp_collection) / 8:
 		print("Rejecting first estimate:", speed, min_value, exclusions)
-		if exclusions >= len(timestamp_collection) * 3 / 4:
+		if exclusions >= len(timestamp_collection) * 0.9:
 			print("Discarding tempo...", exclusions, len(timestamps))
 			speed = round(min_value)
 			# use_exact = True
@@ -527,11 +567,11 @@ def convert_midi(midi_events, speed_info, ctx=None):
 						active_notes[instrument].append(note)
 						loud = max(loud, velocity)
 				elif mode == "pitch_bend_c":
-					note_candidates += 1
 					channel = int(event[3])
 					value = int(event[4])
 					offset = round((value - 8192) / 8192 * pitchbend_ranges.get(channel, 2))
 					if offset != channel_stats.get(channel, {}).get("bend", 0):
+						note_candidates += 1
 						pitchbend_ranges.setdefault(channel, 2)
 						instrument = instrument_map[channel]
 						channel_stats.setdefault(channel, {})["bend"] = offset
@@ -552,7 +592,8 @@ def convert_midi(midi_events, speed_info, ctx=None):
 					volume = value / 127
 					orig_volume = channel_stats.setdefault(channel, {}).get("volume", 1)
 					if volume >= orig_volume * 1.1:
-						note_candidates += 1
+						if note_candidates:
+							note_candidates += 1
 						instrument = instrument_map[channel]
 						for note in active_notes[instrument]:
 							if note.channel == channel:
@@ -565,7 +606,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 				elif mode == "tempo":
 					tempo = int(event[3])
 					step_ms = orig_tempo / tempo * orig_step_ms
-					if not played_notes:
+					if not note_candidates:
 						timestamp = time
 			else:
 				beat = []
@@ -594,7 +635,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 							elif volume >= 20 / sa:
 								recur = 200
 							if note.updated and recur > 50 and recur < 800:
-								h = (note.channel, recur)
+								h = recur
 								n = started.setdefault(h, 0)
 								if recur == 200:
 									offset = bool(n & 1) * 100 + bool(n & 2) * 50
@@ -613,7 +654,12 @@ def convert_midi(midi_events, speed_info, ctx=None):
 							for j, b2 in enumerate(beat):
 								if b2[1] != pitch or b2[0] != instrument:
 									continue
-								beat[j] = (instrument, pitch, note.updated or b2[2], long or b2[3], min(volume + b2[4], 127))
+								vol = isqrt(ceil(volume ** 2 + b2[4] ** 2))
+								if vol > 127:
+									block = (instrument, pitch, note.updated or b2[2], long or b2[3], 127)
+									beat.append(block)
+									vol -= 127
+								beat[j] = (instrument, pitch, note.updated or b2[2], long or b2[3], min(vol, 127))
 								used = True
 								break
 							if not used:
@@ -674,7 +720,7 @@ def render_minecraft(notes, ctx):
 							note = list(note)
 							note[3] = 2
 							note = tuple(note)
-							mat, pitch = get_note_mat(note, transpose=ctx.transpose)
+							mat, pitch = get_note_mat(note, transpose=ctx.transpose, odd=pulse & 1)
 							if mat != "PLACEHOLDER":
 								found.append(k)
 								yield ((-x if taken else x, y + 2, z - 1), "note_block", dict(note=pitch, instrument="harp"))
@@ -685,10 +731,10 @@ def render_minecraft(notes, ctx):
 						if found:
 							ordered = [note for k, note in enumerate(reversed(ordered)) if k not in found][::-1]
 					ordered, remainder = ordered[:MAIN * 2], ordered[MAIN * 2:]
-					required_padding = sum(get_note_mat(note, transpose=ctx.transpose)[0] in transparent for note in ordered) * 2 - len(ordered)
+					required_padding = sum(get_note_mat(note, transpose=ctx.transpose, odd=pulse & 1)[0] in transparent for note in ordered) * 2 - len(ordered)
 					for p in range(required_padding):
 						ordered.append(padding)
-					ordered.sort(key=lambda note: get_note_mat(note, transpose=ctx.transpose)[0] in transparent)
+					ordered.sort(key=lambda note: get_note_mat(note, transpose=ctx.transpose, odd=pulse & 1)[0] in transparent)
 					while ordered and ordered[-1] == padding:
 						ordered.pop(-1)
 					if ordered:
@@ -702,7 +748,7 @@ def render_minecraft(notes, ctx):
 					if len(ordered) & 1:
 						note = ordered[-1]
 						ordered = list(itertools.chain.from_iterable(zip(ordered[:len(ordered) // 2], ordered[len(ordered) // 2:-1])))
-						if get_note_mat(note, transpose=ctx.transpose)[0] in transparent:
+						if get_note_mat(note, transpose=ctx.transpose, odd=pulse & 1)[0] in transparent:
 							ordered.append(padding)
 						ordered.append(note)
 					else:
@@ -739,6 +785,7 @@ def render_minecraft(notes, ctx):
 							note,
 							positioning,
 							replace,
+							odd=pulse & 1,
 							ctx=ctx,
 						)
 					ordered = ordered[MAIN * 2:] + remainder
@@ -766,6 +813,7 @@ def render_minecraft(notes, ctx):
 						yield from get_note_block(
 							note,
 							[x, y + v, z - w],
+							odd=pulse & 1,
 							ctx=ctx,
 						)
 
@@ -1109,65 +1157,9 @@ def render_minecraft(notes, ctx):
 			((x * 19, 0, 0), "activator_rail", dict(shape="east_west")),
 		)
 
-def convert_file(args):
-	ctx = args
-	inputs = ctx.input
-	if not ctx.output:
-		path, name = inputs[0].replace("\\", "/").rsplit("/", 1)
-		ctx.output = [path + "/" + name.rsplit(".", 1)[0] + ".litematic"]
-	if inputs[0].endswith(".zip"):
-		import zipfile
-		z = zipfile.ZipFile(inputs.pop(0))
-		inputs.extend(z.open(f) for f in z.filelist)
-	event_list = []
-	note_candidates = 0
-	for midi in inputs:
-		print("Converting midi...")
-		if py_midicsv:
-			csv_list = py_midicsv.midi_to_csv(midi)
-		else:
-			import subprocess
-			if isinstance(midi, str):
-				csv_list = subprocess.check_output(["Midicsv.exe", midi, "-"]).decode("utf-8", "replace").splitlines()
-			else:
-				p = subprocess.Popen(["Midicsv.exe", "-", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-				b = midi.read()
-				csv_list = p.communicate(b)[0].decode("utf-8", "replace").splitlines()
-		midi_events = list(csv.reader(csv_list))
-		event_list.append(midi_events)
-	interm = []
-	speed_info = get_step_speed(list(itertools.chain.from_iterable(event_list)), tps=20, ctx=ctx)
-	for midi_events in event_list:
-		notes, nc, is_org, speed_info = convert_midi(midi_events, speed_info, ctx=ctx)
-		note_candidates += nc
-		if len(inputs) == 1:
-			interm = notes
-			break
-		for i, beat in enumerate(notes):
-			if len(interm) <= i:
-				interm.append(beat)
-			else:
-				interm[i].extend(beat)
-	if is_org:
-		ctx.transpose += 12
-	if interm and not interm[0]:
-		interm = deque(interm)
-		while interm and not interm[0]:
-			interm.popleft()
-		interm = list(interm)
-	maxima = [(sum(map(len, interm[i::4])), i) for i in range(4)]
-	strongest_beat = max(maxima)[1]
-	if strongest_beat != 0:
-		buffer = [[]] * (4 - strongest_beat)
-		interm = buffer + interm
-	poly = max(map(len, interm), default=0)
-	print("Note candidates:", note_candidates)
-	print("Note count:", sum(map(len, interm)))
-	print("Max detected polyphony (will be reduced to <=14):", poly)
-	print("Lowest note:", min(min(n[1] for n in b) for b in interm if b))
-	print("Highest note:", max(max(n[1] for n in b) for b in interm if b))
-
-	bars = ceil(len(interm) / BAR / DIV)
+def export(transport, ctx=None):
+	print("Saving...")
+	bars = ceil(len(transport) / BAR / DIV)
 	depth = bars * 8 + 8
 	nc = 0
 	block_replacements = {}
@@ -1225,28 +1217,71 @@ def convert_file(args):
 				song_name=output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0],
 				tempo=20,
 			)
-			for i, beat in enumerate(interm):
-				j = 0
+			nbs.header.song_origin = ctx.input[0].replace("\\", "/").rsplit("/", 1)[-1]
+			nbs.header.song_author="Hyperchoron"
+			nbs.header.description="Exported MIDI"
+			layer_poly = {}
+			for i, beat in enumerate(transport):
+				current_poly = {}
+				beat.sort(key=lambda note_value: (note_value[2], note_value[1]), reverse=True)
 				for note in beat:
-					base, pitch = get_note_mat(note, transpose=ctx.transpose)
+					ins = note[0]
+					base, pitch = get_note_mat(note, transpose=ctx.transpose, odd=i & 1)
 					if base == "PLACEHOLDER":
 						continue
 					instrument = instrument_names[base]
 					nbi = nbs_names[instrument]
+					try:
+						current_poly[ins] += 1
+					except KeyError:
+						current_poly[ins] = 1
 					rendered = pynbs.Note(
 						tick=i,
-						layer=j,
+						layer=ins,
 						key=pitch + 33,
 						instrument=nbi,
 						velocity=round(note[4] / 127 * 100),
+						panning=0 if note[2] else 1 if i & 1 else -1,
 					)
 					nbs.notes.append(rendered)
-					j += 1
-				nc += j
+				for k, v in current_poly.items():
+					layer_poly[k] = max(v, layer_poly.get(k, 0))
+			layer_map = sorted(layer_poly.items(), key=lambda tup: (tup[0] not in (-1, 8), tup[0] != 6, tup[-1]), reverse=True)
+			layer_index = 0
+			layer_starts = {}
+			for ins, poly in layer_map:
+				layer_starts[ins] = layer_index
+				for i in range(poly):
+					idx = layer_index + i
+					name = instrument_codelist[ins]
+					if i:
+						name += f"_{i}"
+					layer = pynbs.Layer(
+						id=idx,
+						name=name,
+					)
+					try:
+						nbs.layers[idx] = layer
+					except IndexError:
+						nbs.layers.append(layer)
+				layer_index += poly
+			current_tick = 0
+			used_layers = {}
+			for note in nbs.notes:
+				t = note.tick
+				if t > current_tick:
+					current_tick = t
+					used_layers.clear()
+				ins = note.layer
+				layer = layer_starts[ins] + used_layers.setdefault(ins, 0)
+				used_layers[ins] += 1
+				note.layer = layer
+			nbs.notes.sort(key=lambda note: (note.tick, note.layer))
+			nc = len(nbs.notes)
 			nbs.save(output)
 		elif output.endswith(".mcfunction"):
 			if blocks is None:
-				blocks = list(render_minecraft(list(interm), ctx=ctx))
+				blocks = list(render_minecraft(list(transport), ctx=ctx))
 			with open(output, "w") as f:
 				for (x, y, z), block, *kwargs in blocks:
 					if block in block_replacements:
@@ -1263,7 +1298,7 @@ def convert_file(args):
 					f.write(f"setblock ~{x} ~{y} ~{z} {block}{extra}\n")
 		else:
 			if blocks is None:
-				blocks = list(render_minecraft(list(interm), ctx=ctx))
+				blocks = list(render_minecraft(list(transport), ctx=ctx))
 			import litemapy
 			air = litemapy.BlockState("minecraft:air")
 			mx, my, mz = 20, 13, 2
@@ -1289,6 +1324,96 @@ def convert_file(args):
 			schem.save(output)
 	print("Final note block count:", nc)
 
+def convert_file(args):
+	ctx = args
+	inputs = list(ctx.input)
+	if not ctx.output:
+		path, name = inputs[0].replace("\\", "/").rsplit("/", 1)
+		ctx.output = [path + "/" + name.rsplit(".", 1)[0] + ".litematic"]
+	if inputs[0].endswith(".zip"):
+		import zipfile
+		z = zipfile.ZipFile(inputs.pop(0))
+		inputs.extend(z.open(f) for f in z.filelist)
+	event_list = []
+	transport = []
+	note_candidates = 0
+	for file in inputs:
+		if isinstance(file, str) and file.endswith(".nbs"):
+			print("Converting NBS...")
+			import pynbs
+			nbs = pynbs.read(file)
+			for tick, chord in nbs:
+				while tick > len(transport):
+					transport.append([])
+				mapped_chord = []
+				for note in chord:
+					instrument_name = nbs.layers[note.layer].name.rsplit("_", 1)[0]
+					if instrument_name == "Drumset":
+						ins = 6
+						default = 6
+					else:
+						default = instrument_codelist.index(default_instruments[nbs_values[note.instrument]])
+						try:
+							ins = instrument_codelist.index(instrument_name)
+						except ValueError:
+							ins = default
+					block = (
+						ins,
+						note.key - 33 + fs1 + pitches[nbs_values[note.instrument]],
+						note.panning == 0,
+						ins != default,
+						round(note.velocity * 127 / 100),
+					)
+					mapped_chord.append(block)
+				transport.append(mapped_chord)
+			continue
+		print("Converting MIDI...")
+		if py_midicsv:
+			csv_list = py_midicsv.midi_to_csv(file)
+		else:
+			import subprocess
+			if isinstance(file, str):
+				csv_list = subprocess.check_output(["Midicsv.exe", file, "-"]).decode("utf-8", "replace").splitlines()
+			else:
+				p = subprocess.Popen(["Midicsv.exe", "-", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+				b = file.read()
+				csv_list = p.communicate(b)[0].decode("utf-8", "replace").splitlines()
+		midi_events = list(csv.reader(csv_list))
+		event_list.append(midi_events)
+	if event_list:
+		speed_info = get_step_speed(list(itertools.chain.from_iterable(event_list)), tps=20, ctx=ctx)
+		for midi_events in event_list:
+			notes, nc, is_org, speed_info = convert_midi(midi_events, speed_info, ctx=ctx)
+			note_candidates += nc
+			if len(inputs) == 1:
+				transport = notes
+				break
+			for i, beat in enumerate(notes):
+				if len(transport) <= i:
+					transport.append(beat)
+				else:
+					transport[i].extend(beat)
+		if is_org:
+			ctx.transpose += 12
+	else:
+		speed_info = (50, 1, 50, 60 * 120)
+	if transport and not transport[0]:
+		transport = deque(transport)
+		while transport and not transport[0]:
+			transport.popleft()
+		transport = list(transport)
+	maxima = [(sum(map(len, transport[i::4])), i) for i in range(4)]
+	strongest_beat = max(maxima)[1]
+	if strongest_beat != 0:
+		buffer = [[]] * (4 - strongest_beat)
+		transport = buffer + transport
+	print("Note candidates:", note_candidates)
+	print("Note count:", sum(map(len, transport)))
+	print("Max detected polyphony (will be reduced to <=14 in schematics):", max(map(len, transport), default=0))
+	print("Lowest note:", min(min(n[1] for n in b) for b in transport if b))
+	print("Highest note:", max(max(n[1] for n in b) for b in transport if b))
+	export(transport, ctx=ctx)
+
 
 if __name__ == "__main__":
 	import argparse
@@ -1298,8 +1423,8 @@ if __name__ == "__main__":
 	)
 	parser.add_argument("-i", "--input", nargs="+", help="Input file (.mid | .zip)")
 	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mcfunction | .litematic | .nbs)")
-	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones; higher = higher pitched")
-	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier; higher = faster")
+	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched")
+	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, overrides sync algorithm; higher = faster")
 	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as a regular instrument channel. Defaults to TRUE")
 	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
