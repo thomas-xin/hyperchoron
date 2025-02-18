@@ -1421,7 +1421,7 @@ if __name__ == "__main__":
 		prog="",
 		description="MIDI to Minecraft Note Block Converter",
 	)
-	parser.add_argument("-i", "--input", nargs="+", help="Input file (.mid | .zip)")
+	parser.add_argument("-i", "--input", nargs="+", help="Input file (.mid | .zip | .nbs)")
 	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mcfunction | .litematic | .nbs)")
 	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, overrides sync algorithm; higher = faster")
