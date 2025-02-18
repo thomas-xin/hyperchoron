@@ -606,8 +606,8 @@ def convert_midi(midi_events, speed_info, ctx=None):
 					if not note_candidates:
 						timestamp = time
 			else:
-				beat = []
 				started = {}
+				ticked = {}
 				max_volume = 0
 				for notes in active_notes.values():
 					for note in notes:
@@ -647,27 +647,30 @@ def convert_midi(midi_events, speed_info, ctx=None):
 								pitch = 84 - ctx.transpose + fs1
 							elif normalised < -12:
 								pitch = -12 - ctx.transpose + fs1
-							used = False
-							for j, b2 in enumerate(beat):
-								if b2[1] != pitch or b2[0] != instrument:
-									continue
-								vol = isqrt(ceil(volume ** 2 + b2[4] ** 2))
-								if vol > 127:
-									block = (instrument, pitch, False, long or b2[3], 127)
-									beat.append(block)
-									vol -= 127
-								beat[j] = (instrument, pitch, note.updated or b2[2], long or b2[3], min(vol, 127))
-								used = True
-								break
-							if not used:
-								block = (instrument, pitch, note.updated, long, volume)
-								beat.append(block)
+							bucket = (instrument, pitch)
+							try:
+								temp = ticked[bucket]
+							except KeyError:
+								temp = ticked[bucket] = [note.updated, long, volume]
+							else:
+								temp[0] |= note.updated
+								temp[1] |= long
+								temp[2] = isqrt(ceil(volume ** 2 + temp[2] ** 2))
 							note.timestamp = timestamp + recur
 						if timestamp + step_ms * 2 >= note.end:
 							notes.pop(i)
 						else:
 							note.updated = False
 					notes.reverse()
+				beat = []
+				for k, v in ticked.items():
+					instrument, pitch = k
+					updated, long, volume = v
+					count = max(1, volume // 127)
+					vel = max(1, min(127, round(volume / count)))
+					block = (instrument, pitch, updated, long, vel)
+					for w in range(count):
+						beat.append(block)
 				played_notes.append(beat)
 				timestamp += curr_step
 				if bar:
