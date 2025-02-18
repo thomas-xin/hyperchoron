@@ -17,7 +17,7 @@ MIDI to Minecraft Note Block Converter
 options:
   -h, --help            show this help message and exit
   -i, --input INPUT [INPUT ...]
-                        Input file (.mid | .zip)
+                        Input file (.mid | .zip | .nbs)
   -o, --output [OUTPUT ...]
                         Output file (.mcfunction | .litematic | .nbs)
   -t, --transpose [TRANSPOSE]
