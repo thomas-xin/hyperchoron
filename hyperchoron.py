@@ -719,11 +719,11 @@ def convert_midi(midi_events, speed_info, ctx=None):
 							try:
 								temp = ticked[bucket]
 							except KeyError:
-								temp = ticked[bucket] = [note.updated, long, volume]
+								temp = ticked[bucket] = [note.updated, long, volume ** 2]
 							else:
 								temp[0] |= note.updated
 								temp[1] |= long
-								temp[2] = isqrt(ceil(volume ** 2 + temp[2] ** 2))
+								temp[2] = temp[2] + volume ** 2
 							note.timestamp = timestamp + recur
 						if timestamp + step_ms * 2 >= note.end or len(notes) >= 64 and not needs_sustain:
 							notes.pop(i)
@@ -734,7 +734,8 @@ def convert_midi(midi_events, speed_info, ctx=None):
 				for k, v in ticked.items():
 					instrument, pitch = k
 					updated, long, volume = v
-					count = max(1, volume // 127)
+					volume = sqrt(volume)
+					count = max(1, int(volume // 127))
 					vel = max(1, min(127, round(volume / count)))
 					block = (instrument, pitch, updated, long, vel)
 					for w in range(count):
