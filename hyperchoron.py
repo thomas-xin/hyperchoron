@@ -742,6 +742,8 @@ def convert_midi(midi_events, speed_info, ctx=None):
 						beat.append(block)
 				played_notes.append(beat)
 				timestamp += curr_step
+				if timestamp.is_integer():
+					timestamp = int(timestamp)
 				if bar:
 					bar.update(curr_step / 1000)
 				loud *= 0.5
