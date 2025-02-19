@@ -2,9 +2,10 @@
 
 from collections import deque
 import csv
+import fractions
 import functools
 import itertools
-from math import ceil, inf, isqrt, log2, gcd
+from math import ceil, inf, isqrt, sqrt, log2, gcd
 import os
 from types import SimpleNamespace
 if os.name == "nt" and os.path.exists("Midicsv.exe"):
@@ -30,7 +31,7 @@ material_map = [
 	["bamboo_planks", "bamboo_planks+", "iron_block", "iron_block+", "gold_block", "gold_block+"],
 	["bamboo_planks", "black_wool", "amethyst_block", "amethyst_block+", "packed_ice", "packed_ice+"],
 	["cobblestone", "cobblestone+", "red_stained_glass", "red_stained_glass+", "heavy_core", "heavy_core+"],
-	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "bone_block", "bone_block+"],
+	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "soul_sand+", "bone_block+"],
 	None
 ]
 default_instruments = dict(
@@ -302,9 +303,20 @@ def get_note_mat(note, transpose, odd=False):
 		normalised -= 12
 	assert 0 <= normalised <= 72, normalised
 	ins, mod = divmod(normalised, 12)
-	if mod == 0 and (ins > 5 or ins > 0 and not odd):
-		ins -= 1
+	if mod == 0 and (ins > 5 or ins > 0 and odd):
 		mod += 12
+		ins -= 1
+	elif odd:
+		leeway = 1
+		if ins > 0 and mod <= leeway and not material[ins - 1].endswith("+"):
+			mod += 12
+			ins -= 1
+		elif ins < 5 and mod >= 24 - leeway and material[ins + 1].endswith("+"):
+			mod -= 12
+			ins += 1
+		elif ins < 5 and mod >= 12 - leeway and material[ins].endswith("+") and material[ins + 1].endswith("+"):
+			mod -= 12
+			ins += 1
 	mat = material[ins]
 	if note[3] == 2:
 		replace = dict(
@@ -312,9 +324,7 @@ def get_note_mat(note, transpose, odd=False):
 			emerald_block="amethyst_block",
 			amethyst_block="amethyst_block",
 			iron_block="amethyst_block",
-			soul_sand="amethyst_block+",
 			glowstone="amethyst_block",
-			clay="amethyst_block+"
 		)
 		replace.update({
 			"hay_block+": "amethyst_block+",
@@ -328,18 +338,15 @@ def get_note_mat(note, transpose, odd=False):
 			mat = replace[mat]
 		except KeyError:
 			return "PLACEHOLDER", 0
-	elif note[3]:
+	elif note[3] and (not odd or mod not in (0, 1, 11, 12, 23, 24)):
 		replace = dict(
 			bamboo_planks="pumpkin",
-			black_wool="pumpkin+",
 			bone_block="gold_block",
 			iron_block="amethyst_block",
-			soul_sand="glowstone+",
 			glowstone="amethyst_block",
 		)
 		replace.update({
 			"bamboo_planks+": "pumpkin+",
-			"black_wool+": "amethyst_block",
 			"gold_block+": "packed_ice+",
 			"bone_block+": "gold_block+",
 			"iron_block+": "amethyst_block+",
@@ -348,7 +355,27 @@ def get_note_mat(note, transpose, odd=False):
 		try:
 			mat = replace[mat]
 		except KeyError:
-			pass
+			match mat:
+				case "black_wool":
+					if mod <= 12:
+						mat = "pumpkin"
+						mod += 12
+					else:
+						mat = "amethyst_block"
+						mod -= 12
+				case "black_wool+":
+					if mod >= 0:
+						mat = "amethyst_block"
+				case "soul_sand":
+					if mod <= 12:
+						mat = "amethyst_block"
+						mod += 12
+					else:
+						mat = "gold_block"
+						mod -= 12
+				case "soul_sand+":
+					if mod >= 0:
+						mat = "gold_block"
 	if mat.endswith("+"):
 		mat = mat[:-1]
 		mod += 12
@@ -381,7 +408,8 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 	milliseconds_per_clock = 0
 	timestamps = {}
 	time_diffs = {}
-	nc = 0
+	tempos = {}
+	since_tempo = 0
 	for event in midi_events:
 		mode = event[2].strip().casefold()
 		timestamp = int(event[1])
@@ -389,7 +417,6 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 			if int(event[5]) == 1:
 				continue
 			targets = [timestamp]
-			nc += 1
 			channel = int(event[3])
 			for last_timestamp in time_diffs.get(channel, (0,)):
 				target = timestamp - last_timestamp
@@ -408,21 +435,29 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 				timestamps[target] += 1
 			except KeyError:
 				timestamps[target] = 1
-		if nc > 1:
-			continue
 		if mode == "header":
 			# Header tempo directly specifies clock pulses per quarter note
 			clocks_per_crotchet = int(event[5])
 		elif mode == "tempo":
 			# Tempo event specifies microseconds per quarter note
+			if orig_tempo:
+				tempos[orig_tempo] = tempos.get(orig_tempo, 0) + timestamp - since_tempo
+			since_tempo = timestamp
 			orig_tempo = int(event[3])
 			milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet
+	if tempos:
+		tempos[orig_tempo] = tempos.get(orig_tempo, 0) + int(midi_events[-1][1]) - since_tempo
+		tempo_list = list(tempos.items())
+		tempo_list.sort(key=lambda t: t[1], reverse=True)
+		orig_tempo = tempo_list[0][0]
+		milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet
+		print("Multiple tempos detected! Auto-selecting most common from:", min(tempo_list), max(tempo_list))
 	if not clocks_per_crotchet:
 		clocks_per_crotchet = 4 # Default to 4/4 time signature
 	if not milliseconds_per_clock:
 		orig_tempo = orig_tempo or 60 * 120
 		milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet # Default to 120 BPM
-	step_ms = 1000 // tps
+	step_ms = round(1000 / tps)
 	rev = deque(sorted(timestamps, key=lambda k: timestamps[k]))
 	mode = timestamps[rev[-1]]
 	while len(timestamps) > 1024 or timestamps[rev[0]] < mode / 64:
@@ -432,13 +467,24 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 	print("Estimating true resolution...", len(timestamp_collection), clocks_per_crotchet, milliseconds_per_clock, step_ms, min_value)
 	speed, exclusions = approximate_gcd(timestamp_collection, min_value=min_value - 1)
 	use_exact = False
-	print("Confidence:", 1 - exclusions / len(timestamp_collection))
-	if speed > min_value * 1.25 or exclusions > len(timestamp_collection) / 8:
-		print("Rejecting first estimate:", speed, min_value, exclusions)
-		if exclusions >= len(timestamp_collection) * 0.9:
-			print("Discarding tempo...", exclusions, len(timestamps))
-			speed = round(min_value)
-			# use_exact = True
+	req = 1 / 8
+	print("Confidence:", 1 - exclusions / len(timestamp_collection), req)
+	if speed > min_value * 1.25 or exclusions > len(timestamp_collection) * req:
+		if exclusions >= len(timestamp_collection) * 0.75:
+			speed2 = milliseconds_per_clock / step_ms * clocks_per_crotchet
+			while speed2 > sqrt(2):
+				speed2 /= 2
+			print("Rejecting first estimate:", speed, speed2, min_value, exclusions)
+			step = 1 / speed2
+			inclusions = sum((res := x % step) < step / 12 or res > step - step / 12 or (res := x % (step * 4)) < (step * 4) / 12 or res > (step * 4) - (step * 4) / 12 for x in timestamp_collection)
+			req = (max(speed2, 1 / speed2) - 1) * sqrt(2)
+			print("Confidence:", inclusions / len(timestamp_collection), req)
+			if inclusions < len(timestamp_collection) * req:
+				print("Discarding tempo...")
+				speed = 1
+			else:
+				speed = speed2
+			use_exact = True
 		elif speed > min_value * 1.25:
 			print("Finding closest speed...", exclusions, len(timestamps))
 			div = round(speed / min_value - 0.25)
@@ -456,7 +502,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 		real_ms_per_clock = milliseconds_per_clock
 	else:
 		real_ms_per_clock = round(milliseconds_per_clock * min_value / step_ms) * step_ms
-	print("Speed scale:", speed, real_ms_per_clock)
+	print("Final speed scale:", speed, real_ms_per_clock)
 	return real_ms_per_clock, speed, step_ms, orig_tempo
 
 def convert_midi(midi_events, speed_info, ctx=None):
@@ -479,33 +525,34 @@ def convert_midi(midi_events, speed_info, ctx=None):
 	max_vel = 0
 	for event in midi_events:
 		mode = event[2].strip().casefold()
-		if mode == "program_c":
-			channel = int(event[3])
-			if channel == 9 and ctx.drums:
-				continue
-			value = int(event[4])
-			instrument_map[channel] = org_instrument_mapping[value] if is_org else instrument_mapping[value]
-		elif mode == "note_on_c":
-			channel = int(event[3])
-			velocity = int(event[5])
-			if channel not in instrument_map:
-				instrument_map[channel] = -1 if channel == 9 and ctx.drums else 0
-			last_timestamp = max(last_timestamp, int(event[1]))
-			volume = velocity * channel_stats.setdefault(channel, {}).get("volume", 1)
-			max_vel = max(max_vel, volume)
-		elif mode == "note_off_c":
-			last_timestamp = max(last_timestamp, int(event[1]))
-		elif mode == "control_c":
-			control = int(event[4])
-			if control == 7:
+		match mode:
+			case "program_c":
 				channel = int(event[3])
-				value = int(event[5])
-				volume = value / 127
-				channel_stats.setdefault(channel, {})["volume"] = volume
+				if channel == 9 and ctx.drums:
+					continue
+				value = int(event[4])
+				instrument_map[channel] = org_instrument_mapping[value] if is_org else instrument_mapping[value]
+			case "note_on_c":
+				channel = int(event[3])
+				velocity = int(event[5])
+				if channel not in instrument_map:
+					instrument_map[channel] = -1 if channel == 9 and ctx.drums else 0
+				last_timestamp = max(last_timestamp, int(event[1]))
+				volume = velocity * channel_stats.setdefault(channel, {}).get("volume", 1)
+				max_vel = max(max_vel, volume)
+			case "note_off_c":
+				last_timestamp = max(last_timestamp, int(event[1]))
+			case "control_c":
+				control = int(event[4])
+				if control == 7:
+					channel = int(event[3])
+					value = int(event[5])
+					volume = value / 127
+					channel_stats.setdefault(channel, {})["volume"] = volume
+	print("Instrument mapping:", instrument_map)
 	active_notes = {i: [] for i in range(len(material_map))}
 	active_notes[-1] = []
-	print("Instrument mapping:", instrument_map)
-	midi_events.sort(key=lambda x: (int(x[1]), x[2].strip().casefold() not in ("tempo", "header"))) # Sort events by timestamp
+	midi_events.sort(key=lambda x: (int(x[1]), x[2].strip().casefold() not in ("tempo", "header", "control_c"))) # Sort events by timestamp, keep headers first
 	real_ms_per_clock, scale, orig_step_ms, orig_tempo = speed_info
 	step_ms = orig_step_ms
 	midi_events = deque(midi_events)
@@ -527,84 +574,100 @@ def convert_midi(midi_events, speed_info, ctx=None):
 				# Process all events at the current timestamp
 				midi_events.popleft()
 				mode = event[2].strip().casefold()
-				if mode == "note_on_c":
-					channel = int(event[3])
-					instrument = instrument_map[channel]
-					pitch = int(event[4])
-					velocity = int(event[5])
-					if velocity == 0:
-						notec = len(active_notes[instrument])
-						for i in range(notec):
-							note = active_notes[instrument][notec - i - 1]
-							if note.pitch == pitch:
-								note.sustain = False
-					elif velocity < loud * 0.0625 and sum(map(len, active_notes.items())) >= 16:
-						note_candidates += 1
-					else:
-						note_candidates += 1
-						sustain = sustain_map[instrument]
-						end = inf
-						if sustain or len(active_notes[instrument]) <= 4 and pitchbend_ranges.get(channel):
-							off = None
-							for i, e in enumerate(midi_events):
-								m = e[2].strip().casefold()
-								if m == "note_off_c" or m == "note_on_c" and int(e[5]) <= 1:
-									c = int(e[3])
-									p = int(e[4])
-									if c == channel and p == pitch:
-										off = i
-										end = int(e[1]) * real_ms_per_clock / scale
-										break
-							if off is not None:
-								del midi_events[off]
-						if end == inf:
-							end = timestamp + step_ms
-							sustain = False
-						note = SimpleNamespace(pitch=pitch, velocity=velocity, start=timestamp, timestamp=timestamp, end=end, channel=channel, sustain=sustain, updated=True, volume=0)
-						active_notes[instrument].append(note)
-						loud = max(loud, velocity)
-				elif mode == "pitch_bend_c":
-					channel = int(event[3])
-					value = int(event[4])
-					offset = round((value - 8192) / 8192 * pitchbend_ranges.get(channel, 2))
-					if offset != channel_stats.get(channel, {}).get("bend", 0):
-						note_candidates += 1
-						pitchbend_ranges.setdefault(channel, 2)
+				match mode:
+					case "note_on_c":
+						channel = int(event[3])
 						instrument = instrument_map[channel]
-						channel_stats.setdefault(channel, {})["bend"] = offset
-						candidate = None
-						for note in active_notes[instrument]:
-							if note.channel == channel:
-								note.updated = True
-								if not candidate or note.start > candidate.start:
-									candidate = note
-						if candidate:
-							candidate.end += 50
-				elif mode == "control_c" and event[4].strip() == "6":
-					channel = int(event[3])
-					pitchbend_ranges[channel] = int(event[5])
-				elif mode == "control_c" and event[4].strip() == "7":
-					channel = int(event[3])
-					value = int(event[5])
-					volume = value / 127
-					orig_volume = channel_stats.setdefault(channel, {}).get("volume", 1)
-					if volume >= orig_volume * 1.1:
-						if note_candidates:
+						pitch = int(event[4])
+						velocity = int(event[5])
+						if velocity == 0:
+							notec = len(active_notes[instrument])
+							for i in range(notec):
+								note = active_notes[instrument][notec - i - 1]
+								if note.pitch == pitch:
+									note.sustain = False
+						elif velocity < loud * 0.0625 and sum(map(len, active_notes.items())) >= 16:
 							note_candidates += 1
-						instrument = instrument_map[channel]
-						for note in active_notes[instrument]:
-							if note.channel == channel:
-								note.updated = True
-					elif volume <= orig_volume * 0.5:
-						for note in active_notes[instrument]:
-							if note.channel == channel:
-								note.sustain = False
-					channel_stats[channel]["volume"] = volume
-				elif mode == "tempo":
-					tempo = int(event[3])
-					step_ms = orig_tempo / tempo * orig_step_ms
-					if not note_candidates:
-						timestamp = time
+						else:
+							note_candidates += 1
+							sustain = sustain_map[instrument] or (2 if is_org else 0)
+							end = inf
+							if sustain or len(active_notes[instrument]) <= 4 and pitchbend_ranges.get(channel):
+								off = None
+								for i, e in enumerate(midi_events):
+									m = e[2].strip().casefold()
+									if m == "note_off_c" or m == "note_on_c" and int(e[5]) <= 1:
+										c = int(e[3])
+										p = int(e[4])
+										if c == channel and p == pitch:
+											off = i
+											end = int(e[1]) * real_ms_per_clock / scale
+											break
+								if off is not None:
+									del midi_events[off]
+							if end == inf:
+								end = timestamp + step_ms
+								sustain = False
+							note = SimpleNamespace(pitch=pitch, velocity=velocity, start=timestamp, timestamp=timestamp, end=end, channel=channel, sustain=sustain, updated=True, volume=0)
+							active_notes[instrument].append(note)
+							loud = max(loud, velocity)
+					case "pitch_bend_c":
+						channel = int(event[3])
+						value = int(event[4])
+						offset = round((value - 8192) / 8192 * pitchbend_ranges.get(channel, 2))
+						if offset != channel_stats.get(channel, {}).get("bend", 0):
+							note_candidates += 1
+							pitchbend_ranges.setdefault(channel, 2)
+							instrument = instrument_map[channel]
+							channel_stats.setdefault(channel, {})["bend"] = offset
+							candidate = None
+							for note in active_notes[instrument]:
+								if note.channel == channel:
+									note.updated = True
+									if not candidate or note.start > candidate.start:
+										candidate = note
+							if candidate:
+								candidate.end += 50
+					case "control_c" if event[4].strip() == "6":
+						channel = int(event[3])
+						pitchbend_ranges[channel] = int(event[5])
+					case "control_c" if event[4].strip() == "7":
+						channel = int(event[3])
+						value = int(event[5])
+						volume = value / 127
+						orig_volume = channel_stats.setdefault(channel, {}).get("volume", 1)
+						if volume >= orig_volume * 1.1:
+							if note_candidates:
+								note_candidates += 1
+							instrument = instrument_map[channel]
+							for note in active_notes[instrument]:
+								if note.channel == channel:
+									note.updated = True
+						elif volume <= orig_volume * 0.5:
+							for note in active_notes[instrument]:
+								if note.channel == channel:
+									note.sustain = False
+						channel_stats[channel]["volume"] = volume
+					case "tempo":
+						tempo = int(event[3])
+						ratio = tempo / orig_tempo
+						if max(ratio, 1 / ratio) - 1 < 1 / 16:
+							# print(f"Detected small tempo change of ratio {ratio}, ignoring...")
+							ratio = 1
+						elif ratio > 1:
+							r2 = fractions.Fraction(ratio).limit_denominator(8)
+							if abs(r2 - ratio) < 1 / 64:
+								# print(f"Detected close tempo change of ratio {ratio}, auto-syncing to {r2}...")
+								ratio = r2
+						elif ratio < 1:
+							r2 = fractions.Fraction(1 / ratio).limit_denominator(8)
+							if abs(r2 - ratio) < 1 / 64:
+								# print(f"Detected close tempo change of ratio {ratio}, auto-syncing to {r2}...")
+								ratio = 1 / r2
+						new_step = orig_step_ms / ratio
+						step_ms = int(new_step) if new_step.is_integer() else new_step
+						if not note_candidates:
+							timestamp = round(time)
 			else:
 				started = {}
 				ticked = {}
@@ -625,22 +688,27 @@ def convert_midi(midi_events, speed_info, ctx=None):
 						needs_sustain = note.sustain and length > 200 / sa and (length > 400 / sa or long and (volume >= 120 / sa or note.sustain == 1 and length >= 300 / sa))
 						recur = inf
 						if needs_sustain:
-							if volume > 100 / sa and volume == max_volume:
+							if volume > 100 / sa and volume >= max_volume * 7 / 8:
 								recur = 50
-							elif volume >= 60 / sa:
+							elif volume >= 60 / sa and volume >= max_volume / 2:
 								recur = 100
-							elif volume >= 20 / sa:
+							elif volume >= 20 / sa and volume >= max_volume / 4:
 								recur = 200
-							if note.updated and recur > 50 and recur < 800:
+							else:
+								recur = 400
+							if recur < inf and length >= 200:
 								h = recur
 								n = started.setdefault(h, 0)
-								if recur == 200:
-									offset = bool(n & 1) * 100 + bool(n & 2) * 50
-								else:
-									offset = bool(n & 1) * 50
+								if note.updated:
+									if recur == 200:
+										offset = bool(n & 1) * 100 + bool(n & 2) * 50
+									elif recur == 100:
+										offset = bool(n & 1) * 50
+									else:
+										offset = 0
+									recur += offset
 								started[h] += 1
-								recur += offset
-						if note.updated or (timestamp >= note.timestamp and timestamp + recur < note.end):
+						if note.updated or (timestamp >= note.timestamp and (timestamp + recur < note.end or timestamp + recur <= note.end and volume == max_volume)):
 							pitch = channel_stats.get(note.channel, {}).get("bend", 0) + note.pitch
 							normalised = pitch + ctx.transpose - fs1
 							if normalised > 84:
@@ -657,7 +725,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 								temp[1] |= long
 								temp[2] = isqrt(ceil(volume ** 2 + temp[2] ** 2))
 							note.timestamp = timestamp + recur
-						if timestamp + step_ms * 2 >= note.end:
+						if timestamp + step_ms * 2 >= note.end or len(notes) >= 64 and not needs_sustain:
 							notes.pop(i)
 						else:
 							note.updated = False
@@ -755,32 +823,33 @@ def render_minecraft(notes, ctx):
 						ordered = list(itertools.chain.from_iterable(zip(ordered[:len(ordered) // 2], ordered[len(ordered) // 2:])))
 					for j, note in enumerate(ordered[:MAIN * 2]):
 						replace = {}
-						if j == 0:
-							positioning = [x, y, z + 2]
-							replace["glowstone"] = "amethyst_block"
-						elif j == 1:
-							positioning = [x, y - 1, z + 3]
-						elif j == 2:
-							positioning = [x, y + 2, z]
-							replace["glowstone"] = "amethyst_block"
-							replace["heavy_core"] = "black_concrete_powder"
-						elif j == 3:
-							positioning = [x, y + 1, z + 1]
-							replace["heavy_core"] = "black_concrete_powder"
-						elif j == 4:
-							positioning = [-x, y, z + 2]
-							replace["glowstone"] = "amethyst_block"
-						elif j == 5:
-							positioning = [-x, y - 1, z + 3]
-						elif j == 6:
-							positioning = [-x, y + 2, z]
-							replace["glowstone"] = "amethyst_block"
-							replace["heavy_core"] = "black_concrete_powder"
-						elif j == 7:
-							positioning = [-x, y + 1, z + 1]
-							replace["heavy_core"] = "black_concrete_powder"
-						else:
-							raise ValueError(j)
+						match j:
+							case 0:
+								positioning = [x, y, z + 2]
+								replace["glowstone"] = "amethyst_block"
+							case 1:
+								positioning = [x, y - 1, z + 3]
+							case 2:
+								positioning = [x, y + 2, z]
+								replace["glowstone"] = "amethyst_block"
+								replace["heavy_core"] = "black_concrete_powder"
+							case 3:
+								positioning = [x, y + 1, z + 1]
+								replace["heavy_core"] = "black_concrete_powder"
+							case 4:
+								positioning = [-x, y, z + 2]
+								replace["glowstone"] = "amethyst_block"
+							case 5:
+								positioning = [-x, y - 1, z + 3]
+							case 6:
+								positioning = [-x, y + 2, z]
+								replace["glowstone"] = "amethyst_block"
+								replace["heavy_core"] = "black_concrete_powder"
+							case 7:
+								positioning = [-x, y + 1, z + 1]
+								replace["heavy_core"] = "black_concrete_powder"
+							case _:
+								raise ValueError(j)
 						yield from get_note_block(
 							note,
 							positioning,
@@ -1379,9 +1448,13 @@ def convert_file(args):
 				b = file.read()
 				csv_list = p.communicate(b)[0].decode("utf-8", "replace").splitlines()
 		midi_events = list(csv.reader(csv_list))
+		if not isinstance(file, str):
+			file.close()
 		event_list.append(midi_events)
 	if event_list:
-		speed_info = get_step_speed(list(itertools.chain.from_iterable(event_list)), tps=20 / ctx.speed, ctx=ctx)
+		all_events = list(itertools.chain.from_iterable(event_list))
+		all_events.sort(key=lambda e: int(e[1]))
+		speed_info = get_step_speed(all_events, tps=20 / ctx.speed, ctx=ctx)
 		for midi_events in event_list:
 			notes, nc, is_org, speed_info = convert_midi(midi_events, speed_info, ctx=ctx)
 			note_candidates += nc
@@ -1424,7 +1497,7 @@ if __name__ == "__main__":
 	parser.add_argument("-i", "--input", nargs="+", help="Input file (.mid | .zip | .nbs)")
 	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mcfunction | .litematic | .nbs)")
 	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched")
-	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, overrides sync algorithm; higher = faster")
+	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster")
 	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as a regular instrument channel. Defaults to TRUE")
 	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
