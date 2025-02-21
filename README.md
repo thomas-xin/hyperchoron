@@ -10,7 +10,7 @@
 ```ini
 py hyperchoron.py -h
 usage:  [-h] [-i INPUT [INPUT ...]] [-o [OUTPUT ...]] [-t [TRANSPOSE]] [-s [SPEED]] [-sa [STRUM_AFFINITY]]
-        [-d | --drums | --no-drums] [-c | --cheap | --no-cheap]
+        [-d | --drums | --no-drums] [-c | --cheap | --no-cheap] [-x | --exclusive | --no-exclusive]
 
 MIDI to Minecraft Note Block Converter
 
@@ -19,11 +19,11 @@ options:
   -i, --input INPUT [INPUT ...]
                         Input file (.mid | .zip | .nbs)
   -o, --output [OUTPUT ...]
-                        Output file (.mcfunction | .litematic | .nbs)
+                        Output file (.mcfunction | .litematic | .nbs | .org)
   -t, --transpose [TRANSPOSE]
                         Transposes song up/down a certain amount of semitones, applied before instrument material mapping;
                         higher = higher pitched
-  -s, --speed [SPEED]   Scales song speed up/down as a multiplier, overrides sync algorithm; higher = faster
+  -s, --speed [SPEED]   Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster
   -sa, --strum-affinity [STRUM_AFFINITY]
                         Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more
                         notes
@@ -34,6 +34,9 @@ options:
                         Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility
                         with previous versions of minecraft. May cause spacing issues with the sand/snare drum instruments.
                         Defaults to FALSE
+  -x, --exclusive, --no-exclusive
+                        Disables speed re-matching and strum quantisation, increases pitch bucket limit. Defaults to FALSE if
+                        outputting to any Minecraft-related format, and included for compatibility with other export formats.
 ```
 ### Additional info
 - The program takes one or more input and output files, and currently supports outputting to `.mcfunction` (a list of `/setblock` commands), `.litematic` (used by the litematica mod), or `.nbs` (Note Block Studio project).
