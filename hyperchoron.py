@@ -529,9 +529,10 @@ def convert_midi(midi_events, speed_info, ctx=None):
 			break
 	try:
 		display = repr(title)
+		print("Title:", display)
 	except UnicodeEncodeError:
 		display = repr(title.encode("utf-8", "ignore"))
-	print("Title:", display)
+		print("Title:", display)
 	if title and title.startswith("Organya Symphony No. 1"):
 		print("Using Org mapping...")
 		is_org = True
@@ -825,7 +826,7 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 		))
 	note_count = sum(map(len, notes))
 	conservative = False
-	if note_count >= 4096 * 8 * 16:
+	if note_count > 4096 * 8 * 4:
 		print(f"High note count {note_count} detected, using conservative note sustains...")
 		conservative = True
 	active = {}
