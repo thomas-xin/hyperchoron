@@ -15,17 +15,20 @@ def wait_procs():
 			if procs[i].poll() is not None:
 				procs.pop(i)
 
-OUTPUT_FORMATS = ("litematic", "mcfunction", "nbs")
-for fmt in OUTPUT_FORMATS:
-	if not os.path.exists(f"examples/{fmt}"):
-		os.mkdir(f"examples/{fmt}")
-for fn in sorted(os.listdir("examples/midi"), key=lambda fn: (fn.endswith(".zip"), os.path.getsize(f"examples/midi/{fn}")), reverse=True):
-	names = [fn.rsplit(".", 1)[0] + "." + fmt for fmt in OUTPUT_FORMATS]
-	fi = f"examples/midi/{fn}"
-	fo = [f"examples/{fmt}/{n}" for fmt, n in zip(OUTPUT_FORMATS, names)]
-	if any(not os.path.exists(f) or not os.path.getsize(f) or os.path.getmtime(f) < os.path.getmtime(fi) for f in fo):
-		wait_procs()
-		procs.append(run_conversion(fi, *fo))
+OUTPUT_FORMATS = [("litematic", "mcfunction", "nbs")]
+if "-org" in sys.argv[1:]:
+	OUTPUT_FORMATS.append(("org",))
+for category in OUTPUT_FORMATS:
+	for fmt in category:
+		if not os.path.exists(f"examples/{fmt}"):
+			os.mkdir(f"examples/{fmt}")
+	for fn in sorted(os.listdir("examples/midi"), key=lambda fn: (fn.endswith(".zip"), os.path.getsize(f"examples/midi/{fn}")), reverse=True):
+		names = [fn.rsplit(".", 1)[0] + "." + fmt for fmt in category]
+		fi = f"examples/midi/{fn}"
+		fo = [f"examples/{fmt}/{n}" for fmt, n in zip(category, names)]
+		if any(not os.path.exists(f) or not os.path.getsize(f) or os.path.getmtime(f) < os.path.getmtime(fi) for f in fo):
+			wait_procs()
+			procs.append(run_conversion(fi, *fo))
 
 for proc in procs:
 	proc.wait()
