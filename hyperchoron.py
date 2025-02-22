@@ -1,6 +1,5 @@
 # Coco eats a gold block on the 18/2/2025. Nom nom nom nom. Output sound weird? Sorgy accident it was the block I eated. Rarararrarrrr 😋
 
-import bisect
 from collections import deque
 import csv
 import fractions
@@ -581,22 +580,48 @@ def convert_midi(midi_events, speed_info, ctx=None):
 	midi_events = sorted(map(tuple, midi_events), key=lambda x: (int(x[1]), x[2].strip().casefold() not in ("tempo", "header", "control_c"))) # Sort events by timestamp, keep headers first
 	_orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, orig_tempo = speed_info
 	step_ms = orig_step_ms
-	midi_events = deque(midi_events)
 	instrument_activities = {}
 	timestamp = 0
 	loud = 0
 	note_candidates = 0
 	print("Max volume:", max_vel)
 	print("Processing notes...")
-	note_ends = {}
+	note_lengths = {}
+	temp_active = {}
+	discard = set()
 	for i, e in enumerate(midi_events):
 		m = e[2].strip().casefold()
 		if m == "note_off_c" or m == "note_on_c" and int(e[5]) <= 1:
+			ti = int(e[0])
 			t = int(e[1])
 			c = int(e[3])
 			p = int(e[4])
-			h = (c, p)
-			note_ends.setdefault(h, []).append((t))
+			h = (ti, c, p)
+			try:
+				actives = temp_active[h]
+			except KeyError:
+				continue
+			t2 = actives.pop(0)
+			h2 = (t2, ti, c, p)
+			note_lengths[h2] = max(1, t - t2)
+			if not actives:
+				temp_active.pop(h)
+			discard.add(i)
+		elif m == "note_on_c":
+			ti = int(e[0])
+			t = int(e[1])
+			c = int(e[3])
+			p = int(e[4])
+			h = (ti, c, p)
+			try:
+				temp_active[h].append(t)
+			except KeyError:
+				temp_active[h] = [t]
+	for k, v in temp_active.items():
+		for t in v:
+			h2 = (t, *k)
+			note_lengths.setdefault(h2, 1)
+	midi_events = deque(e for i, e in enumerate(midi_events) if i not in discard)
 	progress = tqdm.tqdm(total=ceil(last_timestamp * real_ms_per_clock / scale / 1000), bar_format="{l_bar}{bar}| {n:.3g}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]") if tqdm else contextlib.nullcontext()
 	with progress as bar:
 		while midi_events:
@@ -617,11 +642,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 						pitch = int(event[4])
 						velocity = int(event[5])
 						if velocity == 0:
-							notec = len(active_notes[instrument])
-							for i in range(notec):
-								note = active_notes[instrument][notec - i - 1]
-								if note.pitch == pitch:
-									note.sustain = False
+							pass
 						elif velocity < loud * 0.0625 and sum(map(len, active_notes.items())) >= 16:
 							note_candidates += 1
 						else:
@@ -630,22 +651,20 @@ def convert_midi(midi_events, speed_info, ctx=None):
 								sustain = 0
 							else:
 								sustain = sustain_map[instrument] or (1 if is_org else 2 if ctx.exclusive else 0)
-							end = 0
+							length = 0
 							if sustain or pitchbend_ranges.get(channel):
-								valid_ends = note_ends[(channel, pitch)]
-								if valid_ends:
-									pos = bisect.bisect_right(valid_ends, event_timestamp)
-									end = valid_ends[min(pos, len(valid_ends) - 1)]
-									while end <= event_timestamp and pos < len(valid_ends) - 1:
-										pos += 1
-										end = valid_ends[pos]
-									end = end * real_ms_per_clock / scale
-							min_sustain = step_ms * 2 if sustain == 2 else step_ms
-							if end < timestamp + min_sustain:
-								end = timestamp + min_sustain
+								track = int(event[0])
+								h = (event_timestamp, track, channel, pitch)
+								try:
+									length = note_lengths[h] * real_ms_per_clock / scale
+								except KeyError:
+									length = 0
+							min_sustain = round(step_ms * 2 if sustain == 2 else step_ms)
+							if length < min_sustain:
+								length = min_sustain
 								if sustain == 1:
 									sustain = 0
-							note = SimpleNamespace(pitch=pitch, velocity=velocity, start=timestamp, timestamp=timestamp, end=end, channel=channel, sustain=sustain, updated=True, volume=0)
+							note = SimpleNamespace(pitch=pitch, velocity=velocity, start=timestamp, timestamp=timestamp, length=length, channel=channel, sustain=sustain, updated=True, volume=0)
 							active_notes[instrument].append(note)
 							loud = max(loud, velocity)
 					case "pitch_bend_c":
@@ -664,7 +683,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 									if not candidate or note.start > candidate.start:
 										candidate = note
 							if candidate:
-								candidate.end = max(candidate.end, timestamp + step_ms)
+								candidate.length = max(candidate.length, timestamp + round(step_ms) - candidate.start)
 					case "control_c" if event[4].strip() == "6":
 						channel = int(event[3])
 						pitchbend_ranges[channel] = int(event[5])
@@ -725,13 +744,14 @@ def convert_midi(midi_events, speed_info, ctx=None):
 					for i in range(len(notes) - 1, -1, -1):
 						note = notes[i]
 						volume = note.volume
-						length = note.end - note.start
+						length = note.length
+						end = note.start + note.length
 						sa = ctx.strum_affinity
-						sms = step_ms
+						sms = float(step_ms)
 						long = note.sustain and length > sms * 3 / sa and volume >= min(80, max_volume) / sa
 						needs_sustain = note.sustain and length > sms * 4 / sa and (length > sms * 8 / sa or long and (volume >= 120 / sa or note.sustain == 1 and length >= sms * 6 / sa))
 						recur = inf
-						if sa >= inf and needs_sustain:
+						if ctx.exclusive and needs_sustain:
 							recur = sms
 						elif needs_sustain:
 							if volume >= 100 / sa and volume >= max_volume * 7 / 8 / sa:
@@ -754,7 +774,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 										offset = 0
 									recur += offset
 								started[h] += 1
-						if note.updated or (timestamp >= note.timestamp and timestamp + recur <= note.end):
+						if note.updated or (timestamp >= note.timestamp and timestamp + recur <= end):
 							pitch = channel_stats.get(note.channel, {}).get("bend", 0) + note.pitch
 							normalised = pitch + ctx.transpose - fs1
 							if normalised > max_pitch:
@@ -772,7 +792,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 								temp[3] = temp[3] if temp[2] > volume ** 2 else channel_stats.get(note.channel, {}).get("pan", 0)
 								temp[2] = temp[2] + volume ** 2
 							note.timestamp = timestamp + recur
-						if timestamp >= note.end or len(notes) >= 64 and not needs_sustain:
+						if timestamp >= end or len(notes) >= 64 and not needs_sustain:
 							notes.pop(i)
 						else:
 							note.updated = False
@@ -850,7 +870,7 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 			ordered = list(beat)
 		for note in ordered:
 			itype, pitch, updated, _long, vel, pan = note
-			volume = min(254, round(vel * 2 / 8) * 8)
+			volume = min(254, round(vel * 2 / 64) * 64 if conservative else round(vel * 2 / 8) * 8)
 			panning = round(pan * 6 + 6)
 			ins = org_instrument_selection[itype]
 			if ins < 0:

@@ -7,7 +7,7 @@ def run_conversion(ctx, fi, *fo):
 	print(args)
 	return subprocess.Popen(args)
 def wait_procs(procs):
-	while len(procs) >= 8:
+	while len(procs) >= 12:
 		try:
 			procs[0].wait(timeout=2)
 		except subprocess.TimeoutExpired:
