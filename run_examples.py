@@ -2,10 +2,9 @@ import os
 import subprocess
 import sys
 
-procs = []
-def run_conversion(fi, *fo):
-	return subprocess.Popen([sys.executable, "hyperchoron.py", "-i", fi, "-o", *fo])
-def wait_procs():
+def run_conversion(ctx, fi, *fo):
+	return subprocess.Popen([sys.executable, "hyperchoron.py", "-i", fi, "-o", *fo, "-t", str(ctx.transpose), "-s", str(ctx.speed), "-sa", str(ctx.strum_affinity)])
+def wait_procs(procs):
 	while len(procs) >= 8:
 		try:
 			procs[0].wait(timeout=2)
@@ -15,20 +14,44 @@ def wait_procs():
 			if procs[i].poll() is not None:
 				procs.pop(i)
 
-OUTPUT_FORMATS = [("litematic", "mcfunction", "nbs")]
-if "-org" in sys.argv[1:]:
-	OUTPUT_FORMATS.append(("org",))
-for category in OUTPUT_FORMATS:
-	for fmt in category:
-		if not os.path.exists(f"examples/{fmt}"):
-			os.mkdir(f"examples/{fmt}")
-	for fn in sorted(os.listdir("examples/midi"), key=lambda fn: (fn.endswith(".zip"), os.path.getsize(f"examples/midi/{fn}")), reverse=True):
-		names = [fn.rsplit(".", 1)[0] + "." + fmt for fmt in category]
-		fi = f"examples/midi/{fn}"
-		fo = [f"examples/{fmt}/{n}" for fmt, n in zip(category, names)]
-		if any(not os.path.exists(f) or not os.path.getsize(f) or os.path.getmtime(f) < os.path.getmtime(fi) for f in fo):
-			wait_procs()
-			procs.append(run_conversion(fi, *fo))
+def convert_files(ctx):
+	procs = []
+	if not ctx.input:
+		ctx.input = "examples/midi"
+	if not ctx.output:
+		ctx.output = ["examples/litematic", "examples/mcfunction", "examples/nbs"]
+	for fold in ctx.output:
+		if not os.path.exists(fold):
+			os.mkdir(fold)
+	fmts = [fold.rsplit("/", 1)[-1] for fold in ctx.output]
+	min_timestamp = os.path.getmtime("hyperchoron.py")
+	for fn in sorted(os.listdir(ctx.input), key=lambda fn: (fn.endswith(".zip"), os.path.getsize(f"{ctx.input}/{fn}")), reverse=True):
+		if fn.rsplit(".", 1)[-1] not in ("mid", "midi", "nbs", "zip"):
+			print(f"WARNING: File {repr(fn)} has unrecognised extension, skipping...")
+			continue
+		names = [fn.rsplit(".", 1)[0] + "." + fmt for fmt in fmts]
+		fi = f"{ctx.input}/{fn}"
+		fo = [f"{fold}/{n}" for fmt, n in zip(ctx.output, names)]
+		if any(not os.path.exists(f) or not os.path.getsize(f) or os.path.getmtime(f) < max(min_timestamp, os.path.getmtime(fi)) for f in fo):
+			wait_procs(procs)
+			procs.append(run_conversion(ctx, fi, *fo))
+	for proc in procs:
+		proc.wait()
 
-for proc in procs:
-	proc.wait()
+
+if __name__ == "__main__":
+	import argparse
+	parser = argparse.ArgumentParser(
+		prog="",
+		description="Hyperchoron Multi-Input",
+	)
+	parser.add_argument("-i", "--input", nargs="?", default=None, help="Input folder")
+	parser.add_argument("-o", "--output", nargs="*", help="Output folder")
+	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched")
+	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster")
+	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes")
+	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as a regular instrument channel. Defaults to TRUE")
+	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
+	parser.add_argument("-x", "--exclusive", action=argparse.BooleanOptionalAction, default=None, help="Disables speed re-matching and strum quantisation, increases pitch bucket limit. Defaults to FALSE if outputting to any Minecraft-related format, and included for compatibility with other export formats.")
+	args = parser.parse_args()
+	convert_files(args)

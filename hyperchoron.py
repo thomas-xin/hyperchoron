@@ -467,9 +467,11 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 		print("Multiple tempos detected! Auto-selecting most common from:", min(tempo_list), max(tempo_list))
 	if not clocks_per_crotchet:
 		clocks_per_crotchet = 4 # Default to 4/4 time signature
+		print("No time signature found! Defaulting to 4/4...")
 	if not milliseconds_per_clock:
-		orig_tempo = orig_tempo or 60 * 120
+		orig_tempo = orig_tempo or 500 * 1000
 		milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet # Default to 120 BPM
+		print("No BPM found! Defaulting to 120...")
 	step_ms = round(1000 / tps)
 	rev = deque(sorted(timestamps, key=lambda k: timestamps[k]))
 	mode = timestamps[rev[-1]]
@@ -510,6 +512,8 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 					else:
 						print("Speed too close for rounding, autoscaling by 75%...")
 						speed *= 0.75
+				else:
+					speed //= 2
 			else:
 				speed /= div
 	if use_exact:
@@ -569,6 +573,8 @@ def convert_midi(midi_events, speed_info, ctx=None):
 					value = int(event[5])
 					volume = value / 127
 					channel_stats.setdefault(channel, {})["volume"] = volume
+					if channel not in instrument_map:
+						instrument_map[channel] = -1 if channel == 9 and ctx.drums else 0
 	print("Instrument mapping:", instrument_map)
 	active_notes = {i: [] for i in range(len(material_map))}
 	active_notes[-1] = []
@@ -586,7 +592,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 	for i, e in enumerate(midi_events):
 		m = e[2].strip().casefold()
 		if m == "note_off_c" or m == "note_on_c" and int(e[5]) <= 1:
-			t = ceil(int(e[1]) * real_ms_per_clock / scale)
+			t = int(e[1])
 			c = int(e[3])
 			p = int(e[4])
 			h = (c, p)
@@ -628,11 +634,12 @@ def convert_midi(midi_events, speed_info, ctx=None):
 							if sustain or pitchbend_ranges.get(channel):
 								valid_ends = note_ends[(channel, pitch)]
 								if valid_ends:
-									pos = bisect.bisect_right(valid_ends, time)
+									pos = bisect.bisect_right(valid_ends, event_timestamp)
 									end = valid_ends[min(pos, len(valid_ends) - 1)]
-									while end <= time and pos < len(valid_ends) - 1:
+									while end <= event_timestamp and pos < len(valid_ends) - 1:
 										pos += 1
 										end = valid_ends[pos]
+									end = end * real_ms_per_clock / scale
 							min_sustain = step_ms * 2 if sustain == 2 else step_ms
 							if end < timestamp + min_sustain:
 								end = timestamp + min_sustain
@@ -674,6 +681,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 								if note.channel == channel:
 									note.updated = True
 						elif volume <= orig_volume * 0.5:
+							instrument = instrument_map[channel]
 							for note in active_notes[instrument]:
 								if note.channel == channel:
 									note.sustain = False
@@ -834,8 +842,8 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 		taken = []
 		next_active = {}
 		if beat:
-			lowest = min((note[1], note) for note in beat)[1]
 			ordered = sorted(beat, key=lambda note: (note[2], round(note[4] * 8), note[0] == -1, note[1]), reverse=True)
+			lowest = min((note[1], note) for note in beat)[1]
 			ordered.remove(lowest)
 			ordered.insert(0, lowest)
 		else:
@@ -1539,6 +1547,7 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 					org.write(struct.pack("B", ins.id))
 					org.write(b"\x00")
 					org.write(struct.pack("<H", len(ins.notes)))
+					nc += len(ins.notes)
 				for i, ins in enumerate(instruments):
 					for note in ins.notes:
 						org.write(struct.pack("<L", note.tick))
@@ -1593,7 +1602,7 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 					block = litemapy.BlockState("minecraft:" + block)
 				reg[x + mx, y + my, z + mz] = block
 			schem.save(output)
-	print("Final note block count:", nc)
+	print("Final note count:", nc)
 
 def convert_file(args):
 	ctx = args
@@ -1677,7 +1686,7 @@ def convert_file(args):
 		if is_org:
 			ctx.transpose += 12
 	else:
-		speed_info = (50, 50, 1, 50, 60 * 120)
+		speed_info = (50, 50, 1, 50, 500)
 	if transport and not transport[0]:
 		transport = deque(transport)
 		while transport and not transport[0]:
