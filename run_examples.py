@@ -3,7 +3,9 @@ import subprocess
 import sys
 
 def run_conversion(ctx, fi, *fo):
-	return subprocess.Popen([sys.executable, "hyperchoron.py", "-i", fi, "-o", *fo, "-t", str(ctx.transpose), "-s", str(ctx.speed), "-sa", str(ctx.strum_affinity)])
+	args = [sys.executable, "hyperchoron.py", "-i", fi, "-o", *fo, "-t", str(ctx.transpose), "-s", str(ctx.speed), "-sa", str(ctx.strum_affinity)]
+	print(args)
+	return subprocess.Popen(args)
 def wait_procs(procs):
 	while len(procs) >= 8:
 		try:
@@ -31,7 +33,7 @@ def convert_files(ctx):
 			continue
 		names = [fn.rsplit(".", 1)[0] + "." + fmt for fmt in fmts]
 		fi = f"{ctx.input}/{fn}"
-		fo = [f"{fold}/{n}" for fmt, n in zip(ctx.output, names)]
+		fo = [f"{fold}/{n}" for fold, n in zip(ctx.output, names)]
 		if any(not os.path.exists(f) or not os.path.getsize(f) or os.path.getmtime(f) < max(min_timestamp, os.path.getmtime(fi)) for f in fo):
 			wait_procs(procs)
 			procs.append(run_conversion(ctx, fi, *fo))

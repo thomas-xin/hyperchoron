@@ -496,9 +496,9 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 			print("Confidence:", inclusions / len(timestamp_collection), req)
 			if inclusions < len(timestamp_collection) * req:
 				print("Discarding tempo...")
-				speed = 1
+				speed = 0.5 if ctx.exclusive else 1
 			else:
-				speed = speed2
+				speed = speed2 / 2 if ctx.exclusive else speed2
 			use_exact = True
 		elif speed > min_value * 1.25:
 			print("Finding closest speed...", exclusions, len(timestamps))
