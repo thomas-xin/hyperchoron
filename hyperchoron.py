@@ -299,7 +299,7 @@ def preprocess(midi_events, ctx):
 def convert_midi(midi_events, speed_info, ctx=None):
 	played_notes = []
 	pitchbend_ranges = {}
-	max_pitch = 89 if ctx.exclusive else 84
+	max_pitch = 101 if ctx.exclusive else 84
 	active_notes = {i: [] for i in range(len(material_map))}
 	active_notes[-1] = []
 	instrument_activities = {}
@@ -672,6 +672,7 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 				])
 				for i, ins in enumerate(instruments, 2):
 					notes = deque(ins.notes)
+					nc += len(notes)
 					start = 0
 					writer.writerows([
 						[i, start, "start_track"],

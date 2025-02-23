@@ -18,7 +18,7 @@ from mappings import (
 	material_map, sustain_map,
 	instrument_names, percussion_mats, instrument_codelist,
 	midi_instrument_selection, org_instrument_selection,
-	c4, c1, c0, fs1,
+	c4, c1, c_1, fs1,
 	MAIN, SIDE, DIV, BAR,
 )
 
@@ -256,6 +256,8 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 				new_pitch += 12
 			if new_pitch < 0:
 				new_pitch = 0
+			if new_pitch > 95:
+				new_pitch = 95
 			h = (itype, new_pitch)
 			if (updated < 2 or conservative) and h in active:
 				iid = active[h]
@@ -340,11 +342,13 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 				if drums:
 					drums.notes.append(note)
 				continue
-			new_pitch = pitch + ctx.transpose - c0
+			new_pitch = pitch + ctx.transpose - c_1
 			if new_pitch < 0:
 				new_pitch += 12
 			if new_pitch < 0:
 				new_pitch = 0
+			if new_pitch > 127:
+				new_pitch = 127
 			h = (itype, new_pitch)
 			if updated < 2 and h in active:
 				reused = False
