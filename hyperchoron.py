@@ -621,7 +621,6 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 					nbs.notes.append(rendered)
 				for k, v in current_poly.items():
 					layer_poly[k] = max(v, layer_poly.get(k, 0))
-			del transport
 			layer_map = sorted(layer_poly.items(), key=lambda tup: (tup[0] not in (-1, 8), tup[0] != 6, tup[-1]), reverse=True)
 			layer_index = 0
 			layer_starts = {}
@@ -892,7 +891,7 @@ if __name__ == "__main__":
 	import argparse
 	parser = argparse.ArgumentParser(
 		prog="",
-		description="MIDI to Minecraft Note Block Converter",
+		description="MIDI converter and Minecraft Note Block exporter",
 	)
 	parser.add_argument("-i", "--input", nargs="+", help="Input file (.mid | .zip | .nbs | .csv)")
 	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mcfunction | .litematic | .nbs | .org | .csv | .mid)")

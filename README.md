@@ -12,31 +12,32 @@ py hyperchoron.py -h
 usage:  [-h] [-i INPUT [INPUT ...]] [-o [OUTPUT ...]] [-t [TRANSPOSE]] [-s [SPEED]] [-sa [STRUM_AFFINITY]]
         [-d | --drums | --no-drums] [-c | --cheap | --no-cheap] [-x | --exclusive | --no-exclusive]
 
-MIDI to Minecraft Note Block Converter
+MIDI converter and Minecraft Note Block exporter
 
 options:
   -h, --help            show this help message and exit
   -i, --input INPUT [INPUT ...]
-                        Input file (.mid | .zip | .nbs)
+                        Input file (.mid | .zip | .nbs | .csv)
   -o, --output [OUTPUT ...]
-                        Output file (.mcfunction | .litematic | .nbs | .org)
+                        Output file (.mcfunction | .litematic | .nbs | .org | .csv | .mid)
   -t, --transpose [TRANSPOSE]
-                        Transposes song up/down a certain amount of semitones, applied before instrument material mapping;
-                        higher = higher pitched
+                        Transposes song up/down a certain amount of semitones, applied before instrument material
+                        mapping; higher = higher pitched
   -s, --speed [SPEED]   Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster
   -sa, --strum-affinity [STRUM_AFFINITY]
-                        Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more
-                        notes
+                        Increases or decreases threshold for sustained notes to be cut into discrete segments; higher
+                        = more notes
   -d, --drums, --no-drums
-                        Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as a
-                        regular instrument channel. Defaults to TRUE
+                        Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as
+                        a regular instrument channel. Defaults to TRUE
   -c, --cheap, --no-cheap
-                        Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility
-                        with previous versions of minecraft. May cause spacing issues with the sand/snare drum instruments.
-                        Defaults to FALSE
+                        Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables
+                        compatibility with previous versions of minecraft. May cause spacing issues with the
+                        sand/snare drum instruments. Defaults to FALSE
   -x, --exclusive, --no-exclusive
-                        Disables speed re-matching and strum quantisation, increases pitch bucket limit. Defaults to FALSE if
-                        outputting to any Minecraft-related format, and included for compatibility with other export formats.
+                        Disables speed re-matching and strum quantisation, increases pitch bucket limit. Defaults to
+                        FALSE if outputting to any Minecraft-related format, and included for compatibility with other
+                        export formats.
 ```
 ### Additional info
 - The program takes one or more input and output files, and currently supports outputting to `.mcfunction` (a list of `/setblock` commands), `.litematic` (used by the litematica mod), or `.nbs` (Note Block Studio project).
