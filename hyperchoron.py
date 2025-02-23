@@ -345,10 +345,10 @@ def convert_midi(midi_events, speed_info, ctx=None):
 								track = int(event[0])
 								h = (event_timestamp, track, channel, pitch)
 								try:
-									length = note_lengths[h] * real_ms_per_clock / scale
+									length = (note_lengths[h] + 0.25) * real_ms_per_clock / scale
 								except KeyError:
 									length = 0
-							min_sustain = curr_frac * 2 if sustain == 2 else curr_frac
+							min_sustain = curr_frac * 2.5 if sustain == 2 else curr_frac * 1.25
 							if length < min_sustain:
 								length = min_sustain
 								if sustain == 1:
@@ -681,16 +681,39 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 						[i, start, "control_c", ins.channel, 10, 64],
 						[i, start, "control_c", ins.channel, 7, 100],
 					])
+					pan = 64
+					vol = 100
 					instrument = []
 					end = start
 					while notes:
 						note = notes.popleft()
+						if note.panning != pan:
+							pan = note.panning
+							instrument.append([i, note.tick, "control_c", ins.channel, 10, pan])
+						if vol != 100:
+							vol = 100
+							instrument.append([i, note.tick, "control_c", ins.channel, 7, vol])
 						instrument.extend((
 							[i, note.tick, "note_on_c", ins.channel, note.pitch, note.volume],
 							[i, note.tick + note.length, "note_off_c", ins.channel, note.pitch, 0],
 						))
+						for tick, mode, value in note.events:
+							match mode:
+								case "panning":
+									mode_i = 10
+									if pan == value:
+										continue
+									pan = value
+								case "volume":
+									mode_i = 7
+									if vol == value:
+										continue
+									vol = value
+								case _:
+									raise NotImplementedError(mode)
+							instrument.append([i, tick, "control_c", ins.channel, mode_i, value])
 						end = max(end, note.tick + note.length)
-					instrument.sort(key=lambda t: (t[1], t[2] != "note_off_c"))
+					instrument.sort(key=lambda t: (t[1], t[2] == "note_on_c"))
 					instrument.append([i, end, "end_track"])
 					writer.writerows(instrument)
 				writer.writerows([[0, 0, "end_of_file"]])

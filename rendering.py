@@ -328,7 +328,7 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 		for note in ordered:
 			itype, pitch, updated, _long, vel, pan = note
 			volume = min(127, vel)
-			panning = round(pan * 127)
+			panning = round(pan * 63 + 64)
 			ins = midi_instrument_selection[itype]
 			if ins < 0:
 				new_pitch = pitch
@@ -338,6 +338,7 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 					length=1,
 					volume=volume,
 					panning=panning,
+					events=[],
 				)
 				if drums:
 					drums.notes.append(note)
@@ -356,16 +357,22 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 					if iid not in taken:
 						instrument = instruments[iid]
 						last_note = instrument.notes[-1]
-						last_vol, _last_pan = last_note.volume, last_note.panning
-						if last_vol == volume or last_vol > volume and not sustain_map[instrument.type]:
-							last_note.length += 1
-							taken.append(iid)
-							try:
-								next_active[h].append(instrument.index)
-							except KeyError:
-								next_active[h] = [instrument.index]
-							reused = True
-							break
+						last_vol, last_pan = last_note.volume, last_note.panning
+						if last_vol >= volume and not sustain_map[instrument.type]:
+							pass
+						else:
+							if last_vol != volume:
+								last_note.events.append((i, "volume", min(127, round(volume / last_vol * 100))))
+							if last_pan != panning:
+								last_note.events.append((i, "panning", panning))
+						last_note.length += 1
+						taken.append(iid)
+						try:
+							next_active[h].append(instrument.index)
+						except KeyError:
+							next_active[h] = [instrument.index]
+						reused = True
+						break
 				if reused:
 					continue
 			choices = sorted(instruments, key=lambda instrument: (instrument.index not in taken, instrument.id == ins), reverse=True)
@@ -376,6 +383,7 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 				length=1,
 				volume=volume,
 				panning=panning,
+				events=[],
 			))
 			taken.append(instrument.index)
 			try:
