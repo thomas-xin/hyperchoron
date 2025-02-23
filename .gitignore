@@ -2,3 +2,5 @@ __pycache__
 examples/mcfunction
 examples/nbs
 examples/org
+examples/mid
+examples/csv

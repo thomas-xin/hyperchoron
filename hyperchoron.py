@@ -206,7 +206,7 @@ def preprocess(midi_events, ctx):
 				if copyright:
 					break
 			case "copyright_t":
-				copyright = event[3].strip(" \t\r\n\"'")
+				copyright = ",".join(event[3:]).strip(" \t\r\n\"'")
 				if title:
 					break
 	try:
