@@ -436,11 +436,13 @@ def convert_midi(midi_events, speed_info, ctx=None):
 				started = {}
 				ticked = {}
 				max_volume = 0
+				poly = 0
 				for notes in active_notes.values():
 					for note in notes:
 						note.volume = channel_stats.get(note.channel, {}).get("volume", 1) * note.velocity / max_vel * 127
 						if note.volume > max_volume:
 							max_volume = note.volume
+						poly += note.sustain
 				for instrument, notes in active_notes.items():
 					notes.reverse()
 					for i in range(len(notes) - 1, -1, -1):
@@ -456,7 +458,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 						if ctx.exclusive and needs_sustain:
 							recur = sms
 						elif needs_sustain:
-							if volume >= 100 / sa and volume >= max_volume * 7 / 8 / sa:
+							if volume >= 100 / sa and (poly <= 4 and volume >= max_volume * 7 / 8 / sa or volume >= max_volume * 127 / 128 / sa):
 								recur = sms
 							elif volume >= 60 / sa and volume >= max_volume / 2 / sa:
 								recur = sms * 2
