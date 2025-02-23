@@ -791,53 +791,56 @@ def convert_file(args):
 	speed_info = None
 	note_candidates = 0
 	for file in inputs:
-		if isinstance(file, str) and file.endswith(".nbs"):
-			print("Converting NBS...")
-			import pynbs
-			nbs = pynbs.read(file)
-			speed_info = (50, 50, 20 / nbs.header.tempo, 50, 500)
-			for tick, chord in nbs:
-				while tick > len(transport):
-					transport.append([])
-				mapped_chord = []
-				poly = {}
-				for note in chord:
-					instrument_name = nbs.layers[note.layer].name.rsplit("_", 1)[0]
-					if instrument_name == "Drumset":
-						ins = 6
-						default = 6
-					else:
-						default = instrument_codelist.index(default_instruments[nbs_values[note.instrument]])
+		if isinstance(file, str):
+			if file.endswith(".nbs"):
+				print("Converting NBS...")
+				import pynbs
+				nbs = pynbs.read(file)
+				speed_info = (50, 50, 20 / nbs.header.tempo, 50, 500)
+				for tick, chord in nbs:
+					while tick > len(transport):
+						transport.append([])
+					mapped_chord = []
+					poly = {}
+					for note in chord:
+						instrument_name = nbs.layers[note.layer].name.rsplit("_", 1)[0]
+						if instrument_name == "Drumset":
+							ins = 6
+							default = 6
+						else:
+							default = instrument_codelist.index(default_instruments[nbs_values[note.instrument]])
+							try:
+								ins = instrument_codelist.index(instrument_name)
+							except ValueError:
+								ins = default
+						block = (
+							ins,
+							note.key - 33 + fs1 + pitches[nbs_values[note.instrument]],
+							not note.panning & 1,
+							ins != default,
+							round(note.velocity * 127 / 100),
+							note.panning / 50,
+						)
 						try:
-							ins = instrument_codelist.index(instrument_name)
-						except ValueError:
-							ins = default
-					block = (
-						ins,
-						note.key - 33 + fs1 + pitches[nbs_values[note.instrument]],
-						not note.panning & 1,
-						ins != default,
-						round(note.velocity * 127 / 100),
-						note.panning / 50,
-					)
-					try:
-						poly[ins] += 1
-					except KeyError:
-						poly[ins] = 1
-					try:
-						instrument_activities[ins][0] += note.velocity
-						instrument_activities[ins][1] = max(instrument_activities[ins][1], poly[ins])
-					except KeyError:
-						instrument_activities[ins] = [note.velocity, poly[ins]]
-					mapped_chord.append(block)
-				transport.append(mapped_chord)
-			continue
-		if file.endswith(".csv"):
-			with open(file, "r", encoding="utf-8") as f:
-				csv_list = f.read().splitlines()
-		else:
-			print("Converting MIDI...")
-			csv_list = rendering.midi2csv(file)
+							poly[ins] += 1
+						except KeyError:
+							poly[ins] = 1
+						try:
+							instrument_activities[ins][0] += note.velocity
+							instrument_activities[ins][1] = max(instrument_activities[ins][1], poly[ins])
+						except KeyError:
+							instrument_activities[ins] = [note.velocity, poly[ins]]
+						mapped_chord.append(block)
+					transport.append(mapped_chord)
+				continue
+			if file.endswith(".csv"):
+				with open(file, "r", encoding="utf-8") as f:
+					csv_list = f.read().splitlines()
+				midi_events = list(csv.reader(csv_list))
+				event_list.append(midi_events)
+				continue
+		print("Converting MIDI...")
+		csv_list = rendering.midi2csv(file)
 		midi_events = list(csv.reader(csv_list))
 		if not isinstance(file, str):
 			file.close()
