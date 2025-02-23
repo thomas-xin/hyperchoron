@@ -91,11 +91,9 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 	time_diffs = {}
 	tempos = {}
 	since_tempo = 0
-	last_timestamp = 0
 	for event in midi_events:
 		mode = event[2].strip().casefold()
 		timestamp = int(event[1])
-		last_timestamp = max(timestamp, last_timestamp)
 		if mode == "note_on_c":
 			if int(event[5]) == 1:
 				continue
@@ -129,7 +127,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 			orig_tempo = int(event[3])
 			milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet
 	if tempos:
-		tempos[orig_tempo] = tempos.get(orig_tempo, 0) + last_timestamp - since_tempo
+		tempos[orig_tempo] = tempos.get(orig_tempo, 0) + int(midi_events[-1][1]) - since_tempo
 		tempo_list = list(tempos.items())
 		tempo_list.sort(key=lambda t: t[1], reverse=True)
 		orig_tempo = tempo_list[0][0]
@@ -166,7 +164,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 			print("Confidence:", inclusions / len(timestamp_collection), req)
 			if inclusions < len(timestamp_collection) * req:
 				print("Discarding tempo...")
-				speed = 0.5 if ctx.exclusive else 1
+				speed = 0.4 if ctx.exclusive else 1
 			else:
 				speed = speed2 / 2 if ctx.exclusive else speed2
 			use_exact = True
@@ -873,9 +871,9 @@ def convert_file(args):
 	if event_list:
 		if len(event_list) > 1:
 			all_events = list(itertools.chain.from_iterable(event_list))
-			all_events.sort(key=lambda e: int(e[1]))
 		else:
 			all_events = event_list[0]
+		all_events.sort(key=lambda e: int(e[1]))
 		speed_info = get_step_speed(all_events, tps=20 / ctx.speed, ctx=ctx)
 		for midi_events in event_list:
 			notes, nc, is_org, instrument_activities2, speed_info = convert_midi(midi_events, speed_info, ctx=ctx)

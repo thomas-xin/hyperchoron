@@ -260,28 +260,35 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 				new_pitch = 95
 			h = (itype, new_pitch)
 			if (updated < 2 or conservative) and h in active:
-				iid = active[h]
-				if iid not in taken:
-					instrument = instruments[iid]
-					last_vol, last_pan = instrument.notes[-1].volume, instrument.notes[-1].panning
-					idx = -1
-					while (last_note := instrument.notes[idx]) and last_note.pitch == 255:
-						idx -= 1
-					if last_note.length < 128:
-						if last_vol != volume or (last_pan != panning and not conservative):
-							instrument.notes.append(SimpleNamespace(
-								tick=i,
-								pitch=255,
-								length=1,
-								volume=volume,
-								panning=last_pan if conservative else panning,
-							))
-						last_note.length += 1
-						taken.append(iid)
-						next_active[h] = iid
-						continue
+				reused = False
+				for iid in active[h]:
+					if iid not in taken:
+						instrument = instruments[iid]
+						last_vol, last_pan = instrument.notes[-1].volume, instrument.notes[-1].panning
+						idx = -1
+						while (last_note := instrument.notes[idx]) and last_note.pitch == 255:
+							idx -= 1
+						if last_note.length < 128:
+							if last_vol != volume or (last_pan != panning and not conservative):
+								instrument.notes.append(SimpleNamespace(
+									tick=i,
+									pitch=255,
+									length=1,
+									volume=volume,
+									panning=last_pan if conservative else panning,
+								))
+							last_note.length += 1
+							taken.append(iid)
+							try:
+								next_active[h].append(instrument.index)
+							except KeyError:
+								next_active[h] = [instrument.index]
+							reused = True
+							break
+				if reused:
+					continue
 			choices = instruments[:8]
-			choices = sorted(choices, key=lambda instrument: (len(instrument.notes) < 3840, instrument.index not in taken, instrument.id == ins, -(len(instrument.notes) // 960)), reverse=True)
+			choices = sorted(choices, key=lambda instrument: (instrument.index not in taken, len(instrument.notes) < 3840, instrument.id == ins, -(len(instrument.notes) // 960)), reverse=True)
 			instrument = choices[0]
 			if instrument.index in taken:
 				break
@@ -293,7 +300,10 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 				panning=panning,
 			))
 			taken.append(instrument.index)
-			next_active[h] = instrument.index
+			try:
+				next_active[h].append(instrument.index)
+			except KeyError:
+				next_active[h] = [instrument.index]
 		active = next_active
 	return instruments, wait
 
