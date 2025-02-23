@@ -121,10 +121,11 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 			clocks_per_crotchet = int(event[5])
 		elif mode == "tempo":
 			# Tempo event specifies microseconds per quarter note
-			if orig_tempo:
+			new_tempo = int(event[3])
+			if orig_tempo and orig_tempo != new_tempo:
 				tempos[orig_tempo] = tempos.get(orig_tempo, 0) + timestamp - since_tempo
 			since_tempo = timestamp
-			orig_tempo = int(event[3])
+			orig_tempo = new_tempo
 			milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet
 	if tempos:
 		tempos[orig_tempo] = tempos.get(orig_tempo, 0) + int(midi_events[-1][1]) - since_tempo

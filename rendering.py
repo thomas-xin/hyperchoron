@@ -585,10 +585,10 @@ def render_minecraft(notes, ctx):
 					((0, y, z - 1), "activator_rail", dict(shape="ascending_south")),
 					((0, y + 1, z), "rail", dict(shape="north_south")),
 					((x * 19, y - 1, z + 3), "black_stained_glass"),
-					((x * 19, y, z), "activator_rail", dict(shape="ascending_south")),
-					((x * 19, y, z + 3), "activator_rail", dict(shape="ascending_north")),
 					((x * 19, y, z + 1), "black_stained_glass"),
 					((x * 19, y, z + 2), "black_stained_glass"),
+					((x * 19, y, z), "activator_rail", dict(shape="ascending_south")),
+					((x * 19, y, z + 3), "activator_rail", dict(shape="ascending_north")),
 					((x * 19, y + 1, z + 1), "activator_rail", dict(shape="north_south")),
 					((x * 19, y + 1, z + 2), "activator_rail", dict(shape="north_south")),
 				)
@@ -843,14 +843,14 @@ def render_minecraft(notes, ctx):
 		yield ((0, -5, i), "redstone_block")
 	yield from (
 		((0, -5, offset), "redstone_block"),
-		((0, -4, offset), "powered_rail", dict(shape="ascending_south", powered="true")),
 		((0, -4, offset + 1), "red_wool"),
-		((0, -3, offset + 1), "powered_rail", dict(shape="ascending_south", powered="true")),
 		((0, -3, offset + 2), "red_wool"),
-		((0, -2, offset + 2), "powered_rail", dict(shape="ascending_south", powered="true")),
 		((0, -2, offset + 3), "red_wool"),
-		((0, -1, offset + 3), "powered_rail", dict(shape="north_south", powered="true")),
 		((0, -1, offset + 4), "red_wool"),
+		((0, -4, offset), "powered_rail", dict(shape="ascending_south", powered="true")),
+		((0, -3, offset + 1), "powered_rail", dict(shape="ascending_south", powered="true")),
+		((0, -2, offset + 2), "powered_rail", dict(shape="ascending_south", powered="true")),
+		((0, -1, offset + 3), "powered_rail", dict(shape="north_south", powered="true")),
 	)
 	for x in (-1, 1):
 		for n in range(2, 20):
