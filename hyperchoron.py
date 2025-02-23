@@ -91,9 +91,11 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 	time_diffs = {}
 	tempos = {}
 	since_tempo = 0
+	last_timestamp = 0
 	for event in midi_events:
 		mode = event[2].strip().casefold()
 		timestamp = int(event[1])
+		last_timestamp = max(timestamp, last_timestamp)
 		if mode == "note_on_c":
 			if int(event[5]) == 1:
 				continue
@@ -127,7 +129,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 			orig_tempo = int(event[3])
 			milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet
 	if tempos:
-		tempos[orig_tempo] = tempos.get(orig_tempo, 0) + int(midi_events[-1][1]) - since_tempo
+		tempos[orig_tempo] = tempos.get(orig_tempo, 0) + last_timestamp - since_tempo
 		tempo_list = list(tempos.items())
 		tempo_list.sort(key=lambda t: t[1], reverse=True)
 		orig_tempo = tempo_list[0][0]
@@ -348,7 +350,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 									length = (note_lengths[h] + 0.25) * real_ms_per_clock / scale
 								except KeyError:
 									length = 0
-							min_sustain = curr_frac * 2.5 if sustain == 2 else curr_frac * 1.25
+							min_sustain = curr_frac * 2.25 if sustain == 2 else curr_frac * 1.25
 							if length < min_sustain:
 								length = min_sustain
 								if sustain == 1:
@@ -382,7 +384,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 									if not candidate or note.start > candidate.start:
 										candidate = note
 							if candidate:
-								candidate.length = max(candidate.length, timestamp + curr_frac - candidate.start)
+								candidate.length = max(candidate.length, float(timestamp + curr_frac - candidate.start))
 					case "control_c" if event[4].strip() == "6":
 						channel = int(event[3])
 						pitchbend_ranges[channel] = int(event[5])
@@ -492,7 +494,7 @@ def convert_midi(midi_events, speed_info, ctx=None):
 								temp[1] |= long
 								temp[3] = temp[3] if temp[2] > volume ** 2 else channel_stats.get(note.channel, {}).get("pan", 0)
 								temp[2] = temp[2] + volume ** 2
-							note.timestamp = timestamp + recur
+							note.timestamp = timestamp + recur - sms / 4
 						if timestamp >= end or len(notes) >= 64 and not needs_sustain:
 							notes.pop(i)
 						else:
