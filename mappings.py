@@ -161,7 +161,10 @@ org_instrument_selection = [
 	-2,
 	66,
 	-1,
+	60,
+	-1,
 ]
+org_octave = 60
 percussion_mats = {int((data := line.split("#", 1)[0].strip().split("\t"))[0]): (data[1], int(data[2])) for line in """
 0	PLACEHOLDER	0
 31	heavy_core	16	# Sticks
@@ -232,3 +235,18 @@ MAIN = 4
 SIDE = 2
 DIV = 4
 BAR = 32
+
+note_names = [
+	"C",
+	"C#",
+	"D",
+	"D#",
+	"E",
+	"F",
+	"F#",
+	"G",
+	"G#",
+	"A",
+	"A#",
+	"B",
+]

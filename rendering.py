@@ -1,6 +1,6 @@
 import functools
 import itertools
-from math import ceil, inf
+from math import ceil, hypot, inf
 import os
 from types import SimpleNamespace
 if os.name == "nt" and os.path.exists("Midicsv.exe") and os.path.exists("Csvmidi.exe"):
@@ -49,7 +49,7 @@ def csv2midi(file, output):
 	return csv_list
 
 @functools.lru_cache(maxsize=256)
-def get_note_mat(note, transpose, odd=False):
+def get_note_mat(note, odd=False):
 	material = material_map[note[0]]
 	pitch = note[1]
 	if not material:
@@ -58,7 +58,6 @@ def get_note_mat(note, transpose, odd=False):
 		except KeyError:
 			print("WARNING: Note", pitch, "not yet supported for drums, discarding...")
 			return "PLACEHOLDER", 0
-	pitch += transpose
 	normalised = pitch - fs1
 	if normalised < 0:
 		normalised += 12
@@ -145,7 +144,7 @@ def get_note_mat(note, transpose, odd=False):
 	return mat, mod
 
 def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=None):
-	base, pitch = get_note_mat(note, transpose=ctx.transpose if ctx else 0, odd=odd)
+	base, pitch = get_note_mat(note, odd=odd)
 	x, y, z = positioning
 	coords = [(x, y, z), (x, y + 1, z), (x, y + 2, z)]
 	if replace and base in replace:
@@ -171,6 +170,13 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 	wait = round(50 / speed_ratio)
 	activities = list(map(list, instrument_activities.items()))
 	instruments = []
+	if sum(t[1][1] for t in activities) >= 12:
+		instruments.append(SimpleNamespace(
+			id=60,
+			index=0,
+			type=9,
+			notes=[],
+		))
 	while len(instruments) < 8:
 		activities.sort(key=lambda t: t[1][0], reverse=True)
 		curr = activities[0]
@@ -202,10 +208,31 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 		taken = []
 		next_active = {}
 		if beat:
-			ordered = sorted(beat, key=lambda note: (note[2], round(note[4] * 8), note[0] == -1, note[1]), reverse=True)
-			lowest = min((note[1], note) for note in beat)[1]
-			ordered.remove(lowest)
-			ordered.insert(0, lowest)
+			ordered = sorted(beat, key=lambda note: (note[2] + round(note[4] * 8 / 127), note[1]), reverse=True)
+			lowest = min((note[0] == -1, note[1], note) for note in beat)[-1]
+			if len(ordered) >= 7 and org_instrument_selection[lowest[0]] >= 0:
+				lowest_to_remove = True
+				for j, note in enumerate(ordered):
+					if note[0] == -1:
+						continue
+					if note == lowest and lowest_to_remove:
+						ordered.pop(j)
+						lowest_to_remove = False
+					elif note[1] == lowest[1] + 12:
+						vel = hypot(note[4], lowest[4]) * 3 / 2
+						tvel = min(127, vel)
+						keep = lowest[4] - tvel * 2 / 3
+						lowest = (9, lowest[1], max(note[2], lowest[2]), True, tvel, (note[5] + lowest[5]) / 2)
+						ordered[j - 1 + lowest_to_remove] = (note[0], note[1], min(1, note[2]), note[3], max(1, keep), note[5])
+						break
+				if lowest[0] != 9 and lowest[1] < c4 - 12:
+					pitch = lowest[1]
+					lowest = (9, pitch, lowest[2], lowest[3], min(127, lowest[4] * 3 / 2), lowest[5])
+				ordered.sort(key=lambda note: (note[2] + round(note[4] * 8 / 127), note[1]), reverse=True)
+				ordered.insert(0, lowest)
+			elif len(ordered) > 1:
+				ordered.remove(lowest)
+				ordered.insert(0, lowest)
 		else:
 			ordered = list(beat)
 		for note in ordered:
@@ -251,7 +278,7 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 				instruments[iid].notes.append(note)
 				taken.append(iid)
 				continue
-			new_pitch = pitch + ctx.transpose - c1
+			new_pitch = pitch - c1
 			if new_pitch < 0:
 				new_pitch += 12
 			if new_pitch < 0:
@@ -287,11 +314,12 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 							break
 				if reused:
 					continue
-			choices = instruments[:8]
-			choices = sorted(choices, key=lambda instrument: (instrument.index not in taken, len(instrument.notes) < 3840, instrument.id == ins, -(len(instrument.notes) // 960)), reverse=True)
+			choices = sorted(instruments[:8], key=lambda instrument: (instrument.index not in taken, len(instrument.notes) < 3072, instrument.id == ins, instrument.id != 60, -(len(instrument.notes) // 1024)), reverse=True)
 			instrument = choices[0]
 			if instrument.index in taken:
 				break
+			if instrument.id == 60 and ins != 60 and pitch >= 12:
+				pitch -= 12
 			instrument.notes.append(SimpleNamespace(
 				tick=i,
 				pitch=new_pitch,
@@ -329,10 +357,7 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 		taken = []
 		next_active = {}
 		if beat:
-			ordered = sorted(beat, key=lambda note: (note[2], round(note[4] * 8), note[0] == -1, note[1]), reverse=True)
-			lowest = min((note[1], note) for note in beat)[1]
-			ordered.remove(lowest)
-			ordered.insert(0, lowest)
+			ordered = sorted(beat, key=lambda note: (round(note[4] * 8 / 127), note[0] == -1, note[1]), reverse=True)
 		else:
 			ordered = list(beat)
 		for note in ordered:
@@ -353,7 +378,7 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 				if drums:
 					drums.notes.append(note)
 				continue
-			new_pitch = pitch + ctx.transpose - c_1
+			new_pitch = pitch - c_1
 			if new_pitch < 0:
 				new_pitch += 12
 			if new_pitch < 0:
@@ -425,7 +450,7 @@ def render_minecraft(notes, ctx):
 				padding = (-1, 0, inf, 0, 0)
 				transparent = ("glowstone", "heavy_core", "blue_stained_glass", "red_stained_glass")
 				lowest = min((note[1], note) for note in curr)[1]
-				ordered = sorted(curr, key=lambda note: (note[2], round(note[4] * 8), note[0] == -1, note[1]), reverse=True)[:cap]
+				ordered = sorted(curr, key=lambda note: (note[2] * 2 + round(note[4] * 8 / 127), note[0] == -1, note[1]), reverse=True)[:cap]
 				if lowest != padding and lowest not in ordered:
 					ordered[-1] = lowest
 				if pulse == 0:
@@ -439,7 +464,7 @@ def render_minecraft(notes, ctx):
 							note = list(note)
 							note[3] = 2
 							note = tuple(note)
-							mat, pitch = get_note_mat(note, transpose=ctx.transpose, odd=pulse & 1)
+							mat, pitch = get_note_mat(note, odd=pulse & 1)
 							if mat != "PLACEHOLDER":
 								found.append(k)
 								yield ((-x if taken else x, y + 2, z - 1), "note_block", dict(note=pitch, instrument="harp"))
@@ -450,10 +475,10 @@ def render_minecraft(notes, ctx):
 						if found:
 							ordered = [note for k, note in enumerate(reversed(ordered)) if k not in found][::-1]
 					ordered, remainder = ordered[:MAIN * 2], ordered[MAIN * 2:]
-					required_padding = sum(get_note_mat(note, transpose=ctx.transpose, odd=pulse & 1)[0] in transparent for note in ordered) * 2 - len(ordered)
+					required_padding = sum(get_note_mat(note, odd=pulse & 1)[0] in transparent for note in ordered) * 2 - len(ordered)
 					for p in range(required_padding):
 						ordered.append(padding)
-					ordered.sort(key=lambda note: get_note_mat(note, transpose=ctx.transpose, odd=pulse & 1)[0] in transparent)
+					ordered.sort(key=lambda note: get_note_mat(note, odd=pulse & 1)[0] in transparent)
 					while ordered and ordered[-1] == padding:
 						ordered.pop(-1)
 					if ordered:
@@ -467,7 +492,7 @@ def render_minecraft(notes, ctx):
 					if len(ordered) & 1:
 						note = ordered[-1]
 						ordered = list(itertools.chain.from_iterable(zip(ordered[:len(ordered) // 2], ordered[len(ordered) // 2:-1])))
-						if get_note_mat(note, transpose=ctx.transpose, odd=pulse & 1)[0] in transparent:
+						if get_note_mat(note, odd=pulse & 1)[0] in transparent:
 							ordered.append(padding)
 						ordered.append(note)
 					else:

@@ -9,8 +9,9 @@
 ### Usage
 ```ini
 py hyperchoron.py -h
-usage:  [-h] [-i INPUT [INPUT ...]] [-o [OUTPUT ...]] [-t [TRANSPOSE]] [-s [SPEED]] [-sa [STRUM_AFFINITY]]
-        [-d | --drums | --no-drums] [-c | --cheap | --no-cheap] [-x | --exclusive | --no-exclusive]
+usage:  [-h] [-i INPUT [INPUT ...]] [-o [OUTPUT ...]] [-s [SPEED]] [-t [TRANSPOSE]]
+        [-ik | --invert-key | --no-invert-key] [-sa [STRUM_AFFINITY]] [-d | --drums | --no-drums]
+        [-c | --cheap | --no-cheap] [-x | --exclusive | --no-exclusive]
 
 MIDI converter and Minecraft Note Block exporter
 
@@ -20,19 +21,23 @@ options:
                         Input file (.mid | .zip | .nbs | .csv)
   -o, --output [OUTPUT ...]
                         Output file (.mcfunction | .litematic | .nbs | .org | .csv | .mid)
+  -s, --speed [SPEED]   Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster.
+                        Defaults to 1
   -t, --transpose [TRANSPOSE]
                         Transposes song up/down a certain amount of semitones, applied before instrument material
-                        mapping; higher = higher pitched
-  -s, --speed [SPEED]   Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster
+                        mapping; higher = higher pitched. Defaults to 0
+  -ik, --invert-key, --no-invert-key
+                        Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C
+                        Major <=> C Minor). Defaults to FALSE
   -sa, --strum-affinity [STRUM_AFFINITY]
                         Increases or decreases threshold for sustained notes to be cut into discrete segments; higher
-                        = more notes
+                        = more notes. Defaults to 1
   -d, --drums, --no-drums
                         Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as
                         a regular instrument channel. Defaults to TRUE
   -c, --cheap, --no-cheap
                         Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables
-                        compatibility with previous versions of minecraft. May cause spacing issues with the
+                        compatibility with previous versions of Minecraft. May cause spacing issues with the
                         sand/snare drum instruments. Defaults to FALSE
   -x, --exclusive, --no-exclusive
                         Disables speed re-matching and strum quantisation, increases pitch bucket limit. Defaults to

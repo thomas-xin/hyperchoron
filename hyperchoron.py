@@ -19,7 +19,7 @@ from mappings import (
 	material_map, default_instruments, instrument_codelist, instrument_names,
 	nbs_names, nbs_values, sustain_map, pitches,
 	instrument_mapping, org_instrument_mapping,
-	DIV, BAR, fs1,
+	DIV, BAR, fs1, note_names,
 )
 
 
@@ -604,7 +604,7 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 				beat.sort(key=lambda note_value: (note_value[2], note_value[1]), reverse=True)
 				for note in beat:
 					ins = note[0]
-					base, pitch = rendering.get_note_mat(note, transpose=ctx.transpose, odd=i & 1)
+					base, pitch = rendering.get_note_mat(note, odd=i & 1)
 					if base == "PLACEHOLDER":
 						continue
 					instrument = instrument_names[base]
@@ -729,7 +729,7 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 			with open(output, "wb") as org:
 				org.write(b"\x4f\x72\x67\x2d\x30\x32")
 				org.write(struct.pack("<H", wait))
-				org.write(b"\x04\x08")
+				org.write(b"\x04\x08" if wait >= 40 else b"\x08\x08")
 				org.write(struct.pack("<L", 0))
 				org.write(struct.pack("<L", ceil(len(transport) / 4) * 4))
 				for i, ins in enumerate(instruments):
@@ -817,6 +817,11 @@ def convert_file(args):
 	speed_info = None
 	note_candidates = 0
 	for file in inputs:
+		if isinstance(file, str) and file.startswith("https://"):
+			import io
+			import urllib.request
+			req = urllib.request.Request(file, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"})
+			file = io.BytesIO(urllib.request.urlopen(req).read())
 		if isinstance(file, str):
 			if file.endswith(".nbs"):
 				print("Converting NBS...")
@@ -904,6 +909,55 @@ def convert_file(args):
 		while transport and not transport[0]:
 			transport.popleft()
 		transport = list(transport)
+	mapping = {}
+	if ctx.invert_key:
+		notes = [0] * 12
+		for beat in transport:
+			for note in beat:
+				p = note[1] % 12
+				notes[p] += 1
+		major_scores = [0] * 12
+		minor_scores = [0] * 12
+		for key in range(12):
+			score = 0
+			for scale in (0, 0, 0, 0, 2, 4, 4, 4, 4, 5, 5, 7, 7, 7, 7, 9, 9, 11, 11):
+				score += notes[(key + scale) % 12]
+			for scale in (1, 3, 3, 6, 8, 8):
+				score -= notes[(key + scale) % 12]
+			major_scores[key] = score
+			score = 0
+			for scale in (0, 0, 0, 0, 2, 3, 3, 3, 3, 5, 5, 7, 7, 7, 7, 8, 9, 10, 11):
+				score += notes[(key + scale) % 12]
+			for scale in (1, 4, 4, 4, 4, 6):
+				score -= notes[(key + scale) % 12]
+			minor_scores[key] = score
+		candidates = list(enumerate(major_scores + minor_scores))
+		candidates.sort(key=lambda t: t[1], reverse=True)
+		key = candidates[0][0]
+		key_repr = f"{note_names[key]} Major" if key < 12 else f"{note_names[key - 12]} Minor"
+		print("Detected key signature:", key_repr)
+		inv_key = key + 12 if key < 12 else key - 12
+		inv_repr = f"{note_names[inv_key]} Major" if inv_key < 12 else f"{note_names[inv_key - 12]} Minor"
+		print("Inverse key:", inv_repr)
+		if key < 12:
+			mapping[(10 + key) % 12] = 1
+			mapping[(4 + key) % 12] = -1
+			mapping[(9 + key) % 12] = -1
+			mapping[(11 + key) % 12] = -1
+		else:
+			mapping[(3 + key) % 12] = 1
+			mapping[(8 + key) % 12] = 1
+			mapping[(10 + key) % 12] = 1
+	if ctx.invert_key or ctx.transpose:
+		for beat in transport:
+			for i, note in enumerate(beat):
+				pitch = note[1]
+				p = pitch % 12
+				adj = ctx.transpose + mapping.get(p, 0)
+				if adj:
+					pitch += adj
+					note = (note[0], pitch, *note[2:])
+					beat[i] = note
 	maxima = [(sum(sum(note[2] + 1 for note in beat) for beat in transport[i::4]), i) for i in range(4)]
 	strongest_beat = max(maxima)[1]
 	if strongest_beat != 0:
@@ -925,11 +979,12 @@ if __name__ == "__main__":
 	)
 	parser.add_argument("-i", "--input", nargs="+", help="Input file (.mid | .zip | .nbs | .csv)")
 	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mcfunction | .litematic | .nbs | .org | .csv | .mid)")
-	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched")
-	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster")
-	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes")
+	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
+	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0")
+	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
+	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as a regular instrument channel. Defaults to TRUE")
-	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
+	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of Minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
 	parser.add_argument("-x", "--exclusive", action=argparse.BooleanOptionalAction, default=None, help="Disables speed re-matching and strum quantisation, increases pitch bucket limit. Defaults to FALSE if outputting to any Minecraft-related format, and included for compatibility with other export formats.")
 	args = parser.parse_args()
 	convert_file(args)
