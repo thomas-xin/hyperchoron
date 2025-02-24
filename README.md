@@ -1,26 +1,29 @@
 ![thumbnail](https://raw.githubusercontent.com/thomas-xin/hyperchoron/refs/heads/main/thumb.jpg)
 # Instructions for use
-### Installation
+## Installation
 - Install [git](https://github.com/git-guides/install-git) and [python](https://www.python.org).
 - Clone this repo:
 `git clone https://github.com/thomas-xin/hyperchoron`
 - Install dependencies:
 `py -m pip install -r requirements.txt`
-### Usage
+- (Optional) Install [DawVert](https://github.com/SatyrDiamond/DawVert) in the same directory:
+`git clone https://github.com/SatyrDiamond/DawVert`
+`py -m pip install -r DawVert/requirements.txt`
+## Usage
 ```ini
 py hyperchoron.py -h
 usage:  [-h] [-i INPUT [INPUT ...]] [-o [OUTPUT ...]] [-s [SPEED]] [-t [TRANSPOSE]]
         [-ik | --invert-key | --no-invert-key] [-sa [STRUM_AFFINITY]] [-d | --drums | --no-drums]
         [-c | --cheap | --no-cheap] [-x | --exclusive | --no-exclusive]
 
-MIDI converter and Minecraft Note Block exporter
+MIDI-Tracker-DAW converter and Minecraft Note Block exporter
 
 options:
   -h, --help            show this help message and exit
   -i, --input INPUT [INPUT ...]
-                        Input file (.mid | .zip | .nbs | .csv)
+                        Input file (.zip | .mid | .csv | .nbs | .org | *)
   -o, --output [OUTPUT ...]
-                        Output file (.mcfunction | .litematic | .nbs | .org | .csv | .mid)
+                        Output file (.mid | .csv | .nbs | .mcfunction | .litematic | .org | *)
   -s, --speed [SPEED]   Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster.
                         Defaults to 1
   -t, --transpose [TRANSPOSE]
@@ -33,25 +36,31 @@ options:
                         Increases or decreases threshold for sustained notes to be cut into discrete segments; higher
                         = more notes. Defaults to 1
   -d, --drums, --no-drums
-                        Allows percussion channel. If disabled, the default MIDI percussion channel will be treated as
-                        a regular instrument channel. Defaults to TRUE
+                        Allows percussion channel. If disabled, percussion channels will be treated as regular
+                        instrument channels. Defaults to TRUE
   -c, --cheap, --no-cheap
-                        Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables
-                        compatibility with previous versions of Minecraft. May cause spacing issues with the
-                        sand/snare drum instruments. Defaults to FALSE
+                        For Minecraft outputs: Restricts the list of non-instrument blocks to a more survival-friendly
+                        set. Also enables compatibility with previous versions of Minecraft. May cause spacing issues
+                        with the sand/snare drum instruments. Defaults to FALSE
   -x, --exclusive, --no-exclusive
-                        Disables speed re-matching and strum quantisation, increases pitch bucket limit. Defaults to
-                        FALSE if outputting to any Minecraft-related format, and included for compatibility with other
-                        export formats.
+                        For non-Minecraft outputs: Disables speed re-matching and strum quantisation, increases pitch
+                        range limits. Defaults to TRUE.
 ```
-### Additional info
-- The program takes one or more input and output files, and currently supports outputting to `.mcfunction` (a list of `/setblock` commands), `.litematic` (used by the litematica mod), or `.nbs` (Note Block Studio project).
-- Multiple MIDI inputs (or a single zip input containing multiple MIDI files) will be treated as a stacked MIDI project, and the exported notes will be combined into a single output stream.
-- Note that if exporting to `.mcfunction`, you will need to make some sort of template datapack to be able to load it in. It is recommended to perform the `/gamerule maxCommandChainLength 2147483647` command prior to pasting the note blocks to avoid longer songs being cut off.
+## Project info
+- Hyperchoron (pun on chorus, and -choron, suffix for 4-dimensional polytopes) was originally exclusively designed as a MIDI to Minecraft Note Block export tool. Over time, support for other formats are being added, and it can now be considered a multipurpose project import helper.
+- The program takes one or more input and output files, with `.zip` file inputs being treated as multiple inputs in one.
+- Currently supported import formats are `.mid`, `.csv`, `.nbs`, `.org`, as well as any format supported by [DawVert](https://github.com/SatyrDiamond/DawVert) if that is installed.
+- Currently supported output formats are `.mid`, `.csv`, `.nbs`, `.mcfunction` (a list of `/setblock` commands), `.litematic` (used by the litematica mod), `.org`, as well as once again, DawVert outputs if available.
+- Multiple inputs are treated as a stacked MIDI project, and the exported notes will be combined into a single output stream.
+- Formats not directly supported are transformed into a separate transport sequence followed by MIDI, and due to DawVert's limitations, some formats will end up being less accurate than they could be. This will change over time as more formats gain direct support.
+- The ability to export to more formats than just Minecraft schematics started being added once it was realised that the algorithm behind tempo sync, note splicing and sorting, and envelope approximation can be adapted into a converter for normally not fully compatible formats.
+
+## Minecraft info
+- If exporting to `.mcfunction`, you will need to make some sort of template datapack to be able to load it in. It is recommended to perform the `/gamerule maxCommandChainLength 2147483647` command prior to pasting the note blocks to avoid longer songs being cut off.
 - If you are intending to build the output schematic in vanilla survival mode, the `-c` option will force the program to use cobblestone for most of the structure. This removes the excessive use of decorative blocks such as beacons, crying obsidian and froglights, as well as heavy core as an instrument. Note that the latter may cause alignment issues arbitrarily depending on the complexity of the song, as sand requires a supporting block, and there are no blocks (besides customised player heads) in vanilla that can perform this role without also possibly silencing a note block that happens to be directly below.
 - If you are exporting to `.nbs`, the output will be intercepted immediately before the schematic formatting stage, and the raw note blocks will be written. The file will be playable in Note Block Studio, however please note that its export feature does not support exporting 20Hz songs, meaning you will not be able to use it in vanilla Minecraft. Support for importing `.nbs` files into Hyperchoron is currently in progress.
 
-# What is the purpose of another exporter like this?
+### What is the purpose of another exporter like this?
 - Converting music to minecraft note blocks programmatically has been a thing for a long time, the most popular program being Note Block Studio. This program is not intended to entirely replace them, and is meant to be a standalone feature.
 - Hyperchoron's intent is to expand on the exporting capabilities of note block programs, using a more adaptable algorithm to produce more accurate recreations of songs while still staying within the boundaries of vanilla Minecraft.
   - Note Sustain: Automatically cut excessively long notes into segments to be replayed several times, preventing notes that are supposed to be sustained from fading out quickly. This adapts based on the volume of the current and adjacent notes, and will automatically offset chords into a strum to avoid excessive sudden loudness.
