@@ -65,6 +65,6 @@ if __name__ == "__main__":
 	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be treated as regular instrument channels. Defaults to TRUE")
 	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="For Minecraft outputs: Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of Minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
-	parser.add_argument("-x", "--exclusive", action=argparse.BooleanOptionalAction, default=None, help="For non-Minecraft outputs: Disables speed re-matching and strum quantisation, increases pitch range limits. Defaults to TRUE.")
+	parser.add_argument("-x", "--exclusive", action=argparse.BooleanOptionalAction, default=None, help="For non-Minecraft outputs: Disables speed re-matching and strum quantisation, increases pitch range limits. Defaults to TRUE")
 	args = parser.parse_args()
 	convert_files(args)

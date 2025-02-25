@@ -12,7 +12,6 @@ from lib import util
 
 
 def export(transport, instrument_activities, speed_info, ctx=None):
-	print("Saving...")
 	block_replacements = {}
 	if ctx.cheap:
 		block_replacements.update()
@@ -44,7 +43,7 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 
 def convert_file(args):
 	ctx = args
-	if ctx.output and (ctx.output[0].rsplit(".", 1)[-1] in ("org", "csv", "mid", "midi")):
+	if ctx.output and (ctx.output[0].rsplit(".", 1)[-1] not in ("nbs", "litematic", "mcfunction")):
 		ctx.strum_affinity = inf
 		if ctx.exclusive is None:
 			print("Auto-switching to Exclusive mode...")
@@ -97,8 +96,8 @@ def convert_file(args):
 	print("Note candidates:", note_candidates)
 	print("Note count:", sum(map(len, transport)))
 	print("Max detected polyphony:", max(map(len, transport), default=0))
-	print("Lowest note:", min(min(n[1] for n in b) for b in transport if b))
-	print("Highest note:", max(max(n[1] for n in b) for b in transport if b))
+	# print("Lowest note:", min(min(n[1] for n in b) for b in transport if b))
+	# print("Highest note:", max(max(n[1] for n in b) for b in transport if b))
 	export(transport, instrument_activities, speed_info, ctx=ctx)
 
 
@@ -116,6 +115,6 @@ if __name__ == "__main__":
 	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be treated as regular instrument channels. Defaults to TRUE")
 	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="For Minecraft outputs: Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of Minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
-	parser.add_argument("-x", "--exclusive", action=argparse.BooleanOptionalAction, default=None, help="For non-Minecraft outputs: Disables speed re-matching and strum quantisation, increases pitch range limits. Defaults to TRUE.")
+	parser.add_argument("-x", "--exclusive", action=argparse.BooleanOptionalAction, default=None, help="For non-Minecraft outputs: Disables speed re-matching and strum quantisation, increases pitch range limits. Defaults to TRUE")
 	args = parser.parse_args()
 	convert_file(args)

@@ -1,5 +1,6 @@
 from collections import deque
 import csv
+from dataclasses import dataclass
 import fractions
 from math import ceil, inf, sqrt
 import os
@@ -140,7 +141,7 @@ def preprocess(midi_events, ctx):
 	note_lengths = {}
 	temp_active = {}
 	discard = set()
-	midi_events.sort(key=lambda x: (x[1], x[2] not in ("tempo", "header", "control_c"))) # Sort events by timestamp, keep headers first
+	midi_events.sort(key=lambda x: (x[1], x[2] == "note_on_c")) # Sort events by timestamp, keep note events last
 	max_vel = 0
 	last_timestamp = 0
 	for i, e in enumerate(midi_events):
@@ -163,7 +164,7 @@ def preprocess(midi_events, ctx):
 					instrument_map[c] = -1 if c == 9 and ctx.drums else 0
 				volume = velocity * channel_stats.setdefault(c, {}).get("volume", 1)
 				max_vel = max(max_vel, volume)
-				if velocity <= 1:
+				if velocity < 1:
 					try:
 						actives = temp_active[h]
 					except KeyError:
@@ -215,6 +216,18 @@ def preprocess(midi_events, ctx):
 	midi_events = [e for i, e in enumerate(midi_events) if i not in discard]
 	return midi_events, instrument_map, channel_stats, note_lengths, max_vel, last_timestamp, is_org
 
+@dataclass(slots=True)
+class TransportNote:
+	pitch: int
+	velocity: float
+	start: float
+	timestamp: float
+	length: float
+	channel: int
+	sustain: bool
+	priority: int
+	volume: float
+
 def deconstruct(midi_events, speed_info, ctx=None):
 	played_notes = []
 	pitchbend_ranges = {}
@@ -251,7 +264,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						velocity = int(event[5])
 						if velocity == 0:
 							pass
-						elif velocity < loud * 0.0625 and sum(map(len, active_notes.items())) >= 16:
+						elif velocity < loud * 0.0625 and sum(map(len, active_notes.items())) >= 48:
 							note_candidates += 1
 						else:
 							note_candidates += 1
@@ -277,7 +290,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 									length = min_sustain
 									if sustain == 1:
 										sustain = 0
-							note = SimpleNamespace(
+							note = TransportNote(
 								pitch=pitch,
 								velocity=velocity,
 								start=timestamp,
@@ -424,7 +437,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						else:
 							note.priority = 0
 							if note.sustain == 2 and (length < sms * 3 or (timestamp - note.start) % (sms * 2) >= sms):
-								note.velocity = max(2, note.velocity - sms / (length + sms) * note.velocity * 2)
+								note.velocity = max(2, note.velocity - sms / (length + sms * 2) * note.velocity * 2)
 					notes.reverse()
 				beat = []
 				poly = {}
@@ -458,9 +471,20 @@ def deconstruct(midi_events, speed_info, ctx=None):
 	return played_notes, note_candidates, is_org, instrument_activities, speed_info
 
 
+@dataclass(slots=True)
+class MidiNote:
+	tick: int
+	pitch: int
+	length: int
+	volume: int
+	panning: int
+	events: list
+	aligned: int
+
 def render_midi(notes, instrument_activities, speed_info, ctx):
 	orig_ms_per_clock, real_ms_per_clock, scale, _orig_step_ms, _orig_tempo = speed_info
 	speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
+	resolution = 6
 	wait = round(50 / speed_ratio * 1000 * 8)
 	activities = list(map(list, instrument_activities.items()))
 	instruments = [SimpleNamespace(
@@ -469,6 +493,8 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 		notes=[],
 		name=instrument_codelist[curr[0]],
 		channel=curr[0] if curr[0] >= 0 else 9,
+		pitchbend_range=0,
+		sustain=sustain_map[curr[0]],
 	) for curr in activities for c in range(curr[1][1] if curr[0] != -1 else 1)]
 	drums = None
 	for i, ins in enumerate(instruments):
@@ -477,6 +503,7 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 			drums = ins
 	active = {}
 	for i, beat in enumerate(notes):
+		tick = i * resolution
 		taken = []
 		next_active = {}
 		if beat:
@@ -485,18 +512,19 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 			ordered = list(beat)
 		for note in ordered:
 			itype, pitch, priority, _long, vel, pan = note
-			volume = min(127, vel)
+			volume = round(min(127, vel))
 			panning = round(pan * 63 + 64)
 			ins = midi_instrument_selection[itype]
 			if ins < 0:
 				new_pitch = pitch
-				note = SimpleNamespace(
-					tick=i,
+				note = MidiNote(
+					tick=tick,
 					pitch=new_pitch,
 					length=1,
 					volume=volume,
 					panning=panning,
 					events=[],
+					aligned=0,
 				)
 				if drums:
 					drums.notes.append(note)
@@ -509,39 +537,54 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 			if new_pitch > 127:
 				new_pitch = 127
 			h = (itype, new_pitch)
-			if priority < 2 and h in active:
-				reused = False
-				for iid in active[h]:
-					if iid not in taken:
-						instrument = instruments[iid]
-						last_note = instrument.notes[-1]
-						last_vol, last_pan = last_note.volume, last_note.panning
-						if last_vol >= volume and not sustain_map[instrument.type]:
-							pass
-						else:
-							if last_vol != volume:
-								last_note.events.append((i, "volume", min(127, round(volume / last_vol * 100))))
-							if last_pan != panning:
-								last_note.events.append((i, "panning", panning))
-						last_note.length += 1
-						taken.append(iid)
-						try:
-							next_active[h].append(instrument.index)
-						except KeyError:
-							next_active[h] = [instrument.index]
-						reused = True
-						break
-				if reused:
+			if priority < 2:
+				try:
+					for h2 in (h, (itype, new_pitch - 1), (itype, new_pitch + 1)):
+						for iid in active.get(h2, ()):
+							if iid in taken:
+								continue
+							instrument = instruments[iid]
+							last_note = instrument.notes[-1]
+							last_vol, last_pan = last_note.volume, last_note.panning
+							if last_vol >= volume and not sustain_map[instrument.type]:
+								pass
+							else:
+								if last_vol != volume:
+									last_note.events.append((tick, "volume", min(127, round(volume / last_vol * 100))))
+								if last_pan != panning:
+									last_note.events.append((tick, "panning", panning))
+							if h != h2:
+								if last_note.aligned <= resolution * 2:
+									if not any(e[1] == "pitch" for e in last_note.events):
+										last_note.events.append((last_note.tick, "pitch", last_note.pitch))
+									last_note.pitch = new_pitch
+									last_note.aligned = 0
+								for j in range(resolution + 2):
+									offset = j / (resolution + 1) * (h[1] - h2[1])
+									timing = tick - resolution // 2 + j - 1
+									last_note.events.append((timing, "pitch", h2[1] + offset))
+								instrument.pitchbend_range = max(instrument.pitchbend_range, ceil(max(abs(e[2] - last_note.pitch) for e in last_note.events if e[1] == "pitch") / 12) * 12)
+							last_note.length += resolution
+							last_note.aligned += resolution
+							taken.append(iid)
+							try:
+								next_active[h].append(instrument.index)
+							except KeyError:
+								next_active[h] = [instrument.index]
+							raise StopIteration
+				except StopIteration:
 					continue
 			choices = sorted(instruments, key=lambda instrument: (instrument.index not in taken, instrument.id == ins), reverse=True)
 			instrument = choices[0]
-			instrument.notes.append(SimpleNamespace(
-				tick=i,
+			events = []
+			instrument.notes.append(MidiNote(
+				tick=tick,
 				pitch=new_pitch,
-				length=1,
+				length=resolution,
 				volume=volume,
 				panning=panning,
-				events=[],
+				events=events,
+				aligned=resolution,
 			))
 			taken.append(instrument.index)
 			try:
@@ -549,7 +592,8 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 			except KeyError:
 				next_active[h] = [instrument.index]
 		active = next_active
-	return instruments, wait
+	print([ins.pitchbend_range for ins in instruments])
+	return instruments, wait, resolution
 
 
 def load_csv(file):
@@ -573,14 +617,15 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 	else:
 		print("Exporting MIDI...")
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	instruments, wait = list(render_midi(list(transport), instrument_activities, speed_info, ctx=ctx))
+	instruments, wait, resolution = list(render_midi(list(transport), instrument_activities, speed_info, ctx=ctx))
 	import io
 	b = open(output, "w", newline="", encoding="utf-8") if is_csv else io.StringIO()
 	nc = 0
 	with b:
+		instruments.sort(key=lambda ins: ins.pitchbend_range)
 		writer = csv.writer(b)
 		writer.writerows([
-			[0, 0, "header", 1, len(instruments) + 1, 8],
+			[0, 0, "header", 1, len(instruments) + 1, 8 * resolution],
 			[1, 0, "start_track"],
 			[1, 0, "title_t", out_name],
 			[1, 0, "copyright_t", "Hyperchoron"],
@@ -589,19 +634,37 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 			[1, 0, "tempo", wait],
 			[1, 0, "end_track"],
 		])
+		covered_channels = {}
+		extra_channels = 0
 		for i, ins in enumerate(instruments, 2):
 			notes = deque(ins.notes)
 			nc += len(notes)
 			start = 0
+			if ins.pitchbend_range and ins.channel in covered_channels:
+				if extra_channels > 5:
+					for k, v in covered_channels.items():
+						if k != ins.channel and v == ins.id:
+							ins.channel = k
+							break
+				else:
+					ins.channel = extra_channels + 10
+					extra_channels += 1
 			writer.writerows([
 				[i, start, "start_track"],
 				[i, start, "title_t", ins.name],
 				[i, start, "program_c", ins.channel, ins.id if ins.id >= 0 else 0],
 				[i, start, "control_c", ins.channel, 10, 64],
 				[i, start, "control_c", ins.channel, 7, 100],
+				[i, start, "control_c", ins.channel, 101, 0],
+				[i, start, "control_c", ins.channel, 100, 0],
+				[i, start, "control_c", ins.channel, 6, ins.pitchbend_range or 12],
+				[i, start, "control_c", ins.channel, 100, 127],
+				[i, start, "control_c", ins.channel, 101, 127],
 			])
+			covered_channels[ins.channel] = ins.id
 			pan = 64
 			vol = 100
+			bent = False
 			instrument = []
 			end = start
 			while notes:
@@ -612,6 +675,9 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 				if vol != 100:
 					vol = 100
 					instrument.append([i, note.tick, "control_c", ins.channel, 7, vol])
+				if bent:
+					instrument.append([i, note.tick, "pitch_bend_c", ins.channel, 8192])
+					bent = False
 				instrument.extend((
 					[i, note.tick, "note_on_c", ins.channel, note.pitch, note.volume],
 					[i, note.tick + note.length, "note_off_c", ins.channel, note.pitch, 0],
@@ -628,6 +694,11 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 							if vol == value:
 								continue
 							vol = value
+						case "pitch":
+							bend = round(8191 * (value - note.pitch) / ins.pitchbend_range) + 8192
+							instrument.append([i, tick, "pitch_bend_c", ins.channel, bend])
+							bent = bend != 8192
+							continue
 						case _:
 							raise NotImplementedError(mode)
 					instrument.append([i, tick, "control_c", ins.channel, mode_i, value])

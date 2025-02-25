@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from math import ceil, hypot
 from types import SimpleNamespace
 from .mappings import (
@@ -8,6 +9,14 @@ from .mappings import (
 )
 from .util import create_reader
 
+
+@dataclass(slots=True)
+class OrgNote:
+	tick: int
+	pitch: int
+	length: int
+	volume: int
+	panning: int
 
 def render_org(notes, instrument_activities, speed_info, ctx):
 	orig_ms_per_clock, real_ms_per_clock, scale, _orig_step_ms, _orig_tempo = speed_info
@@ -48,6 +57,8 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 	if note_count > 4096 * 8 * 4:
 		print(f"High note count {note_count} detected, using conservative note sustains...")
 		conservative = True
+	min_vol = 16
+	max_vol = 127 + min_vol
 	active = {}
 	for i, beat in enumerate(notes):
 		taken = []
@@ -65,15 +76,15 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 						lowest_to_remove = False
 					elif note[1] == lowest[1] + 12:
 						vel = hypot(note[4], lowest[4]) * 3 / 2
-						tvel = min(127, vel)
+						tvel = min(max_vol, vel)
 						keep = lowest[4] - tvel * 2 / 3
 						lowest = (9, lowest[1], max(note[2], lowest[2]), True, tvel, (note[5] + lowest[5]) / 2)
 						ordered[j - 1 + lowest_to_remove] = (note[0], note[1], min(1, note[2]), note[3], max(1, keep), note[5])
 						break
 				if lowest[0] != 9 and lowest[1] < c4 - 12:
 					pitch = lowest[1]
-					lowest = (9, pitch, lowest[2], lowest[3], min(127, lowest[4] * 3 / 2), lowest[5])
-				ordered.sort(key=lambda note: (note[2] + round(note[4] * 8 / 127), note[1]), reverse=True)
+					lowest = (9, pitch, lowest[2], lowest[3], min(max_vol, lowest[4] * 3 / 2), lowest[5])
+				ordered.sort(key=lambda note: (note[2] + round(note[4] * 8 / max_vol), note[1]), reverse=True)
 				ordered.insert(0, lowest)
 			elif len(ordered) > 1:
 				ordered.remove(lowest)
@@ -82,7 +93,8 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 			ordered = list(beat)
 		for note in ordered:
 			itype, pitch, priority, _long, vel, pan = note
-			volume = min(254, round(vel * 2 / 64) * 64 if conservative else round(vel * 2 / 8) * 8)
+			vel -= min_vol
+			volume = max(0, min(254, round(vel * 2 / 64) * 64 if conservative else round(vel * 2 / 8) * 8))
 			panning = round(pan * 6 + 6)
 			ins = org_instrument_selection[itype]
 			if ins < 0:
@@ -113,7 +125,7 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 				if iid in taken:
 					continue
 				new_pitch = pitch + c4 - c1
-				note = SimpleNamespace(
+				note = OrgNote(
 					tick=i,
 					pitch=new_pitch,
 					length=1,
@@ -132,9 +144,10 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 				new_pitch = 95
 			h = (itype, new_pitch)
 			if (priority < 2 or conservative) and h in active:
-				reused = False
-				for iid in active[h]:
-					if iid not in taken:
+				try:
+					for iid in active[h]:
+						if iid in taken:
+							continue
 						instrument = instruments[iid]
 						last_vol, last_pan = instrument.notes[-1].volume, instrument.notes[-1].panning
 						idx = -1
@@ -142,7 +155,7 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 							idx -= 1
 						if last_note.length < 192:
 							if last_vol != volume or (last_pan != panning and not conservative):
-								instrument.notes.append(SimpleNamespace(
+								instrument.notes.append(OrgNote(
 									tick=i,
 									pitch=255,
 									length=1,
@@ -155,9 +168,8 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 								next_active[h].append(instrument.index)
 							except KeyError:
 								next_active[h] = [instrument.index]
-							reused = True
-							break
-				if reused:
+							raise StopIteration
+				except StopIteration:
 					continue
 			choices = sorted(instruments[:8], key=lambda instrument: (instrument.index not in taken, len(instrument.notes) < 3072, instrument.id == ins, instrument.id != 60, -(len(instrument.notes) // 1024)), reverse=True)
 			instrument = choices[0]
@@ -167,7 +179,7 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 				continue
 			if instrument.id == 60 and ins != 60 and pitch >= 12:
 				pitch -= 12
-			instrument.notes.append(SimpleNamespace(
+			instrument.notes.append(OrgNote(
 				tick=i,
 				pitch=new_pitch,
 				length=1,
@@ -187,6 +199,7 @@ def load_org(file):
 	print("Importing ORG...")
 	if isinstance(file, str):
 		file = open(file, "rb")
+	min_vol = 16
 	with file:
 		read = create_reader(file)
 		wait = read(6, 2)
@@ -232,15 +245,22 @@ def load_org(file):
 		[1, 0, "tempo", wait * 1000 * 8],
 	]
 	for i, ins in enumerate(instruments):
-		if i < 8:
+		if i not in range(8, 16):
 			events.append([i + 2, 0, "program_c", i, midi_instrument_selection[org_instrument_mapping[ins.id]]])
+			channel = i
+			pitch = None
+		else:
+			channel = 9
+			if i == 8:
+				events.append([i + 2, 0, "program_c", channel, 0])
+			pitch = [35, 38, 42, 46, 47, 73, 35, 35][i - 8]
 		for j, e in enumerate(ins.events):
 			if e.panning != 255:
-				events.append([i + 2, e.tick, "control_c", i, 10, (e.panning - 6) / 6 * 63 + 64])
+				events.append([i + 2, e.tick, "control_c", channel, 10, (e.panning - 6) / 6 * 63 + 64])
 			if e.volume != 255:
-				events.append([i + 2, e.tick, "control_c", i, 7, e.volume / 254 * 127])
+				events.append([i + 2, e.tick, "control_c", channel, 7, e.volume / 254 * (127 - min_vol) + min_vol])
 			if e.pitch != 255:
-				events.append([i + 2, e.tick, "note_on_c", i, e.pitch + c1, 127, 1, e.length])
+				events.append([i + 2, e.tick, "note_on_c", channel, pitch or e.pitch + c1, 127, 1, e.length])
 	return events
 
 # TODO: Finish implementation

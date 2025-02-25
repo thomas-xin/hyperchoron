@@ -44,7 +44,7 @@ options:
                         with the sand/snare drum instruments. Defaults to FALSE
   -x, --exclusive, --no-exclusive
                         For non-Minecraft outputs: Disables speed re-matching and strum quantisation, increases pitch
-                        range limits. Defaults to TRUE.
+                        range limits. Defaults to TRUE
 ```
 ## Project info
 - Hyperchoron (pun on chorus, and -choron, suffix for 4-dimensional polytopes) was originally exclusively designed as a MIDI to Minecraft Note Block export tool. Over time, support for other formats are being added, and it can now be considered a multipurpose project import helper.
