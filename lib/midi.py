@@ -59,6 +59,7 @@ def get_step_speed(midi_events, ctx=None):
 	time_diffs = {}
 	tempos = {}
 	since_tempo = 0
+	has_bends = False
 	for event in midi_events:
 		mode = event[2].strip().casefold()
 		timestamp = int(event[1])
@@ -95,6 +96,8 @@ def get_step_speed(midi_events, ctx=None):
 			since_tempo = timestamp
 			orig_tempo = new_tempo
 			milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet
+		elif mode == "pitch_bend_c":
+			has_bends = True
 	if tempos:
 		tempos[orig_tempo] = tempos.get(orig_tempo, 0) + int(midi_events[-1][1]) - since_tempo
 		tempo_list = list(tempos.items())
@@ -109,7 +112,7 @@ def get_step_speed(midi_events, ctx=None):
 		orig_tempo = orig_tempo or 500 * 1000
 		milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet # Default to 120 BPM
 		print("No BPM found! Defaulting to 120...")
-	return sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, ctx.resolution / ctx.speed, orig_tempo, ctx=ctx)
+	return sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, ctx.resolution / ctx.speed, orig_tempo, has_bends, ctx=ctx)
 
 def preprocess(midi_events, ctx):
 	title = None

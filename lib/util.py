@@ -63,7 +63,7 @@ def approximate_gcd(arr, min_value=8):
 
 	return (max_gcd, len(arr) - max_count) if max_gcd >= min_value else (gcd(*arr), len(arr))
 
-def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, orig_tempo, ctx=None):
+def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, orig_tempo, fine=False, ctx=None):
 	step_ms = round(1000 / tps)
 	rev = deque(sorted(timestamps, key=lambda k: timestamps[k]))
 	mode = timestamps[rev[-1]]
@@ -84,13 +84,13 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 			print("Rejecting first estimate:", speed, speed2, min_value, exclusions)
 			step = 1 / speed2
 			inclusions = sum((res := x % step) < step / 12 or res > step - step / 12 or (res := x % (step * 4)) < (step * 4) / 12 or res > (step * 4) - (step * 4) / 12 for x in timestamp_collection)
-			req = (max(speed2, 1 / speed2) - 1) * sqrt(2)
+			req = 0 if ctx.exclusive else (max(speed2, 1 / speed2) - 1) * sqrt(2)
 			print("Confidence:", inclusions / len(timestamp_collection), req)
 			if inclusions < len(timestamp_collection) * req:
 				print("Discarding tempo...")
-				speed = 0.2 if ctx.exclusive else 1
+				speed = 1
 			else:
-				speed = speed2 / 3 if ctx.exclusive else speed2
+				speed = speed2
 			use_exact = True
 		elif speed > min_value * 1.25:
 			print("Finding closest speed...", exclusions, len(timestamps))
@@ -106,7 +106,7 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 						speed *= 0.75
 				else:
 					speed //= 2
-			else:
+			elif fine or not ctx.exclusive:
 				speed /= div
 	if use_exact:
 		real_ms_per_clock = milliseconds_per_clock
