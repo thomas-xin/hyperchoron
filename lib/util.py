@@ -88,9 +88,9 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 			print("Confidence:", inclusions / len(timestamp_collection), req)
 			if inclusions < len(timestamp_collection) * req:
 				print("Discarding tempo...")
-				speed = 0.4 if ctx.exclusive else 1
+				speed = 0.2 if ctx.exclusive else 1
 			else:
-				speed = speed2 / 2 if ctx.exclusive else speed2
+				speed = speed2 / 3 if ctx.exclusive else speed2
 			use_exact = True
 		elif speed > min_value * 1.25:
 			print("Finding closest speed...", exclusions, len(timestamps))
@@ -112,7 +112,7 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 		real_ms_per_clock = milliseconds_per_clock
 	else:
 		real_ms_per_clock = round(milliseconds_per_clock * min_value / step_ms) * step_ms
-	print("Final speed scale:", speed, real_ms_per_clock)
+	print("Final speed scale:", milliseconds_per_clock, real_ms_per_clock, speed, step_ms, orig_tempo)
 	return milliseconds_per_clock, real_ms_per_clock, speed, step_ms, orig_tempo
 
 def create_reader(file):
@@ -160,7 +160,7 @@ def merge_imports(inputs, ctx):
 		else:
 			all_events = event_list[0]
 		all_events.sort(key=lambda e: int(e[1]))
-		speed_info = midi.get_step_speed(all_events, tps=20 / ctx.speed, ctx=ctx)
+		speed_info = midi.get_step_speed(all_events, ctx=ctx)
 		for midi_events in event_list:
 			notes, nc, is_org, instrument_activities2, speed_info = midi.deconstruct(midi_events, speed_info, ctx=ctx)
 			merge_activities(instrument_activities, instrument_activities2)

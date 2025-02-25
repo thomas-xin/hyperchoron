@@ -51,7 +51,7 @@ def csv2midi(file, output):
 	return csv_list
 
 
-def get_step_speed(midi_events, tps=20, ctx=None):
+def get_step_speed(midi_events, ctx=None):
 	orig_tempo = 0
 	clocks_per_crotchet = 0
 	milliseconds_per_clock = 0
@@ -109,7 +109,7 @@ def get_step_speed(midi_events, tps=20, ctx=None):
 		orig_tempo = orig_tempo or 500 * 1000
 		milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet # Default to 120 BPM
 		print("No BPM found! Defaulting to 120...")
-	return sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, orig_tempo, ctx=ctx)
+	return sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, ctx.resolution / ctx.speed, orig_tempo, ctx=ctx)
 
 def preprocess(midi_events, ctx):
 	title = None
@@ -482,10 +482,10 @@ class MidiNote:
 	aligned: int
 
 def render_midi(notes, instrument_activities, speed_info, ctx):
-	orig_ms_per_clock, real_ms_per_clock, scale, _orig_step_ms, _orig_tempo = speed_info
+	orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
 	speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
 	resolution = 6
-	wait = round(50 / speed_ratio * 1000 * 8)
+	wait = round(orig_step_ms / speed_ratio * 1000 * 8)
 	activities = list(map(list, instrument_activities.items()))
 	instruments = [SimpleNamespace(
 		id=midi_instrument_selection[curr[0]],
@@ -494,6 +494,7 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 		name=instrument_codelist[curr[0]],
 		channel=curr[0] if curr[0] >= 0 else 9,
 		pitchbend_range=0,
+		event_count=0,
 		sustain=sustain_map[curr[0]],
 	) for curr in activities for c in range(curr[1][1] if curr[0] != -1 else 1)]
 	drums = None
@@ -520,7 +521,7 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 				note = MidiNote(
 					tick=tick,
 					pitch=new_pitch,
-					length=1,
+					length=resolution,
 					volume=volume,
 					panning=panning,
 					events=[],
@@ -539,31 +540,43 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 			h = (itype, new_pitch)
 			if priority < 2:
 				try:
-					for h2 in (h, (itype, new_pitch - 1), (itype, new_pitch + 1)):
+					for h2 in (h, (itype, new_pitch - 1), (itype, new_pitch + 1), (itype, new_pitch - 2), (itype, new_pitch + 2)):
 						for iid in active.get(h2, ()):
 							if iid in taken:
 								continue
 							instrument = instruments[iid]
 							last_note = instrument.notes[-1]
 							last_vol, last_pan = last_note.volume, last_note.panning
-							if last_vol >= volume and not sustain_map[instrument.type]:
-								pass
-							else:
-								if last_vol != volume:
-									last_note.events.append((tick, "volume", min(127, round(volume / last_vol * 100))))
-								if last_pan != panning:
-									last_note.events.append((tick, "panning", panning))
+							if last_vol + 16 <= volume:
+								continue
 							if h != h2:
+								if last_pan != panning or last_note.length > resolution * 2:
+									continue
+								diff = h[1] - h2[1]
+								if last_vol + 8 <= volume:
+									continue
+								if abs(diff) > 1 and last_note.length > resolution:
+									continue
 								if last_note.aligned <= resolution * 2:
 									if not any(e[1] == "pitch" for e in last_note.events):
 										last_note.events.append((last_note.tick, "pitch", last_note.pitch))
 									last_note.pitch = new_pitch
 									last_note.aligned = 0
 								for j in range(resolution + 2):
-									offset = j / (resolution + 1) * (h[1] - h2[1])
+									offset = j / (resolution + 1) * diff
 									timing = tick - resolution // 2 + j - 1
 									last_note.events.append((timing, "pitch", h2[1] + offset))
+									instrument.event_count += 1
 								instrument.pitchbend_range = max(instrument.pitchbend_range, ceil(max(abs(e[2] - last_note.pitch) for e in last_note.events if e[1] == "pitch") / 12) * 12)
+							if last_vol >= volume and not sustain_map[instrument.type]:
+								pass
+							else:
+								if last_vol != volume:
+									last_note.events.append((tick, "volume", min(127, round(volume / last_vol * 100))))
+									instrument.event_count += 1
+								if last_pan != panning:
+									last_note.events.append((tick, "panning", panning))
+									instrument.event_count += 1
 							last_note.length += resolution
 							last_note.aligned += resolution
 							taken.append(iid)
@@ -622,7 +635,7 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 	b = open(output, "w", newline="", encoding="utf-8") if is_csv else io.StringIO()
 	nc = 0
 	with b:
-		instruments.sort(key=lambda ins: ins.pitchbend_range)
+		instruments.sort(key=lambda ins: ins.event_count)
 		writer = csv.writer(b)
 		writer.writerows([
 			[0, 0, "header", 1, len(instruments) + 1, 8 * resolution],

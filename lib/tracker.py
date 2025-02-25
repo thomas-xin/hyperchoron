@@ -19,9 +19,9 @@ class OrgNote:
 	panning: int
 
 def render_org(notes, instrument_activities, speed_info, ctx):
-	orig_ms_per_clock, real_ms_per_clock, scale, _orig_step_ms, _orig_tempo = speed_info
+	orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
 	speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
-	wait = round(50 / speed_ratio)
+	wait = round(orig_step_ms / speed_ratio)
 	activities = list(map(list, instrument_activities.items()))
 	instruments = []
 	if sum(t[1][1] for t in activities) >= 12:

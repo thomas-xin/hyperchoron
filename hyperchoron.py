@@ -48,6 +48,8 @@ def convert_file(args):
 		if ctx.exclusive is None:
 			print("Auto-switching to Exclusive mode...")
 			ctx.exclusive = True
+	if not ctx.resolution:
+		ctx.resolution = 50 if ctx.exclusive else 20
 	inputs = list(ctx.input)
 	if not ctx.output or not any("." in fn for fn in ctx.output):
 		*path, name = inputs[0].replace("\\", "/").rsplit("/", 1)
@@ -109,6 +111,7 @@ if __name__ == "__main__":
 	)
 	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)")
 	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mid | .csv | .nbs | .mcfunction | .litematic | .org | *)")
+	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target resolution of represented data in intermediate formats. Defaults to 20 for Minecraft outputs, 50 otherwise")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
 	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0")
 	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
