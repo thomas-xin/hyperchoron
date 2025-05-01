@@ -19,11 +19,11 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 		block_replacements.update()
 	nc = 0
 	for output in ctx.output:
-		ext = output.rsplit(".", 1)[-1]
+		ext = output.rsplit(".", 1)[-1].casefold()
 		match ext:
 			case "nbs":
 				from lib import minecraft
-				nc += minecraft.save_nbs(transport, output, ctx=ctx)
+				nc += minecraft.save_nbs(transport, output, speed_info, ctx=ctx)
 			case "mid" | "midi" | "csv":
 				from lib import midi
 				nc += midi.save_midi(transport, output, instrument_activities=instrument_activities, speed_info=speed_info, ctx=ctx)
@@ -43,8 +43,8 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 
 def convert_file(args):
 	ctx = args
-	if ctx.output and (ctx.output[0].rsplit(".", 1)[-1] not in ("nbs", "litematic", "mcfunction")):
-		ctx.strum_affinity = inf
+	if ctx.output and (ctx.output[0].rsplit(".", 1)[-1].casefold() not in ("nbs", "litematic", "mcfunction")):
+		# ctx.strum_affinity = inf
 		if ctx.exclusive is None:
 			print("Auto-switching to Exclusive mode...")
 			ctx.exclusive = True
@@ -72,7 +72,7 @@ def convert_file(args):
 			name = file.replace("\\", "/").rsplit("/", 1)[-1]
 		else:
 			name = file.name.replace("\\", "/").rsplit("/", 1)[-1]
-		ext = name.rsplit(".", 1)[-1]
+		ext = name.rsplit(".", 1)[-1].casefold()
 		match ext:
 			case "nbs":
 				from lib import minecraft
@@ -89,6 +89,9 @@ def convert_file(args):
 			case "mid" | "midi":
 				from lib import midi
 				data = midi.load_midi(file)
+			case "wav":
+				from lib import pcm
+				data = pcm.load_wav(file)
 			case _:
 				from lib import dawvert
 				data = dawvert.load_arbitrary(file, ext)
@@ -113,6 +116,7 @@ if __name__ == "__main__":
 	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mid | .csv | .nbs | .mcfunction | .litematic | .org | *)")
 	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target resolution of represented data in intermediate formats. Defaults to 20 for Minecraft outputs, 50 otherwise")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
+	parser.add_argument("-v", "--volume", nargs="?", type=float, default=1, help="Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1")
 	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0")
 	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
 	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1")

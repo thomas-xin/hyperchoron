@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import functools
 from math import ceil, hypot
 from types import SimpleNamespace
 from .mappings import (
@@ -7,7 +8,7 @@ from .mappings import (
 	percussion_mats,
 	c4, c1,
 )
-from .util import create_reader
+from .util import create_reader, transport_note_priority
 
 
 @dataclass(slots=True)
@@ -64,7 +65,7 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 		taken = []
 		next_active = {}
 		if beat:
-			ordered = sorted(beat, key=lambda note: (note[2] + round(note[4] * 8 / 127), note[1]), reverse=True)
+			ordered = sorted(beat, key=lambda note: (transport_note_priority(note, sustained=(note[0], note[1] - c1) in active), note[1]), reverse=True)
 			lowest = min((note[0] == -1, note[1], note) for note in beat)[-1]
 			if len(ordered) >= 7 and org_instrument_selection[lowest[0]] >= 0:
 				lowest_to_remove = True
@@ -272,6 +273,7 @@ def load_xm(file):
 		read = create_reader(file)
 		offs = 60
 		header_size = read(offs, 4)
+		song_length = read(offs + 4, 2)
 		channel_count = read(offs + 8, 2)
 		pattern_count = read(offs + 10, 2)
 		instrument_count = read(offs + 12, 2)
@@ -282,7 +284,9 @@ def load_xm(file):
 		patterns = []
 		for i in range(pattern_count):
 			pattern_head_size = read(offs, 4)
+			pattern_rows = read(offs + 5, 2)
 			pattern_size = read(offs + 7, 2)
+			print(i, pattern_rows, pattern_size)
 			offs += pattern_head_size
 			pattern = read(offs, pattern_size, decode=False)
 			patterns.append(pattern)
@@ -294,7 +298,6 @@ def load_xm(file):
 			name = read(offs + 4, 22, decode=False).rstrip(b"\x00").decode("utf-8").strip()
 			instrument = SimpleNamespace(
 				name=name,
-				samples=[],
 				sustain=False,
 			)
 			instruments.append(instrument)
@@ -310,13 +313,42 @@ def load_xm(file):
 				name = read(offs + 18, 22, decode=False).rstrip(b"\x00").decode("utf-8").strip()
 				if sample_type & 3:
 					instrument.sustain = True
-				# print(name, sample_type)
 				offs += sample_header_size
 			offs += sum(sample_sizes)
-		print(instruments, len(instruments), instrument_count)
-		raise NotImplementedError
-	print(channel_count, pattern_count, instrument_count, tempo, ordering)
-	raise NotImplementedError
+	events = [
+		[0, 0, "header", 1, len(instruments) + 1, 8],
+		[1, 0, "tempo", tempo * 1000 * 8],
+	]
+	@functools.lru_cache(maxsize=pattern_count)
+	def decode_pattern(p):
+		pattern = []
+		i = 0
+		while i < len(p):
+			pitch = p[i]
+			assert pitch < 128, "Pattern compression not yet implemented!"
+			ins, vcol, eff, efp = p[i + 1:i + 5]
+			i += 5
+			pattern.append([0, len(pattern), "note_on_c", channel, pitch or e.pitch + c1, 127, 1, e.length])
+	for b in ordering:
+		for event in decode_pattern(patterns[b]):
+			pass
+	for i, ins in enumerate(instruments):
+		if i not in range(8, 16):
+			events.append([i + 2, 0, "program_c", i, midi_instrument_selection[org_instrument_mapping[ins.id]]])
+			channel = i
+			pitch = None
+		else:
+			channel = 9
+			if i == 8:
+				events.append([i + 2, 0, "program_c", channel, 0])
+			pitch = [35, 38, 42, 46, 47, 73, 35, 35][i - 8]
+		for j, e in enumerate(ins.events):
+			if e.panning != 255:
+				events.append([i + 2, e.tick, "control_c", channel, 10, (e.panning - 6) / 6 * 63 + 64])
+			if e.volume != 255:
+				events.append([i + 2, e.tick, "control_c", channel, 7, e.volume / 254 * (127 - min_vol) + min_vol])
+			if e.pitch != 255:
+				events.append([i + 2, e.tick, "note_on_c", channel, pitch or e.pitch + c1, 127, 1, e.length])
 
 
 def save_org(transport, output, instrument_activities, speed_info, ctx):
@@ -331,7 +363,7 @@ def save_org(transport, output, instrument_activities, speed_info, ctx):
 		org.write(struct.pack("<L", 0))
 		org.write(struct.pack("<L", ceil(len(transport) / 4) * 4))
 		for i, ins in enumerate(instruments):
-			org.write(struct.pack("<H", 1000 + i * (50 if i & 1 else -50)))
+			org.write(struct.pack("<H", 1000 + (i + 1 >> 1) * (70 if i & 1 else -70)))
 			org.write(struct.pack("B", ins.id))
 			org.write(b"\x00")
 			org.write(struct.pack("<H", len(ins.notes)))

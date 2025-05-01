@@ -1,3 +1,6 @@
+import math
+
+
 # Predefined list attempting to match instruments across pitch ranges
 material_map = [
 	["bamboo_planks", "black_wool", "black_wool+", "amethyst_block+", "gold_block", "gold_block+"],
@@ -31,6 +34,7 @@ default_instruments.update(dict(
 	guitar="Plucked",
 	bass="Plucked",
 ))
+fixed_instruments = {v: k for k, v in reversed(default_instruments.items())}
 instrument_names = dict(
 	amethyst_block="harp",
 	bamboo_planks="bass",
@@ -231,8 +235,10 @@ cheap_materials = dict(
 	ochre_froglight="cobblestone",
 	gilded_blackstone="cobblestone",
 	sculk="cobblestone",
+	redstone_ore="cobblestone",
+	deepslate_redstone_ore="cobblestone",
 	polished_blackstone_slab="cobblestone_slab",
-	beacon="cobblestone_slab",
+	sea_lantern="cobblestone_slab",
 	acacia_trapdoor="cobblestone_slab",
 	crimson_trapdoor="cobblestone_slab",
 	bamboo_mosaic_slab="cobblestone_slab",
@@ -263,9 +269,7 @@ cheap_materials = dict(
 	piglin_head="air",
 	zombie_head="air",
 )
-expensive_materials = dict(
-	hopper="beacon",
-)
+expensive_materials = {}
 
 # Remapping of midi note range to note block note range
 c4 = 60
@@ -294,6 +298,13 @@ note_names = [
 	"A#",
 	"B",
 ]
+
+harmonics = dict(
+	default=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17)][1:],
+	triangle=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17, 2)][1:],
+	square=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17, 2)][1:],
+	saw=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17)][1:],
+)
 
 dawvert_inputs = dict(
 	mid="midi",

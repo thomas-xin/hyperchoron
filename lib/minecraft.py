@@ -1,7 +1,6 @@
 import functools
 import itertools
 from math import ceil, inf, trunc
-from types import SimpleNamespace
 try:
 	import tqdm
 except ImportError:
@@ -10,14 +9,33 @@ else:
 	import warnings
 	warnings.filterwarnings("ignore", category=tqdm.TqdmWarning)
 from .mappings import (
-	material_map, percussion_mats,
-	default_instruments, pitches,
-	instrument_names, nbs_names, nbs_values,
-	instrument_codelist,
+	material_map, percussion_mats, pitches,
+	instrument_names, nbs_names,
+	instrument_codelist, fixed_instruments,
 	cheap_materials, expensive_materials,
 	fs1,
 	MAIN, SIDE, DIV, BAR,
 )
+from .util import transport_note_priority
+
+
+def nbt_from_dict(d):
+	import nbtlib
+	if isinstance(d, int):
+		return nbtlib.tag.Int(d)
+	if isinstance(d, float):
+		return nbtlib.tag.Double(d)
+	if isinstance(d, str):
+		return nbtlib.tag.String(d)
+	if isinstance(d, list):
+		return nbtlib.tag.List(map(nbt_from_dict, d))
+	if isinstance(d, dict):
+		return nbtlib.tag.Compound({str(k): nbt_from_dict(v) for k, v in d.items()})
+	raise NotImplementedError(type(d), d)
+
+def nbt_to_str(d):
+	import json5
+	return json5.dumps(d, separators=(',', ':'))
 
 
 @functools.lru_cache(maxsize=256)
@@ -151,14 +169,14 @@ def render_minecraft(notes, ctx):
 			for pulse in (0, 1, 2, 3):
 				if pulse >= len(beat):
 					break
-				curr = beat[pulse]
+				curr = [note for note in beat[pulse] if note[2] >= 0]
 				if not curr:
 					continue
 				cap = MAIN * 2 + SIDE * 2 + 2 if pulse == 0 else SIDE * 4 if pulse == 2 else SIDE * 3
 				padding = (-1, 0, inf, 0, 0)
 				transparent = ("glowstone", "heavy_core", "blue_stained_glass", "red_stained_glass")
 				lowest = min((note[1], note) for note in curr)[1]
-				ordered = sorted(curr, key=lambda note: (note[2] * 2 + round(note[4] * 8 / 127), note[0] == -1, note[1]), reverse=True)[:cap]
+				ordered = sorted(curr, key=lambda note: (transport_note_priority(note, note[0] == -1, multiplier=3), note[1]), reverse=True)[:cap]
 				if lowest != padding and lowest not in ordered:
 					ordered[-1] = lowest
 				if pulse == 0:
@@ -281,6 +299,7 @@ def render_minecraft(notes, ctx):
 			if mirrored:
 				yield from (
 					((x * 19, y, z), "observer", dict(facing="north")),
+					((x * 19, y + 1, z), "torch"),
 					((x * 19, y, z + 1), "redstone_lamp"),
 					((x * 2, y - 1, z + 3), "black_stained_glass"),
 					((x * 2, y, z + 2), "black_stained_glass"),
@@ -309,6 +328,7 @@ def render_minecraft(notes, ctx):
 				yield from (
 					((x * 2, y - 1, z), "black_stained_glass"),
 					((x * 2, y, z), "observer", dict(facing="north")),
+					((x * 2, y + 1, z), "torch"),
 					((x * 2, y, z + 1), "redstone_lamp"),
 					((x, y - 1, z + 1), "glass"),
 					((x, y, z + 1), "repeater", dict(facing="west" if right else "east", delay=4)),
@@ -325,14 +345,18 @@ def render_minecraft(notes, ctx):
 					((x * 19, y + 1, z + 1), "activator_rail", dict(shape="north_south")),
 					((x * 19, y + 1, z + 2), "activator_rail", dict(shape="north_south")),
 				)
-		if y == 0:
-			yield ((x * 3, y - 1, z), "beacon")
+			yield ((x * 3, y - 1, z), "shroomlight")
 			for i in range(4, 18):
 				yield ((x * i, y - 1, z), "crimson_trapdoor" if i & 1 == right else "acacia_trapdoor", dict(facing="south", half="top"))
-			yield ((x * 18, y - 1, z), "beacon")
+			yield ((x * 18, y - 1, z), "shroomlight")
 			yield ((x * (18 if mirrored else 3), y, z), "observer", dict(facing="east" if right ^ mirrored else "west"))
 			for i in range(3, 18):
 				yield ((x * (i if mirrored else i + 1), y, z), "repeater", dict(facing="east" if right ^ mirrored else "west", delay=2))
+			for i in range(3, 19):
+				yield ((x * i, y + 3, z + 2), "sea_lantern")
+			if z <= 1:
+				for i in range(3, 19):
+					yield ((x * i, y + 3, z - 2), "sea_lantern")
 		elif y != 0:
 			reverse = True
 			lower = y < 0
@@ -347,15 +371,19 @@ def render_minecraft(notes, ctx):
 					((x * (i * 2 + o2), y, z), block),
 					((x * (i * 2 + o2 - 1), y - 1, z), slab, dict(type="top")),
 					((x * (i * 2 + o2 - 1), y, z), "repeater", dict(facing="east" if right ^ reverse else "west", delay=2)),
+					((x * (i * 2 + o2 - 1), y + 1, z), "glass"),
 					((x * (i * 2 + o1), y + (1 if lower else -1), z + 2), block),
 				)
 				if i < 7:
 					yield ((x * (i * 2 + o1 + 1), y + (0 if lower else -2), z + 2), slab, dict(type="top"))
 					yield ((x * (i * 2 + o1 + 1), y + (1 if lower else -1), z + 2), "repeater", dict(facing="west" if right ^ reverse else "east", delay=2))
+					yield ((x * (i * 2 + o1 + 1), y + (1 if lower else -1) + 1, z + 2), "sea_lantern")
 			x2 = x * 2 if reverse else x * 19 
 			yield from (
 				((x * (18 if reverse else 3), y, z), "observer", dict(facing="east" if right ^ reverse else "west")),
+				((x * (18 if reverse else 3), y + 1, z), "sea_lantern"),
 				((x * (3 if reverse else 18), y + (1 if lower else -1), z + 2), "observer", dict(facing="west" if right ^ reverse else "east")),
+				((x * (3 if reverse else 18), y + (1 if lower else -1) + 1, z + 2), "sea_lantern"),
 				((x2, y + (1 if lower else -1), z + 2), "observer", dict(facing="north")),
 				((x2, y - 1, z), edge, dict(type="top")),
 				((x2, y + (0 if lower else -2), z + 1), edge, dict(type="top")),
@@ -456,6 +484,7 @@ def render_minecraft(notes, ctx):
 				((x2, 11, z), "redstone_wire", dict(south="up", north="side")),
 				((x2, 12, z), "oxidized_copper_bulb", dict(lit="false")),
 				((x2, 12, z2), "redstone_wire", dict(north="side", south="side")),
+				((x2, 13, z), "torch"),
 			)
 
 	def profile_notes(notes, early=False):
@@ -469,6 +498,7 @@ def render_minecraft(notes, ctx):
 		((-6, 0), (-6, 1), (-9, 0), (-9, 1)),
 		((6, 0), (9, 0), (12, 0)),
 	)
+	b = 0
 	for b in (tqdm.trange(bars) if tqdm else range(bars)):
 		inverted = not b & 1
 		offset = b * 8 + 1
@@ -528,7 +558,7 @@ def render_minecraft(notes, ctx):
 
 	offset = b * 8 + 8
 	yield from (
-		((0, -1, 1), "hopper"),
+		((0, -1, 1), "hopper", dict(facing="north"), {'Items': [{'Slot': 0, 'id': 'minecraft:wooden_shovel', 'count': 1}, {'Slot': 1, 'id': 'minecraft:wooden_shovel', 'count': 1}, {'Slot': 2, 'id': 'minecraft:wooden_shovel', 'count': 1}, {'Slot': 3, 'id': 'minecraft:wooden_shovel', 'count': 1}, {'Slot': 4, 'id': 'minecraft:wooden_shovel', 'count': 1}]}),
 		((0, 0, 1), "powered_rail", dict(shape="north_south")),
 		((0, 0, 0), "netherite_block"),
 		((0, -1, 0), "honey_block"),
@@ -541,16 +571,16 @@ def render_minecraft(notes, ctx):
 		((-1, 1, 0), "redstone_wire", dict(east="side", west="side")),
 		((1, 0, -1), "obsidian"),
 		((-1, 0, -1), "obsidian"),
-		((0, 1, -1), "obsidian"),
+		((0, 1, -1), "shroomlight"),
 		((2, 1, -1), "composter", dict(level=6)),
 		((1, 1, -1), "comparator", dict(facing="east", powered="true")),
 		((0, -1, -2), "sticky_piston", dict(facing="south", extended="true")),
 		((0, -1, -1), "piston_head", dict(facing="south", short="false", type="sticky")),
-		((0, -3, -2), "cobbled_deepslate"),
+		((0, -3, -2), "target"),
 		((0, -2, -2), "redstone_torch"),
 		((1, -4, -2), "cobbled_deepslate"),
-		((1, -3, -2), "redstone_wire", dict(east="side", north="side", south="side", west="side")),
-		((0, -4, -1), "cobbled_deepslate"),
+		((1, -3, -2), "redstone_wire", dict(east="side", west="side")),
+		((0, -4, -1), "shroomlight"),
 		((1, -5, -1), "cobbled_deepslate"),
 		((1, -4, -1), "repeater", dict(delay=4, facing="south")),
 		((1, -4, 0), "observer", dict(facing="south")),
@@ -573,13 +603,17 @@ def render_minecraft(notes, ctx):
 			yield ((0, -4, i), "powered_rail", dict(shape="north_south", powered="true"))
 		else:
 			yield ((0, -4, i), "rail", dict(shape="north_east"))
-		yield ((0, -5, i), "redstone_block")
+		yield ((0, -5, i), "redstone_ore" if i & 1 else "deepslate_redstone_ore")
+		yield ((0, -7, i), "glass")
+		yield ((0, -6, i), "redstone_torch")
 	yield from (
-		((0, -5, offset), "redstone_block"),
+		((0, -5, offset), "deepslate_redstone_ore"),
+		((0, -7, offset), "glass"),
+		((0, -6, offset), "redstone_torch"),
 		((0, -4, offset + 1), "red_wool"),
 		((0, -3, offset + 2), "red_wool"),
 		((0, -2, offset + 3), "red_wool"),
-		((0, -1, offset + 4), "red_wool"),
+		((0, -1, offset + 4), "shroomlight"),
 		((0, -4, offset), "powered_rail", dict(shape="ascending_south", powered="true")),
 		((0, -3, offset + 1), "powered_rail", dict(shape="ascending_south", powered="true")),
 		((0, -2, offset + 2), "powered_rail", dict(shape="ascending_south", powered="true")),
@@ -610,61 +644,69 @@ def render_minecraft(notes, ctx):
 		)
 
 
-def load_nbs(file):
-	print("Importing NBS...")
-	import pynbs
-	nbs = pynbs.read(file)
-	transport = []
-	instrument_activities = {}
-	for tick, chord in nbs:
-		while tick > len(transport):
-			transport.append([])
-		mapped_chord = []
-		poly = {}
-		for note in chord:
-			instrument_name = nbs.layers[note.layer].name.rsplit("_", 1)[0]
-			if instrument_name == "Drumset":
-				ins = 6
-				default = 6
-			else:
-				default = instrument_codelist.index(default_instruments[nbs_values[note.instrument]])
-				try:
-					ins = instrument_codelist.index(instrument_name)
-				except ValueError:
-					ins = default
-			block = (
-				ins,
-				note.key - 33 + fs1 + pitches[nbs_values[note.instrument]],
-				not note.panning & 1,
-				ins != default,
-				round(note.velocity * 127 / 100),
-				note.panning / 50,
-			)
-			try:
-				poly[ins] += 1
-			except KeyError:
-				poly[ins] = 1
-			try:
-				instrument_activities[ins][0] += note.velocity
-				instrument_activities[ins][1] = max(instrument_activities[ins][1], poly[ins])
-			except KeyError:
-				instrument_activities[ins] = [note.velocity, poly[ins]]
-			mapped_chord.append(block)
-		transport.append(mapped_chord)
-	return SimpleNamespace(
-		transport=transport,
-		instrument_activities=instrument_activities,
-		speed_info=(50, 50, 20 / nbs.header.tempo, 50, 500),
-	)
+# def load_nbs(file):
+# 	print("Importing NBS...")
+# 	import pynbs
+# 	nbs = pynbs.read(file)
+# 	events = [
+# 		[0, 0, "header", 1, len(instruments) + 1, 8],
+# 		[1, 0, "tempo", 1000 * 1000 / nbs.header.tempo],
+# 	]
+# 	for tick, chord in nbs:
+# 		while tick > len(transport):
+# 			transport.append([])
+# 		mapped_chord = []
+# 		poly = {}
+# 		for note in chord:
+# 			instrument_name = nbs.layers[note.layer].name.rsplit("_", 1)[0]
+# 			if instrument_name == "Drumset":
+# 				ins = 6
+# 				default = 6
+# 			else:
+# 				default = instrument_codelist.index(default_instruments[nbs_values[note.instrument]])
+# 				try:
+# 					ins = instrument_codelist.index(instrument_name)
+# 				except ValueError:
+# 					ins = default
+# 			block = (
+# 				ins,
+# 				note.key - 33 + fs1 + pitches[nbs_values[note.instrument]],
+# 				not note.panning & 1,
+# 				ins != default,
+# 				round(note.velocity * 127 / 100),
+# 				note.panning / 50,
+# 			)
+# 			try:
+# 				poly[ins] += 1
+# 			except KeyError:
+# 				poly[ins] = 1
+# 			try:
+# 				instrument_activities[ins][0] += note.velocity
+# 				instrument_activities[ins][1] = max(instrument_activities[ins][1], poly[ins])
+# 			except KeyError:
+# 				instrument_activities[ins] = [note.velocity, poly[ins]]
+# 			mapped_chord.append(block)
+# 		transport.append(mapped_chord)
+# 	return SimpleNamespace(
+# 		transport=transport,
+# 		instrument_activities=instrument_activities,
+# 		speed_info=(50, 50, 20 / nbs.header.tempo, 50, 500),
+# 	)
 
 
-def save_nbs(transport, output, ctx):
+def save_nbs(transport, output, speed_info, ctx):
 	print("Exporting NBS...")
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+	if ctx.exclusive:
+		orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
+		speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
+		tempo = round(1000 * speed_ratio / orig_step_ms)
+	else:
+		tempo = 20
 	import pynbs
 	nbs = pynbs.new_file(
 		song_name=out_name,
-		tempo=20,
+		tempo=tempo,
 	)
 	nbs.header.song_origin = ctx.input[0].replace("\\", "/").rsplit("/", 1)[-1]
 	nbs.header.song_author="Hyperchoron"
@@ -678,7 +720,16 @@ def save_nbs(transport, output, ctx):
 			base, pitch = get_note_mat(note, odd=i & 1)
 			if base == "PLACEHOLDER":
 				continue
-			instrument = instrument_names[base]
+			raw = False
+			if ins != -1:
+				if ctx.exclusive:
+					instrument = fixed_instruments[instrument_codelist[ins]]
+					pitch = note[1] - pitches[instrument] - fs1
+					if pitch < 0:
+						pitch += 12
+					raw = True
+			if not raw:
+				instrument = instrument_names[base]
 			nbi = nbs_names[instrument]
 			try:
 				current_poly[ins] += 1
@@ -690,7 +741,7 @@ def save_nbs(transport, output, ctx):
 				key=pitch + 33,
 				instrument=nbi,
 				velocity=round(note[4] / 127 * 100),
-				panning=trunc(note[5] * 49) * 2 + (0 if note[2] else 1 if i & 1 else -1),
+				panning=trunc(note[5] * 49) * 2 + (0 if note[2] > 0 else 1 if i & 1 else -1),
 			)
 			nbs.notes.append(rendered)
 		for k, v in current_poly.items():
@@ -743,11 +794,12 @@ def save_mcfunction(transport, output, ctx):
 			if block == "sand":
 				f.write(f"setblock ~{x} ~{y - 1} ~{z} dirt keep\n")
 			nc += block == "note_block"
+			info = nbt = ""
 			if kwargs:
-				extra = "[" + ",".join(f"{k}={v}" for k, v in kwargs[0].items()) + "]"
-			else:
-				extra = ""
-			f.write(f"setblock ~{x} ~{y} ~{z} {block}{extra}\n")
+				info = "[" + ",".join(f"{k}={v}" for k, v in kwargs[0].items()) + "]"
+				if len(kwargs) > 1:
+					nbt = nbt_to_str(kwargs[1])
+			f.write(f"setblock ~{x} ~{y} ~{z} {block}{info}{nbt} strict\n")
 	return nc
 
 def save_litematic(transport, output, ctx):
@@ -760,7 +812,7 @@ def save_litematic(transport, output, ctx):
 	mx, my, mz = 20, 13, 2
 	bars = ceil(len(transport) / BAR / DIV)
 	depth = bars * 8 + 8
-	reg = litemapy.Region(-mx, -my, -mz, mx * 2 + 1, my * 2 + 1, depth + mz)
+	reg = litemapy.Region(-mx, -my, -mz, mx * 2 + 1, my * 2 + 1, depth + mz + 8)
 	schem = reg.as_schematic(
 		name=out_name,
 		author="Hyperchoron",
@@ -768,6 +820,7 @@ def save_litematic(transport, output, ctx):
 	)
 	nc = 0
 	for (x, y, z), block, *kwargs in blocks:
+		pos = (x + mx, y + my, z + mz)
 		if block in block_replacements:
 			block = block_replacements[block]
 			if block == "cobblestone_slab":
@@ -777,8 +830,12 @@ def save_litematic(transport, output, ctx):
 		nc += block == "note_block"
 		if kwargs:
 			block = litemapy.BlockState("minecraft:" + block, **{k: str(v) for k, v in kwargs[0].items()})
+			if len(kwargs) > 1:
+				tile_entity = litemapy.TileEntity(nbt_from_dict(kwargs[1]))
+				tile_entity.position = pos
+				reg.tile_entities.append(tile_entity)
 		else:
 			block = litemapy.BlockState("minecraft:" + block)
-		reg[x + mx, y + my, z + mz] = block
+		reg[pos] = block
 	schem.save(output)
 	return nc

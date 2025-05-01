@@ -30,7 +30,7 @@ def load_arbitrary(file, ext):
 
 def save_arbitrary(transport, output, instrument_activities, speed_info, ctx):
 	ext = output.rsplit(".", 1)[-1]
-	assert ext in dawvert_outputs, f"Input format {ext} currently unsupported."
+	assert ext in dawvert_outputs, f"Output format {ext} currently unsupported."
 	mid = os.path.abspath(output.rsplit(".", 1)[0] + ".mid")
 	nc = midi.save_midi(transport, mid, instrument_activities, speed_info, ctx)
 	if os.path.exists(output):

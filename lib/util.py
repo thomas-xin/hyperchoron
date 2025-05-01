@@ -20,14 +20,13 @@ def approximate_gcd(arr, min_value=8):
 
 	# Generate all possible divisors >= min_value from non-zero elements
 	divisors = set()
-	for x in non_zero:
-		x_abs = abs(x)
-		# Find all divisors of x_abs
-		for i in range(1, int(isqrt(x_abs)) + 1):
-			if x_abs % i == 0:
+	for x in set(map(abs, non_zero)):
+		# Find all divisors of x
+		for i in range(1, int(isqrt(x)) + 1):
+			if x % i == 0:
 				if i >= min_value:
 					divisors.add(i)
-				counterpart = x_abs // i
+				counterpart = x // i
 				if counterpart >= min_value:
 					divisors.add(counterpart)
 
@@ -43,10 +42,7 @@ def approximate_gcd(arr, min_value=8):
 
 	# Find the divisor(s) with the maximum count of divisible elements
 	for d in sorted_divisors:
-		count = 0
-		for x in arr:
-			if x % d == 0:
-				count += 1
+		count = sum(x % d == 0 for x in arr)
 		if count > max_count:
 			max_count = count
 			candidates = [d]
@@ -104,7 +100,7 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 					else:
 						print("Speed too close for rounding, autoscaling by 75%...")
 						speed *= 0.75
-				else:
+				elif speed > 1:
 					speed //= 2
 			elif fine or not ctx.exclusive:
 				speed /= div
@@ -123,6 +119,9 @@ def create_reader(file):
 			return b
 		return int.from_bytes(b, "little")
 	return read
+
+def transport_note_priority(n, sustained=False, multiplier=8):
+	return n[2] + round(n[4] * multiplier / 127) + sustained
 
 def merge_activities(a1, a2):
 	if not a1:
@@ -196,15 +195,15 @@ def transpose(transport, ctx):
 		minor_scores = [0] * 12
 		for key in range(12):
 			score = 0
-			for scale in (0, 0, 0, 0, 2, 4, 4, 4, 4, 5, 5, 7, 7, 7, 7, 9, 9, 11, 11):
+			for scale in (0, 0, 2, 4, 4, 5, 7, 7, 9, 11):
 				score += notes[(key + scale) % 12]
-			for scale in (1, 3, 3, 6, 8, 8):
+			for scale in (1, 3, 8):
 				score -= notes[(key + scale) % 12]
 			major_scores[key] = score
 			score = 0
-			for scale in (0, 0, 0, 0, 2, 3, 3, 3, 3, 5, 5, 7, 7, 7, 7, 8, 9, 10, 11):
+			for scale in (0, 0, 2, 3, 3, 5, 7, 7, 8, 11):
 				score += notes[(key + scale) % 12]
-			for scale in (1, 4, 4, 4, 4, 6):
+			for scale in (4, 4, 6):
 				score -= notes[(key + scale) % 12]
 			minor_scores[key] = score
 		candidates = list(enumerate(major_scores + minor_scores))
@@ -234,7 +233,7 @@ def transpose(transport, ctx):
 					pitch += adj
 					note = (note[0], pitch, *note[2:])
 					beat[i] = note
-	maxima = [(sum(sum(note[2] + 1 for note in beat) for beat in transport[i::4]), i) for i in range(4)]
+	maxima = [(sum(sum(map(transport_note_priority, beat)) for beat in transport[i::4]), i) for i in range(4)]
 	strongest_beat = max(maxima)[1]
 	if strongest_beat != 0:
 		buffer = [[]] * (4 - strongest_beat)
