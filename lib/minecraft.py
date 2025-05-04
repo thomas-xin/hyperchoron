@@ -50,9 +50,9 @@ def get_note_mat(note, odd=False):
 			return "PLACEHOLDER", 0
 	normalised = pitch - fs1
 	if normalised < 0:
-		normalised += 12
+		normalised %= 12
 	elif normalised > 72:
-		normalised -= 12
+		normalised = 60 + normalised % 12
 	assert 0 <= normalised <= 72, normalised
 	ins, mod = divmod(normalised, 12)
 	if mod == 0 and (ins > 5 or ins > 0 and odd):
@@ -697,7 +697,7 @@ def render_minecraft(notes, ctx):
 def save_nbs(transport, output, speed_info, ctx):
 	print("Exporting NBS...")
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	if ctx.exclusive:
+	if not ctx.mc_legal:
 		orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
 		speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
 		tempo = round(1000 * speed_ratio / orig_step_ms)
@@ -716,18 +716,20 @@ def save_nbs(transport, output, speed_info, ctx):
 		current_poly = {}
 		beat.sort(key=lambda note_value: (note_value[2], note_value[1]), reverse=True)
 		for note in beat:
+			if note[2] < 0:
+				continue
 			ins = note[0]
 			base, pitch = get_note_mat(note, odd=i & 1)
 			if base == "PLACEHOLDER":
 				continue
 			raw = False
 			if ins != -1:
-				if ctx.exclusive:
+				if not ctx.mc_legal:
 					instrument = fixed_instruments[instrument_codelist[ins]]
-					pitch = note[1] - pitches[instrument] - fs1
-					if pitch < 0:
-						pitch += 12
-					raw = True
+					pitch2 = note[1] - pitches[instrument] - fs1
+					if pitch2 in range(-33, 55):
+						pitch = pitch2
+						raw = True
 			if not raw:
 				instrument = instrument_names[base]
 			nbi = nbs_names[instrument]
@@ -740,7 +742,7 @@ def save_nbs(transport, output, speed_info, ctx):
 				layer=ins,
 				key=pitch + 33,
 				instrument=nbi,
-				velocity=round(note[4] / 127 * 100),
+				velocity=round(note[4] / 127 * 100) if note[2] >= 0 else 0,
 				panning=trunc(note[5] * 49) * 2 + (0 if note[2] > 0 else 1 if i & 1 else -1),
 			)
 			nbs.notes.append(rendered)

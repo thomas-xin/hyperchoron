@@ -237,11 +237,11 @@ NoteSegment = namedtuple("NoteSegment", ("instrument", "pitch", "priority", "lon
 def deconstruct(midi_events, speed_info, ctx=None):
 	played_notes = []
 	pitchbend_ranges = {}
-	max_pitch = 101 if ctx.exclusive else 84
+	max_pitch = 101 if not ctx.mc_legal else 84
 	active_notes = {i: [] for i in range(len(material_map))}
 	active_notes[-1] = []
 	instrument_activities = {}
-	timestamp = 0
+	timestamp_approx = timestamp = 0
 	loud = 0
 	note_candidates = 0
 	_orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, orig_tempo = speed_info
@@ -279,7 +279,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							if instrument in (-1, 6, 8):
 								sustain = 0
 							else:
-								sustain = sustain_map[instrument] or (1 if is_org else 2 if ctx.exclusive else 0)
+								sustain = sustain_map[instrument] or (1 if is_org else 2 if not ctx.mc_legal else 0)
 							if len(event) > 6:
 								priority, length_ticks = event[6], event[7]
 								length = (length_ticks + 0.25) * real_ms_per_clock / scale
@@ -327,7 +327,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 									if not candidate or note.start > candidate.start:
 										candidate = note
 							if candidate:
-								candidate.length = max(candidate.length, float(timestamp + curr_frac - candidate.start))
+								candidate.length = max(candidate.length, float(timestamp_approx + curr_frac - candidate.start))
 					case "control_c" if int(event[4]) == 6:
 						channel = int(event[3])
 						pitchbend_ranges[channel] = int(event[5])
@@ -369,20 +369,19 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						step_ms = int(new_step) if new_step.is_integer() else new_step
 						curr_frac = step_ms if step_ms.is_integer() else float(step_ms)
 						if not note_candidates:
-							timestamp = round(time)
+							timestamp_approx = timestamp = round(time)
 				global_index += 1
 			else:
-				timestamp_approx = float(timestamp)
 				ticked = {}
 				max_volume = 0
-				total_volume = 0
+				total_value = 0
 				poly = 0
 				for notes in active_notes.values():
 					for note in notes:
 						note.volume = channel_stats.get(note.channel, {}).get("volume", 1) * note.velocity / max_vel * 127 * ctx.volume
 						if note.volume > max_volume:
 							max_volume = note.volume
-						total_volume += note.volume
+						total_value += note.volume * note.length
 						poly += note.sustain
 				for instrument, notes in active_notes.items():
 					notes.reverse()
@@ -394,7 +393,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						sms = curr_frac
 						needs_sustain = note.sustain
 						long = length >= sms * 2
-						if note.start + sms > timestamp_approx or needs_sustain and timestamp_approx + sms <= end:
+						if note.start + sms * 2 / 3 > timestamp_approx or needs_sustain and timestamp_approx + sms <= end:
 							pitch = channel_stats.get(note.channel, {}).get("bend", 0) + note.pitch
 							normalised = pitch + ctx.transpose - fs1
 							if normalised > max_pitch:
@@ -403,9 +402,9 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								pitch = -12 - ctx.transpose + fs1
 							priority = note.priority
 							if priority > 0 and volume != 0:
-								period = note.period = round(min(1, ctx.strum_affinity * sqrt(2 * total_volume / volume)))
-								offset = note.offset = len(ticked) % period
-							elif round((timestamp - note.start) / sms) % note.period != note.offset:
+								period = note.period = round(max(1, 10 / ctx.strum_affinity * sqrt(total_value / volume / length) / sms))
+								offset = note.offset = sum(bool(info[1]) for info in ticked.values()) % period if long else 0
+							elif round((timestamp_approx - note.start) / sms) % note.period != note.offset:
 								priority = -1
 							bucket = (instrument, pitch)
 							try:
@@ -420,8 +419,8 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						if timestamp_approx >= end or len(notes) >= 64 and not needs_sustain:
 							notes.pop(i)
 						else:
-							note.priority = 0
-							if note.sustain == 2 and (length < sms * 3 or (timestamp - note.start) % (sms * 2) >= sms):
+							note.priority = 0 if note.sustain == 1 else -1
+							if note.sustain == 2 and (length < sms * 3 or (timestamp_approx - note.start) % (sms * 2) >= sms):
 								note.velocity = max(2, note.velocity - sms / (length + sms * 2) * note.velocity * 2)
 					notes.reverse()
 				beat = []
@@ -447,7 +446,9 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				played_notes.append(beat)
 				timestamp += curr_step
 				if timestamp.is_integer():
-					timestamp = int(timestamp)
+					timestamp_approx = timestamp = int(timestamp)
+				else:
+					timestamp_approx = float(timestamp)
 				if bar:
 					bar.update(curr_step / 1000)
 				loud *= 0.5

@@ -43,13 +43,12 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 
 def convert_file(args):
 	ctx = args
-	if ctx.output and (ctx.output[0].rsplit(".", 1)[-1].casefold() not in ("nbs", "litematic", "mcfunction")):
-		# ctx.strum_affinity = inf
-		if ctx.exclusive is None:
-			print("Auto-switching to Exclusive mode...")
-			ctx.exclusive = True
+	if ctx.output and (ctx.output[0].rsplit(".", 1)[-1].casefold() in ("litematic", "mcfunction")):
+		if ctx.mc_legal is None:
+			print("Auto-switching to Minecraft-Legal mode...")
+			ctx.mc_legal = True
 	if not ctx.resolution:
-		ctx.resolution = 50 if ctx.exclusive else 20
+		ctx.resolution = 50 if not ctx.mc_legal else 20
 	inputs = list(ctx.input)
 	if not ctx.output or not any("." in fn for fn in ctx.output):
 		*path, name = inputs[0].replace("\\", "/").rsplit("/", 1)
@@ -122,6 +121,6 @@ if __name__ == "__main__":
 	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be treated as regular instrument channels. Defaults to TRUE")
 	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="For Minecraft outputs: Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of Minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
-	parser.add_argument("-x", "--exclusive", action=argparse.BooleanOptionalAction, default=None, help="For non-Minecraft outputs: Disables speed re-matching and strum quantisation, increases pitch range limits. Defaults to TRUE")
+	parser.add_argument("-m", "--mc-legal", action=argparse.BooleanOptionalAction, default=None, help="Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic and .mcfunction outputs, FALSE otherwise")
 	args = parser.parse_args()
 	convert_file(args)

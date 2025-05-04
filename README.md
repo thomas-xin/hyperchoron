@@ -11,10 +11,8 @@
 `py -m pip install -r DawVert/requirements.txt`
 ## Usage
 ```ini
-py hyperchoron.py -h
-usage:  [-h] [-i INPUT [INPUT ...]] [-o [OUTPUT ...]] [-s [SPEED]] [-t [TRANSPOSE]]
-        [-ik | --invert-key | --no-invert-key] [-sa [STRUM_AFFINITY]] [-d | --drums | --no-drums]
-        [-c | --cheap | --no-cheap] [-x | --exclusive | --no-exclusive]
+usage:  [-h] [-i INPUT [INPUT ...]] [-o [OUTPUT ...]] [-r [RESOLUTION]] [-s [SPEED]] [-v [VOLUME]] [-t [TRANSPOSE]] [-ik | --invert-key | --no-invert-key]
+        [-sa [STRUM_AFFINITY]] [-d | --drums | --no-drums] [-c | --cheap | --no-cheap] [-m | --mc-legal | --no-mc-legal]
 
 MIDI-Tracker-DAW converter and Minecraft Note Block exporter
 
@@ -24,27 +22,24 @@ options:
                         Input file (.zip | .mid | .csv | .nbs | .org | *)
   -o, --output [OUTPUT ...]
                         Output file (.mid | .csv | .nbs | .mcfunction | .litematic | .org | *)
-  -s, --speed [SPEED]   Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster.
-                        Defaults to 1
+  -r, --resolution [RESOLUTION]
+                        Target resolution of represented data in intermediate formats. Defaults to 20 for Minecraft outputs, 50 otherwise
+  -s, --speed [SPEED]   Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1
+  -v, --volume [VOLUME]
+                        Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1
   -t, --transpose [TRANSPOSE]
-                        Transposes song up/down a certain amount of semitones, applied before instrument material
-                        mapping; higher = higher pitched. Defaults to 0
+                        Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0
   -ik, --invert-key, --no-invert-key
-                        Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C
-                        Major <=> C Minor). Defaults to FALSE
+                        Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE
   -sa, --strum-affinity [STRUM_AFFINITY]
-                        Increases or decreases threshold for sustained notes to be cut into discrete segments; higher
-                        = more notes. Defaults to 1
+                        Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1
   -d, --drums, --no-drums
-                        Allows percussion channel. If disabled, percussion channels will be treated as regular
-                        instrument channels. Defaults to TRUE
+                        Allows percussion channel. If disabled, percussion channels will be treated as regular instrument channels. Defaults to TRUE
   -c, --cheap, --no-cheap
-                        For Minecraft outputs: Restricts the list of non-instrument blocks to a more survival-friendly
-                        set. Also enables compatibility with previous versions of Minecraft. May cause spacing issues
-                        with the sand/snare drum instruments. Defaults to FALSE
-  -x, --exclusive, --no-exclusive
-                        For non-Minecraft outputs: Disables speed re-matching and strum quantisation, increases pitch
-                        range limits. Defaults to TRUE
+                        For Minecraft outputs: Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous
+                        versions of Minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE
+  -m, --mc-legal, --no-mc-legal
+                        Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic and .mcfunction outputs, FALSE otherwise
 ```
 ### Examples
 Converting a MIDI file into a Minecraft Litematica schematic:
@@ -118,7 +113,7 @@ Converting a raw audio file into a MIDI project file, transcribing all notes up 
   - .mid/.midi
   - .csv
   - .nbs
-    - If your intent is not to play the song in Minecraft but rather just to make a cover of a song using Minecraft sounds, make sure to include the `-x`/`--exclusive` option in the arguments, to enable looser timings and instrument pitch ranges.
+    - If you want to ensure that the output stays vanilla Minecraft compliant, be sure to use the `--mc-legal` argument. This option is normally enabled by default for `.litematic` and `.mcfunction` outputs.
   - .mcfunction: A list of Minecraft `/setblock` commands, to be run through a modded client or a datapack. The notes will be mapped to a multi-layered structure enabling 20Hz playback, but with limitations on polyphony, volume and pan control.
   - .litematic: Similar output to `.mcfunction`, but more easily viewed in the [Litematica](https://modrinth.com/mod/litematica) mod.
   - .org

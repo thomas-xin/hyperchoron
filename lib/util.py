@@ -80,7 +80,7 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 			print("Rejecting first estimate:", speed, speed2, min_value, exclusions)
 			step = 1 / speed2
 			inclusions = sum((res := x % step) < step / 12 or res > step - step / 12 or (res := x % (step * 4)) < (step * 4) / 12 or res > (step * 4) - (step * 4) / 12 for x in timestamp_collection)
-			req = 0 if ctx.exclusive else (max(speed2, 1 / speed2) - 1) * sqrt(2)
+			req = 0 if not ctx.mc_legal else (max(speed2, 1 / speed2) - 1) * sqrt(2)
 			print("Confidence:", inclusions / len(timestamp_collection), req)
 			if inclusions < len(timestamp_collection) * req:
 				print("Discarding tempo...")
@@ -92,7 +92,7 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 			print("Finding closest speed...", exclusions, len(timestamps))
 			div = round(speed / min_value - 0.25)
 			if div <= 1:
-				if not ctx.exclusive:
+				if ctx.mc_legal:
 					if speed % 3 == 0:
 						print("Speed too close for rounding, autoscaling by 2/3...")
 						speed *= 2
@@ -102,8 +102,10 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 						speed *= 0.75
 				elif speed > 1:
 					speed //= 2
-			elif fine or not ctx.exclusive:
+			elif fine or ctx.mc_legal:
 				speed /= div
+	while speed > 50:
+		speed /= 2
 	if use_exact:
 		real_ms_per_clock = milliseconds_per_clock
 	else:
