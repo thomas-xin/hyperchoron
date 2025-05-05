@@ -10,8 +10,8 @@ else:
 	warnings.filterwarnings("ignore", category=tqdm.TqdmWarning)
 from .mappings import (
 	material_map, percussion_mats, pitches,
-	instrument_names, nbs_names,
-	instrument_codelist, fixed_instruments,
+	instrument_names, nbs_names, nbs_values, midi_instrument_selection,
+	instrument_codelist, fixed_instruments, default_instruments,
 	cheap_materials, expensive_materials,
 	fs1,
 	MAIN, SIDE, DIV, BAR,
@@ -644,65 +644,55 @@ def render_minecraft(notes, ctx):
 		)
 
 
-# def load_nbs(file):
-# 	print("Importing NBS...")
-# 	import pynbs
-# 	nbs = pynbs.read(file)
-# 	events = [
-# 		[0, 0, "header", 1, len(instruments) + 1, 8],
-# 		[1, 0, "tempo", 1000 * 1000 / nbs.header.tempo],
-# 	]
-# 	for tick, chord in nbs:
-# 		while tick > len(transport):
-# 			transport.append([])
-# 		mapped_chord = []
-# 		poly = {}
-# 		for note in chord:
-# 			instrument_name = nbs.layers[note.layer].name.rsplit("_", 1)[0]
-# 			if instrument_name == "Drumset":
-# 				ins = 6
-# 				default = 6
-# 			else:
-# 				default = instrument_codelist.index(default_instruments[nbs_values[note.instrument]])
-# 				try:
-# 					ins = instrument_codelist.index(instrument_name)
-# 				except ValueError:
-# 					ins = default
-# 			block = (
-# 				ins,
-# 				note.key - 33 + fs1 + pitches[nbs_values[note.instrument]],
-# 				not note.panning & 1,
-# 				ins != default,
-# 				round(note.velocity * 127 / 100),
-# 				note.panning / 50,
-# 			)
-# 			try:
-# 				poly[ins] += 1
-# 			except KeyError:
-# 				poly[ins] = 1
-# 			try:
-# 				instrument_activities[ins][0] += note.velocity
-# 				instrument_activities[ins][1] = max(instrument_activities[ins][1], poly[ins])
-# 			except KeyError:
-# 				instrument_activities[ins] = [note.velocity, poly[ins]]
-# 			mapped_chord.append(block)
-# 		transport.append(mapped_chord)
-# 	return SimpleNamespace(
-# 		transport=transport,
-# 		instrument_activities=instrument_activities,
-# 		speed_info=(50, 50, 20 / nbs.header.tempo, 50, 500),
-# 	)
+def load_nbs(file):
+	print("Importing NBS...")
+	import pynbs
+	nbs = pynbs.read(file)
+	header = nbs.header
+	events = [
+		[0, 0, "header", 1, 9 + 1, 1],
+		[1, 0, "tempo", 1000 * 1000 / header.tempo],
+	]
+	for i in range(9):
+		events.append([i + 2, 0, "program_c", i, midi_instrument_selection[i]])
+	ticked = {}
+	for tick, chord in nbs:
+		for note in chord:
+			instrument_name = nbs.layers[note.layer].name.rsplit("_", 1)[0]
+			if instrument_name == "Drumset":
+				ins = 6
+				default = 6
+			else:
+				default = instrument_codelist.index(default_instruments[nbs_values[note.instrument]])
+				try:
+					ins = instrument_codelist.index(instrument_name)
+				except ValueError:
+					ins = default
+			pitch = note.key - 33 + fs1 + pitches[nbs_values[note.instrument]]
+			bucket = (note.layer, pitch)
+			if note.panning not in range(-1, 2):
+				events.append([ins + 2, tick, "control_c", ins, 10, note.panning / 100 * 63 + 64])
+			volume = round(note.velocity * 127 / 100)
+			if note.panning & 1:
+				if bucket in ticked:
+					prev = ticked[bucket]
+					if prev[5] == volume and tick - prev[1] < header.tempo / 2:
+						prev[7] = max(prev[7], 1 + tick - prev[1])
+						continue
+			note_event = [ins + 2, tick, "note_on_c", ins, pitch, volume, 1, 1]
+			events.append(note_event)
+			ticked[bucket] = note_event
+	events.sort(key=lambda e: e[1])
+	return events
 
 
 def save_nbs(transport, output, speed_info, ctx):
 	print("Exporting NBS...")
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	if not ctx.mc_legal:
-		orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
-		speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
-		tempo = round(1000 * speed_ratio / orig_step_ms)
-	else:
-		tempo = 20
+	orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
+	speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
+	wait = round(orig_step_ms / speed_ratio / 50) * 50 if ctx.mc_legal else orig_step_ms / speed_ratio
+	tempo = 1000 / wait
 	import pynbs
 	nbs = pynbs.new_file(
 		song_name=out_name,

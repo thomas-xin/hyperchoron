@@ -242,8 +242,8 @@ def load_org(file):
 				e.panning = read(offsets + j, 1)
 			offsets += len(ins.events)
 	events = [
-		[0, 0, "header", 1, len(instruments) + 1, 8],
-		[1, 0, "tempo", wait * 1000 * 8],
+		[0, 0, "header", 1, len(instruments) + 1, 1],
+		[1, 0, "tempo", wait * 1000],
 	]
 	for i, ins in enumerate(instruments):
 		if i not in range(8, 16):

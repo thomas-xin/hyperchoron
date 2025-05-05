@@ -104,8 +104,12 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 					speed //= 2
 			elif fine or ctx.mc_legal:
 				speed /= div
-	while speed > 50:
+	while speed > 66:
 		speed /= 2
+	if ctx.mc_legal:
+		while milliseconds_per_clock * speed < 50:
+			speed *= 2
+			print(milliseconds_per_clock, speed)
 	if use_exact:
 		real_ms_per_clock = milliseconds_per_clock
 	else:

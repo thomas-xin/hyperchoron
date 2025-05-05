@@ -157,8 +157,8 @@ def load_wav(file):
 	amp = np.abs(c.T, dtype=np.float64)
 	print(amp.shape, c.shape, sr)
 	events = [
-		[0, 0, "header", 1, 1 + 1, 8],
-		[1, 0, "tempo", bufsize / sr * 1000 * 1000 * 8],
+		[0, 0, "header", 1, 1 + 1, 1],
+		[1, 0, "tempo", bufsize / sr * 1000 * 1000 * 1],
 	]
 	events.append([2, 0, "program_c", 0, 46])
 	events.append([2, 0, "program_c", 1, 1])

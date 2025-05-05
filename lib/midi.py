@@ -402,7 +402,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								pitch = -12 - ctx.transpose + fs1
 							priority = note.priority
 							if priority > 0 and volume != 0:
-								period = note.period = round(max(1, 10 / ctx.strum_affinity * sqrt(total_value / volume / length) / sms))
+								period = note.period = round(min(8, max(1, 10 / ctx.strum_affinity * sqrt(total_value / volume / length) / sms)))
 								offset = note.offset = sum(bool(info[1]) for info in ticked.values()) % period if long else 0
 							elif round((timestamp_approx - note.start) / sms) % note.period != note.offset:
 								priority = -1
