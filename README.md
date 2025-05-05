@@ -44,8 +44,10 @@ options:
 ### Examples
 Converting a MIDI file into a Minecraft Litematica schematic:
 - `py hyperchoron.py -i input.mid -o output.litematic`
+
 Converting a FL Studio project into a Minecraft Note Block Studio project, ignoring vanilla Minecraft limitations (Refer below for additional requirements):
 - `py hyperchoron.py -i input.flp -x -o output.nbs`
+
 Converting a raw audio file into a MIDI project file, transcribing all notes up a Major 3rd (Refer below for additional requirements):
 - `py hyperchoron.py -i input.wav -t 4 -o output.mid`
 ## Project info
@@ -113,9 +115,9 @@ Converting a raw audio file into a MIDI project file, transcribing all notes up 
   - .mid/.midi
   - .csv
   - .nbs
-    - If you want to ensure that the output stays vanilla Minecraft compliant, be sure to use the `--mc-legal` argument. This option is normally enabled by default for `.litematic` and `.mcfunction` outputs.
+    - If you want to ensure that the output stays vanilla Minecraft compliant, be sure to use the `--mc-legal` argument. This option is normally enabled by default for `.litematic` and `.mcfunction` outputs. If not specified, Hyperchoron will attempt to utilise the full capacity of the `.nbs` format including non-integer tick rates, and will only switch instruments if notes fall outside even the extended range provided by Note Block Studio.
   - .mcfunction: A list of Minecraft `/setblock` commands, to be run through a modded client or a datapack. The notes will be mapped to a multi-layered structure enabling 20Hz playback, but with limitations on polyphony, volume and pan control.
-  - .litematic: Similar output to `.mcfunction`, but more easily viewed in the [Litematica](https://modrinth.com/mod/litematica) mod.
+  - .litematic: Similar output to `.mcfunction`, but more easily viewed and pasted using the [Litematica](https://modrinth.com/mod/litematica) mod.
   - .org
 - WIP:
   - .xm

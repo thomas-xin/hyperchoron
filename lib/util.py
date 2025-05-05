@@ -104,6 +104,8 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 					speed //= 2
 			elif fine or ctx.mc_legal:
 				speed /= div
+			elif div > 2:
+				speed /= div / 2
 	if use_exact:
 		real_ms_per_clock = milliseconds_per_clock
 	else:
@@ -233,8 +235,15 @@ def transpose(transport, ctx):
 					pitch += adj
 					note = (note[0], pitch, *note[2:])
 					beat[i] = note
-	maxima = [(sum(sum(map(transport_note_priority, beat)) for beat in transport[i::4]), i) for i in range(4)]
-	strongest_beat = max(maxima)[1]
+	divisions = 4
+	scores = [0] * divisions
+	for i in range(0, len(transport), divisions):
+		priorities = [sum(map(transport_note_priority, beat)) for beat in transport[i:i + divisions]]
+		for j in range(divisions):
+			if j >= len(priorities):
+				break
+			scores[j] += priorities[j]
+	strongest_beat = scores.index(max(scores))
 	if strongest_beat != 0:
 		buffer = [[]] * (4 - strongest_beat)
 		transport = buffer + transport
