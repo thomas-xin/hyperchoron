@@ -68,10 +68,10 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 	timestamp_collection = list(itertools.chain.from_iterable([k] * ceil(max(1, log2(v / 2))) for k, v in timestamps.items()))
 	min_value = step_ms / milliseconds_per_clock
 	print("Estimating true resolution...", len(timestamp_collection), clocks_per_crotchet, milliseconds_per_clock, step_ms, min_value)
-	speed, exclusions = approximate_gcd(timestamp_collection, min_value=min_value - 1)
+	speed, exclusions = approximate_gcd(timestamp_collection, min_value=min_value * 2 / 3)
 	use_exact = False
 	req = 1 / 8
-	print("Confidence:", 1 - exclusions / len(timestamp_collection), req)
+	print("Confidence:", 1 - exclusions / len(timestamp_collection), req, speed)
 	if speed > min_value * 1.25 or exclusions > len(timestamp_collection) * req:
 		if exclusions >= len(timestamp_collection) * 0.75:
 			speed2 = milliseconds_per_clock / step_ms * clocks_per_crotchet
@@ -104,12 +104,6 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 					speed //= 2
 			elif fine or ctx.mc_legal:
 				speed /= div
-	while speed > 66:
-		speed /= 2
-	if ctx.mc_legal:
-		while milliseconds_per_clock * speed < 50:
-			speed *= 2
-			print(milliseconds_per_clock, speed)
 	if use_exact:
 		real_ms_per_clock = milliseconds_per_clock
 	else:
