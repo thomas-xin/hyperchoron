@@ -696,7 +696,7 @@ def save_nbs(transport, output, speed_info, ctx):
 	import pynbs
 	nbs = pynbs.new_file(
 		song_name=out_name,
-		tempo=tempo,
+		tempo=round(tempo, 3),
 	)
 	nbs.header.song_origin = ctx.input[0].replace("\\", "/").rsplit("/", 1)[-1]
 	nbs.header.song_author="Hyperchoron"
@@ -712,16 +712,18 @@ def save_nbs(transport, output, speed_info, ctx):
 			base, pitch = get_note_mat(note, odd=i & 1)
 			if base == "PLACEHOLDER":
 				continue
-			raw = False
+			instrument = instrument_names[base]
 			if ins != -1:
 				if not ctx.mc_legal:
-					instrument = fixed_instruments[instrument_codelist[ins]]
-					pitch2 = note[1] - pitches[instrument] - fs1
-					if pitch2 in range(-33, 55):
+					instrument2 = fixed_instruments[instrument_codelist[ins]]
+					pitch2 = note[1] - pitches[instrument2] - fs1
+					if pitch2 in range(-12, 48):
 						pitch = pitch2
-						raw = True
-			if not raw:
-				instrument = instrument_names[base]
+						instrument = instrument2
+					else:
+						pitch2 = note[1] - pitches[instrument] - fs1
+						if pitch2 in range(-33, 55):
+							pitch = pitch2
 			nbi = nbs_names[instrument]
 			try:
 				current_poly[ins] += 1

@@ -300,7 +300,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							note = TransportNote(
 								pitch=pitch,
 								velocity=velocity,
-								start=timestamp,
+								start=timestamp_approx,
 								length=length,
 								channel=channel,
 								sustain=sustain,
@@ -373,6 +373,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				global_index += 1
 			else:
 				ticked = {}
+				long_notes = 0
 				max_volume = 0
 				total_value = 0
 				poly = 0
@@ -402,8 +403,8 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								pitch = -12 - ctx.transpose + fs1
 							priority = note.priority
 							if priority > 0 and volume != 0:
-								period = note.period = round(min(8, max(1, 15 / ctx.strum_affinity * sqrt(total_value / volume / length) / sms)))
-								offset = note.offset = sum(bool(info[1]) for info in ticked.values()) % period if long else 0
+								period = note.period = round(min(8, max(1, 200 / sqrt(pitch + 24) / ctx.strum_affinity * sqrt(total_value / volume / length) / sms))) if long else 8
+								offset = note.offset = long_notes % period if long else 0
 							elif round((timestamp_approx - note.start) / sms) % note.period != note.offset:
 								priority = -1
 							bucket = (instrument, pitch)
@@ -416,6 +417,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								temp[1] |= long
 								temp[3] = temp[3] if temp[2] > volume ** 2 else channel_stats.get(note.channel, {}).get("pan", 0)
 								temp[2] = temp[2] + volume ** 2
+							long_notes += long
 						if timestamp_approx >= end or len(notes) >= 64 and not needs_sustain:
 							notes.pop(i)
 						else:
