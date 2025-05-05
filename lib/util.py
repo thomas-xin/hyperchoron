@@ -68,7 +68,7 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 	timestamp_collection = list(itertools.chain.from_iterable([k] * ceil(max(1, log2(v / 2))) for k, v in timestamps.items()))
 	min_value = step_ms / milliseconds_per_clock
 	print("Estimating true resolution...", len(timestamp_collection), clocks_per_crotchet, milliseconds_per_clock, step_ms, min_value)
-	speed, exclusions = approximate_gcd(timestamp_collection, min_value=min_value * 2 / 3)
+	speed, exclusions = approximate_gcd(timestamp_collection, min_value=min_value * 3 / 4)
 	use_exact = False
 	req = 1 / 8
 	print("Confidence:", 1 - exclusions / len(timestamp_collection), req, speed)
