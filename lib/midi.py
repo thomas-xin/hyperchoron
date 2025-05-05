@@ -470,8 +470,8 @@ class MidiNote:
 def render_midi(notes, instrument_activities, speed_info, ctx):
 	orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
 	speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
+	wait = round(orig_step_ms / speed_ratio * 1000)
 	resolution = 6
-	wait = round(orig_step_ms / speed_ratio * 1000 * 8)
 	activities = list(map(list, instrument_activities.items()))
 	instruments = [SimpleNamespace(
 		id=midi_instrument_selection[curr[0]],
@@ -538,14 +538,14 @@ def render_midi(notes, instrument_activities, speed_info, ctx):
 							if (last_vol < volume or last_note.length > resolution * 4) and not sustain_map[instrument.type]:
 								continue
 							if h != h2:
-								if last_pan != panning or last_note.aligned > resolution * 2:
+								if last_pan != panning or last_note.aligned > resolution * 3:
 									continue
 								diff = h[1] - h2[1]
 								if last_vol + 8 <= volume:
 									continue
 								if abs(diff) > 1 and last_note.aligned > resolution:
 									continue
-								if last_note.aligned <= resolution * 2:
+								if last_note.aligned <= resolution * 3:
 									if not any(e[1] == "pitch" for e in last_note.events):
 										last_note.events.append((last_note.tick, "pitch", last_note.pitch))
 									last_note.pitch = new_pitch
@@ -626,13 +626,13 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 		instruments.sort(key=lambda ins: ins.event_count)
 		writer = csv.writer(b)
 		writer.writerows([
-			[0, 0, "header", 1, len(instruments) + 1, 8 * resolution],
+			[0, 0, "header", 1, len(instruments) + 1, resolution * 24],
 			[1, 0, "start_track"],
 			[1, 0, "title_t", out_name],
 			[1, 0, "copyright_t", "Hyperchoron"],
 			[1, 0, "text_t", "Exported MIDI"],
 			[1, 0, "time_signature", 4, 4, 8, 8],
-			[1, 0, "tempo", wait],
+			[1, 0, "tempo", wait * 24],
 			[1, 0, "end_track"],
 		])
 		covered_channels = {}
