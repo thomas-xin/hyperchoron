@@ -170,12 +170,30 @@ def load_wav(file):
 	active_notes = {}
 	overtone_cost = 0.25
 	overtone_value = 2
+	last_bassdrum = 0
 	for tick, bins in enumerate(amp):
 		chord = bins[::2]
 		note_instruments = [0] * len(chord)
+		has_bassdrum = False
 		for i, v in enumerate(chord):
 			if v <= loudest / 4096:
 				continue
+			if i < 12 and not has_bassdrum and v >= loudest / 32:
+				drum_candidates = 0
+				for j in range(i * 2, i * 2 + 24):
+					v2 = bins[j]
+					if abs(v - v2) < v / 2:
+						drum_candidates += 1
+				if drum_candidates >= 12:
+					has_bassdrum = True
+					for j in range(i, i + 12):
+						chord[j] = max(0, chord[j] - v)
+					vel = min(127, v * 1024 / loudest)
+					if vel > last_bassdrum * 1.2:
+						events.append([2, tick, "note_on_c", 9, 35, vel, 1, 1])
+						# print(events[-1])
+						last_bassdrum = vel
+					continue
 			overtone_matches = dict.fromkeys(harmonics, 0)
 			for k, values in harmonics.items():
 				for j, harmonic in values:
@@ -200,6 +218,8 @@ def load_wav(file):
 					case _:
 						ins = 0
 				note_instruments[i] = ins
+		if not has_bassdrum:
+			last_bassdrum = 0
 		# betweens = bins[1::2] * 0.5
 		# chord -= betweens
 		# chord[1:] -= betweens[:-1]
@@ -211,7 +231,7 @@ def load_wav(file):
 		for attempt in range(24):
 			i = inds.pop(-1)
 			v = norm[i]
-			if v < 1 / 4096:
+			if v < 1 / 16:
 				break
 			if active_notes.get(i, 0) >= v * 1.0625:
 				priority = -1

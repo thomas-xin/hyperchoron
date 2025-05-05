@@ -111,9 +111,10 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 					case "basedrum":
 						if mat == "netherrack":
 							iid = 8
+							pitch = rpitch - 12
 						else:
 							iid = 12
-							pitch = rpitch - 12
+							pitch = rpitch - 18
 					case "snare":
 						iid = 9
 					case "hat":
