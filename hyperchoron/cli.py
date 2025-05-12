@@ -1,6 +1,6 @@
 # Coco eats a gold block on the 18/2/2025. Nom nom nom nom. Output sound weird? Sorgy accident it was the block I eated. Rarararrarrrr 😋
 
-from math import inf
+import sys
 try:
 	import tqdm
 except ImportError:
@@ -8,7 +8,8 @@ except ImportError:
 else:
 	import warnings
 	warnings.filterwarnings("ignore", category=tqdm.TqdmWarning)
-from lib import util
+from hyperchoron import util
+from hyperchoron._version import get_versions
 
 
 def export(transport, instrument_activities, speed_info, ctx=None):
@@ -22,22 +23,22 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 		ext = output.rsplit(".", 1)[-1].casefold()
 		match ext:
 			case "nbs":
-				from lib import minecraft
+				from hyperchoron import minecraft
 				nc += minecraft.save_nbs(transport, output, speed_info, ctx=ctx)
 			case "mid" | "midi" | "csv":
-				from lib import midi
+				from hyperchoron import midi
 				nc += midi.save_midi(transport, output, instrument_activities=instrument_activities, speed_info=speed_info, ctx=ctx)
 			case "org":
-				from lib import tracker
+				from hyperchoron import tracker
 				nc += tracker.save_org(transport, output, instrument_activities=instrument_activities, speed_info=speed_info, ctx=ctx)
 			case "mcfunction":
-				from lib import minecraft
+				from hyperchoron import minecraft
 				nc += minecraft.save_mcfunction(transport, output, ctx=ctx)
 			case "litematic":
-				from lib import minecraft
+				from hyperchoron import minecraft
 				nc += minecraft.save_litematic(transport, output, ctx=ctx)
 			case _:
-				from lib import dawvert
+				from hyperchoron import dawvert
 				nc += dawvert.save_arbitrary(transport, output, instrument_activities=instrument_activities, speed_info=speed_info, ctx=ctx)
 	print("Final note count:", nc)
 
@@ -74,25 +75,25 @@ def convert_file(args):
 		ext = name.rsplit(".", 1)[-1].casefold()
 		match ext:
 			case "nbs":
-				from lib import minecraft
+				from hyperchoron import minecraft
 				data = minecraft.load_nbs(file)
 			case "csv":
-				from lib import midi
+				from hyperchoron import midi
 				data = midi.load_csv(file)
 			case "org":
-				from lib import tracker
+				from hyperchoron import tracker
 				data = tracker.load_org(file)
 			# case "xm":
-			# 	from lib import tracker
+			# 	from hyperchoron import tracker
 			# 	data = tracker.load_xm(file)
 			case "mid" | "midi":
-				from lib import midi
+				from hyperchoron import midi
 				data = midi.load_midi(file)
 			case "wav":
-				from lib import pcm
+				from hyperchoron import pcm
 				data = pcm.load_wav(file)
 			case _:
-				from lib import dawvert
+				from hyperchoron import dawvert
 				data = dawvert.load_arbitrary(file, ext)
 		imported.append(data)
 	transport, instrument_activities, speed_info, note_candidates = util.merge_imports(imported, ctx)
@@ -105,12 +106,13 @@ def convert_file(args):
 	export(transport, instrument_activities, speed_info, ctx=ctx)
 
 
-if __name__ == "__main__":
+def main():
 	import argparse
 	parser = argparse.ArgumentParser(
-		prog="",
-		description="MIDI-Tracker-DAW converter and Minecraft Note Block exporter",
+		prog=f"hyperchoron",
+		description=f"v{get_versions()['version']} MIDI-Tracker-DAW converter and Minecraft Note Block exporter",
 	)
+	parser.add_argument("-V", "--version", action="version", version=f"%(prog)s v{get_versions()['version']}")
 	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)")
 	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mid | .csv | .nbs | .mcfunction | .litematic | .org | *)")
 	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target resolution of represented data in intermediate formats. Defaults to 20 for Minecraft outputs, 50 otherwise")
@@ -124,3 +126,6 @@ if __name__ == "__main__":
 	parser.add_argument("-m", "--mc-legal", action=argparse.BooleanOptionalAction, default=None, help="Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic and .mcfunction outputs, FALSE otherwise")
 	args = parser.parse_args()
 	convert_file(args)
+
+if __name__ == "__main__":
+	main()
