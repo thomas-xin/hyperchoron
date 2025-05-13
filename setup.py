@@ -12,7 +12,7 @@ setup(
     description="Lightweight MIDI-Tracker-DAW converter and Minecraft Note Block exporter",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    author='Thomas Xin',
+    author="Thomas Xin",
     url="https://github.com/thomas-xin/hyperchoron",
     packages=[
         "hyperchoron",
