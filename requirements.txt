@@ -1,6 +1,0 @@
-json5>=0.12.0
-litemapy>=0.10.0b0
-nbtlib>=2.0.4
-py_midicsv>=4.1.2
-pynbs>=1.1.0
-tqdm>=4.67.1

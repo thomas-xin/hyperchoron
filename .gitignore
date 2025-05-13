@@ -6,3 +6,5 @@ examples/nbs
 examples/org
 examples/mid
 examples/csv
+.idea
+*.egg-info

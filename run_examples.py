@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 def run_conversion(ctx, fi, *fo):
-	args = [sys.executable, "hyperchoron.py", "-i", fi, "-o", *fo, "-t", str(ctx.transpose), "-s", str(ctx.speed), "-sa", str(ctx.strum_affinity)]
+	args = [sys.executable, "cli.py", "-i", fi, "-o", *fo, "-t", str(ctx.transpose), "-s", str(ctx.speed), "-sa", str(ctx.strum_affinity)]
 	if not ctx.drums:
 		args.append("--no-drums")
 	if ctx.mc_legal:
@@ -32,7 +32,7 @@ def convert_files(ctx):
 		if not os.path.exists(fold):
 			os.mkdir(fold)
 	fmts = [fold.rsplit("/", 1)[-1] for fold in ctx.output]
-	min_timestamp = os.path.getmtime("hyperchoron.py")
+	min_timestamp = os.path.getmtime("cli.py")
 	for fn in sorted(os.listdir(ctx.input), key=lambda fn: (fn.endswith(".zip"), os.path.getsize(f"{ctx.input}/{fn}")), reverse=True):
 		if fn.rsplit(".", 1)[-1] not in ("mid", "midi", "nbs", "zip"):
 			print(f"WARNING: File {repr(fn)} has unrecognised extension, skipping...")

@@ -16,10 +16,10 @@ semitone = 2 ** (1 / 12)
 
 # def load_templates():
 # 	instruments = {}
-# 	for fn in os.listdir("lib/wav"):
+# 	for fn in os.listdir("hyperchoron/wav"):
 # 		instrument = SimpleNamespace(name=fn.rsplit(".", 1)[0], base_freq=0, sample=None)
 # 		data = io.BytesIO()
-# 		with wave.open("lib/wav/" + fn, "rb") as w:
+# 		with wave.open("hyperchoron/wav/" + fn, "rb") as w:
 # 			assert (sr := w.getframerate()) == 48000
 # 			assert (_nc := w.getnchannels()) == 2
 # 			while True:

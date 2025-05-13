@@ -1,14 +1,14 @@
 ![thumbnail](https://raw.githubusercontent.com/thomas-xin/hyperchoron/refs/heads/main/thumb.jpg)
 # Instructions for use
 ## Installation
-- Install [git](https://github.com/git-guides/install-git) and [python](https://www.python.org).
+- Install [git](https://github.com/git-guides/install-git), [python](https://www.python.org) and [pip](https://pip.pypa.io/en/stable/)
 - Clone this repo:
 `git clone https://github.com/thomas-xin/hyperchoron`
-- Install dependencies:
-`py -m pip install -r requirements.txt`
+- Install this as a package:
+`pip install -e .`
 - (Optional) Install [DawVert](https://github.com/SatyrDiamond/DawVert) in the same directory:<br />
 `git clone https://github.com/SatyrDiamond/DawVert`<br />
-`py -m pip install -r DawVert/requirements.txt`
+`python3 -m pip install -r DawVert/requirements.txt`
 ## Usage
 ```ini
 usage:  [-h] [-i INPUT [INPUT ...]] [-o [OUTPUT ...]] [-r [RESOLUTION]] [-s [SPEED]] [-v [VOLUME]] [-t [TRANSPOSE]] [-ik | --invert-key | --no-invert-key]
@@ -18,6 +18,7 @@ MIDI-Tracker-DAW converter and Minecraft Note Block exporter
 
 options:
   -h, --help            show this help message and exit
+  -V, --version         show program's version number and exit
   -i, --input INPUT [INPUT ...]
                         Input file (.zip | .mid | .csv | .nbs | .org | *)
   -o, --output [OUTPUT ...]
@@ -43,13 +44,13 @@ options:
 ```
 ### Examples
 Converting a MIDI file into a Minecraft Litematica schematic:
-- `py hyperchoron.py -i input.mid -o output.litematic`
+- `hyperchoron -i input.mid -o output.litematic`
 
 Converting a FL Studio project into a Minecraft Note Block Studio project, ignoring vanilla Minecraft limitations (Refer below for additional requirements):
-- `py hyperchoron.py -i input.flp -x -o output.nbs`
+- `hyperchoron -i input.flp -x -o output.nbs`
 
 Converting a raw audio file into a MIDI project file, transcribing all notes up a Major 3rd (Refer below for additional requirements):
-- `py hyperchoron.py -i input.wav -t 4 -o output.mid`
+- `hyperchoron -i input.wav -t 4 -o output.mid`
 ## Project info
 - Hyperchoron (pun on chorus, and -choron, suffix for 4-dimensional polytopes) was originally exclusively designed as a MIDI to Minecraft Note Block export tool. Over time, support for other formats are being added, and it can now be considered a multipurpose project import helper.
 - The program takes one or more input and output files, with `.zip` file inputs being treated as multiple inputs in one.
