@@ -1,13 +1,15 @@
 import os
 import subprocess
 import sys
+from hyperchoron import util
+
 
 def run_conversion(ctx, fi, *fo):
-	args = [sys.executable, "cli.py", "-i", fi, "-o", *fo, "-t", str(ctx.transpose), "-s", str(ctx.speed), "-sa", str(ctx.strum_affinity)]
+	args = [sys.executable, "hyperchoron.py", "-i", fi, "-o", *fo, "-t", str(ctx.transpose), "-s", str(ctx.speed), "-sa", str(ctx.strum_affinity), "-md", str(ctx.max_distance)]
 	if not ctx.drums:
 		args.append("--no-drums")
 	if ctx.mc_legal:
-		args.append("-m")
+		args.append("-ml")
 	if ctx.invert_key:
 		args.append("-ik")
 	print(args)
@@ -32,7 +34,7 @@ def convert_files(ctx):
 		if not os.path.exists(fold):
 			os.mkdir(fold)
 	fmts = [fold.rsplit("/", 1)[-1] for fold in ctx.output]
-	min_timestamp = os.path.getmtime("cli.py")
+	min_timestamp = os.path.getmtime("hyperchoron.py")
 	for fn in sorted(os.listdir(ctx.input), key=lambda fn: (fn.endswith(".zip"), os.path.getsize(f"{ctx.input}/{fn}")), reverse=True):
 		if fn.rsplit(".", 1)[-1] not in ("mid", "midi", "nbs", "zip"):
 			print(f"WARNING: File {repr(fn)} has unrecognised extension, skipping...")
@@ -48,23 +50,6 @@ def convert_files(ctx):
 
 
 if __name__ == "__main__":
-	import argparse
-	parser = argparse.ArgumentParser(
-		prog="",
-		description="Hyperchoron Multi-Input",
-	)
-	parser = argparse.ArgumentParser(
-		prog="",
-		description="MIDI-Tracker-DAW converter and Minecraft Note Block exporter",
-	)
-	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)")
-	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mid | .csv | .nbs | .mcfunction | .litematic | .org | *)")
-	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
-	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0")
-	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
-	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1")
-	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be treated as regular instrument channels. Defaults to TRUE")
-	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="For Minecraft outputs: Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of Minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
-	parser.add_argument("-m", "--mc-legal", action=argparse.BooleanOptionalAction, default=None, help="Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic and .mcfunction outputs, FALSE otherwise")
+	parser = util.get_parser()
 	args = parser.parse_args()
 	convert_files(args)

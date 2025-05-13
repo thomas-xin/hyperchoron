@@ -1,16 +1,17 @@
 import math
 
 
+falling_blocks = ("sand", "black_concrete_powder", "gravel")
 # Predefined list attempting to match instruments across pitch ranges
 material_map = [
 	["bamboo_planks", "black_wool", "black_wool+", "amethyst_block+", "gold_block", "gold_block+"],
 	["bamboo_planks", "bamboo_planks+", "glowstone", "glowstone+", "gold_block", "gold_block+"],
 	["pumpkin", "pumpkin+", "amethyst_block", "clay", "clay+", "packed_ice+"],
 	["pumpkin", "pumpkin+", "emerald_block", "emerald_block+", "gold_block", "gold_block+"],
-	["bamboo_planks", "bamboo_planks+", "iron_block", "iron_block+", "gold_block", "gold_block+"],
+	["bamboo_planks", "bamboo_planks+", "iron_block", "iron_block+", "soul_sand+", "bone_block+"],
 	["bamboo_planks", "black_wool", "amethyst_block", "amethyst_block+", "packed_ice", "packed_ice+"],
-	["cobblestone", "cobblestone+", "red_stained_glass", "red_stained_glass+", "heavy_core", "heavy_core+"],
-	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "soul_sand+", "bone_block+"],
+	["netherrack", "netherrack+", "red_stained_glass", "red_stained_glass+", "red_sand", "red_sand+"],
+	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "gold_block", "gold_block+"],
 	None
 ]
 default_instruments = dict(
@@ -33,13 +34,15 @@ default_instruments.update(dict(
 	didgeridoo="Wind",
 	guitar="Plucked",
 	bass="Plucked",
+	xylophone="Pitched Percussion",
 ))
 fixed_instruments = {v: k for k, v in reversed(default_instruments.items())}
 instrument_names = dict(
 	amethyst_block="harp",
 	bamboo_planks="bass",
-	heavy_core="snare",
+	red_sand="snare",
 	black_concrete_powder="snare",
+	heavy_core="snare",
 	blue_stained_glass="hat",
 	red_stained_glass="hat",
 	obsidian="basedrum",
@@ -61,6 +64,11 @@ instrument_names = dict(
 	zombie_head="zombie",
 	creeper_head="creeper",
 	piglin_head="piglin",
+	warped_trapdoor="trapdoor",
+	bamboo_trapdoor="trapdoor",
+	oak_trapdoor="trapdoor",
+	bamboo_fence_gate="fence_gate",
+	dropper="dispenser",
 )
 nbs_names = {k: i for i, k in enumerate([
 	"harp",
@@ -81,7 +89,7 @@ nbs_names = {k: i for i, k in enumerate([
 	"pling",
 ])}
 nbs_values = {v: k for k, v in nbs_names.items()}
-for unsupported in ("skeleton", "wither_skeleton", "zombie", "creeper", "piglin"):
+for unsupported in ("skeleton", "wither_skeleton", "zombie", "creeper", "piglin", "trapdoor", "fence_gate", "dispenser"):
 	nbs_names[unsupported] = nbs_names["snare"]
 nbs_values.update({i: "creeper" for i in range(16, 32)})
 pitches = dict(
@@ -171,38 +179,42 @@ org_instrument_selection = [
 org_octave = 60
 percussion_mats = {int((data := line.split("#", 1)[0].strip().split("\t"))[0]): (data[1], int(data[2])) for line in """
 0	PLACEHOLDER	0
-31	heavy_core	16	# Sticks
-32	blue_stained_glass	24	# Square Click
+27	obsidian	24	# High Q
+28	black_concrete_powder	6	# Slap
+29	warped_trapdoor	0	# Scratch Push
+30	bamboo_trapdoor	0	# Scratch Pull
+31	black_concrete_powder	16	# Sticks
+32	dropper	0	# Square Click
 33	blue_stained_glass	8	# Metronome Click
 34	gold_block	18	# Metronome Bell
-35	netherrack	4	# Acoustic Bass Drum
-36	netherrack	8	# Bass Drum 1
+35	cobblestone	4	# Acoustic Bass Drum
+36	cobblestone	8	# Bass Drum 1
 37	blue_stained_glass	4	# Side Stick
-38	heavy_core	4	# Acoustic Snare
-39	heavy_core	12	# Hand Clap
-40	heavy_core	8	# Electric Snare
+38	black_concrete_powder	4	# Acoustic Snare
+39	oak_trapdoor	0	# Hand Clap
+40	black_concrete_powder	8	# Electric Snare
 41	obsidian	0	# Low Floor Tom
 42	blue_stained_glass	18	# Closed Hi-Hat
 43	obsidian	6	# High Floor Tom
 44	blue_stained_glass	21	# Pedal Hi-Hat
 45	obsidian	12	# Low Tom
-46	heavy_core	18	# Open Hi-Hat
+46	black_concrete_powder	18	# Open Hi-Hat
 47	obsidian	16	# Low-Mid Tom
 48	obsidian	20	# Hi-Mid Tom
 49	creeper_head	0	# Crash Cymbal 1
 50	obsidian	24	# High Tom
-51	heavy_core	23	# Ride Cymbal 1
-52	heavy_core	20	# Chinese Cymbal
-53	heavy_core	19	# Ride Bell
+51	black_concrete_powder	23	# Ride Cymbal 1
+52	black_concrete_powder	20	# Chinese Cymbal
+53	black_concrete_powder	19	# Ride Bell
 54	blue_stained_glass	19	# Tambourine
-55	heavy_core	17	# Splash Cymbal
+55	black_concrete_powder	17	# Splash Cymbal
 56	soul_sand	15	# Cowbell
 57	creeper_head	0	# Crash Cymbal 2
 58	skeleton_skull	0	# Vibraslap
-59	heavy_core	24	# Ride Cymbal 2
-60	netherrack	23	# Hi Bongo
-61	netherrack	21	# Low Bongo
-62	netherrack	10	# Mute Hi Conga
+59	black_concrete_powder	24	# Ride Cymbal 2
+60	cobblestone	23	# Hi Bongo
+61	cobblestone	21	# Low Bongo
+62	cobblestone	10	# Mute Hi Conga
 63	soul_sand	7	# Open Hi Conga
 64	soul_sand	2	# Low Conga
 65	obsidian	22	# High Timbale
@@ -214,7 +226,7 @@ percussion_mats = {int((data := line.split("#", 1)[0].strip().split("\t"))[0]): 
 71	gold_block	20	# Short Whistle
 72	packed_ice	17	# Long Whistle
 73	blue_stained_glass	12	# Short Guiro
-74	skeleton_skull	0	# Long Guiro
+74	bamboo_fence_gate	0	# Long Guiro
 75	bone_block	19	# Claves
 76	bone_block	14	# Hi Wood Block
 77	bone_block	7	# Low Wood Block
@@ -225,51 +237,30 @@ percussion_mats = {int((data := line.split("#", 1)[0].strip().split("\t"))[0]): 
 82	blue_stained_glass	16	# Closed Hi-Hat
 83	skeleton_skull	0	# Jingle Bell
 84	packed_ice	20	# Bell Tree
+85	dropper	0	# Castanets
+86	obsidian	8	# Mute Surdo
+87	obsidian	0	# Open Surdo
 """.strip().splitlines()}
-cheap_materials = dict(
-	netherite_block="cobblestone",
-	obsidian="cobblestone",
-	crying_obsidian="obsidian",
-	pearlescent_froglight="cobblestone",
-	verdant_froglight="cobblestone",
-	ochre_froglight="cobblestone",
-	gilded_blackstone="cobblestone",
-	sculk="cobblestone",
-	redstone_ore="cobblestone",
-	deepslate_redstone_ore="cobblestone",
-	polished_blackstone_slab="cobblestone_slab",
-	sea_lantern="cobblestone_slab",
-	acacia_trapdoor="cobblestone_slab",
-	crimson_trapdoor="cobblestone_slab",
-	bamboo_mosaic_slab="cobblestone_slab",
-	resin_brick_slab="cobblestone_slab",
-	prismarine_slab="cobblestone_slab",
-	waxed_cut_copper_slab="cobblestone_slab",
-	purpur_slab="cobblestone_slab",
-	dark_prismarine_slab="cobblestone_slab",
-	dark_prismarine="cobblestone",
-	prismarine_wall="cobblestone_wall",
-	oxidized_copper_trapdoor="bamboo_trapdoor",
-	white_stained_glass="glass",
-	blue_stained_glass="glass",
-	red_stained_glass="glass",
-	black_stained_glass="glass",
-	tinted_glass="glass",
-	mangrove_roots="cobblestone",
-	cobbled_deepslate="cobblestone",
-	black_wool="white_wool",
-	yellow_wool="cobblestone",
-	black_concrete_powder="sand",
-	heavy_core="sand",
-	magma_block="sand",
-	amethyst_block="dirt",
-	wither_skeleton_skull="air",
-	skeleton_skull="air",
-	creeper_head="air",
-	piglin_head="air",
-	zombie_head="air",
-)
-expensive_materials = {}
+
+# palette_flips = (
+# 	None,
+# 	None,
+# 	dict(
+# 		observer={
+# 			"north": "south",
+# 			"south": "north",
+# 		},
+# 		crafter={
+# 			"north_up": "south_up",
+# 			"south_up": "north_up",
+# 		},
+# 		activator_rail={
+# 			"ascending_north": "ascending_south",
+# 			"ascending_south": "ascending_north",
+# 		},
+
+# 	),
+# )
 
 # Remapping of midi note range to note block note range
 c4 = 60
@@ -278,11 +269,6 @@ fs1 = fs4 - 36
 c1 = c4 - 36
 c0 = c4 - 48
 c_1 = 0
-
-MAIN = 4
-SIDE = 2
-DIV = 4
-BAR = 32
 
 note_names = [
 	"C",
@@ -315,7 +301,6 @@ dawvert_inputs = dict(
 	mmp="lmms",
 	mmpz="lmms",
 	ssp="serato",
-	soundbridge="soundbridge",
 	mod="mod",
 	xm="xm",
 	s3m="s3m",
@@ -355,7 +340,6 @@ dawvert_outputs = dict(
 	mid="midi",
 	muse="muse",
 	sequence="onlineseq",
-	soundbridge="soundbridge",
 	rrp="reaper",
 	soundation="soundation",
 )

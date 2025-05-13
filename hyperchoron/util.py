@@ -1,7 +1,12 @@
 from collections import deque
+import datetime
 import itertools
 from math import ceil, isqrt, sqrt, log2, gcd
 from .mappings import note_names
+from ._version import get_versions
+
+DEFAULT_NAME = "Hyperchoron"
+DEFAULT_DESCRIPTION = f"Exported by Hyperchoron on {datetime.datetime.now().date()}"
 
 # Thank you deepseek-r1 for optimisation
 def approximate_gcd(arr, min_value=8):
@@ -67,21 +72,21 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 		timestamps.pop(rev.popleft())
 	timestamp_collection = list(itertools.chain.from_iterable([k] * ceil(max(1, log2(v / 2))) for k, v in timestamps.items()))
 	min_value = step_ms / milliseconds_per_clock
-	print("Estimating true resolution...", len(timestamp_collection), clocks_per_crotchet, milliseconds_per_clock, step_ms, min_value)
+	# print("Estimating true resolution...", len(timestamp_collection), clocks_per_crotchet, milliseconds_per_clock, step_ms, min_value)
 	speed, exclusions = approximate_gcd(timestamp_collection, min_value=min_value * 3 / 4)
 	use_exact = False
 	req = 1 / 8
-	print("Confidence:", 1 - exclusions / len(timestamp_collection), req, speed)
+	# print("Confidence:", 1 - exclusions / len(timestamp_collection), req, speed)
 	if speed > min_value * 1.25 or exclusions > len(timestamp_collection) * req:
 		if exclusions >= len(timestamp_collection) * 0.75:
 			speed2 = milliseconds_per_clock / step_ms * clocks_per_crotchet
 			while speed2 > sqrt(2):
 				speed2 /= 2
-			print("Rejecting first estimate:", speed, speed2, min_value, exclusions)
+			# print("Rejecting first estimate:", speed, speed2, min_value, exclusions)
 			step = 1 / speed2
 			inclusions = sum((res := x % step) < step / 12 or res > step - step / 12 or (res := x % (step * 4)) < (step * 4) / 12 or res > (step * 4) - (step * 4) / 12 for x in timestamp_collection)
 			req = 0 if not ctx.mc_legal else (max(speed2, 1 / speed2) - 1) * sqrt(2)
-			print("Confidence:", inclusions / len(timestamp_collection), req)
+			# print("Confidence:", inclusions / len(timestamp_collection), req)
 			if inclusions < len(timestamp_collection) * req:
 				print("Discarding tempo...")
 				speed = 1
@@ -89,16 +94,16 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 				speed = speed2
 			use_exact = True
 		elif speed > min_value * 1.25:
-			print("Finding closest speed...", exclusions, len(timestamps))
+			# print("Finding closest speed...", exclusions, len(timestamps))
 			div = round(speed / min_value - 0.25)
 			if div <= 1:
 				if ctx.mc_legal:
 					if speed % 3 == 0:
-						print("Speed too close for rounding, autoscaling by 2/3...")
+						# print("Speed too close for rounding, autoscaling by 2/3...")
 						speed *= 2
 						speed //= 3
 					else:
-						print("Speed too close for rounding, autoscaling by 75%...")
+						# print("Speed too close for rounding, autoscaling by 75%...")
 						speed *= 0.75
 				elif speed > 1:
 					speed //= 2
@@ -110,7 +115,7 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 		real_ms_per_clock = milliseconds_per_clock
 	else:
 		real_ms_per_clock = round(milliseconds_per_clock * min_value / step_ms) * step_ms
-	print("Final speed scale:", milliseconds_per_clock, real_ms_per_clock, speed, step_ms, orig_tempo)
+	print("Detected speed scale:", milliseconds_per_clock, real_ms_per_clock, speed, step_ms, orig_tempo)
 	return milliseconds_per_clock, real_ms_per_clock, speed, step_ms, orig_tempo
 
 def create_reader(file):
@@ -247,3 +252,23 @@ def transpose(transport, ctx):
 	if strongest_beat != 0:
 		buffer = [[]] * (4 - strongest_beat)
 		transport = buffer + transport
+
+def get_parser():
+	import argparse
+	parser = argparse.ArgumentParser(
+		prog="hyperchoron",
+		description=f"v{get_versions()['version']} MIDI-Tracker-DAW converter and Minecraft Note Block exporter",
+	)
+	parser.add_argument("-V", "--version", action="version", version=f"%(prog)s v{get_versions()['version']}")
+	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)")
+	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | *)")
+	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target resolution of represented data in intermediate formats. Defaults to 20 for Minecraft outputs, 50 otherwise")
+	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
+	parser.add_argument("-v", "--volume", nargs="?", type=float, default=1, help="Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1")
+	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0")
+	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
+	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1")
+	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be treated as regular instrument channels. Defaults to TRUE")
+	parser.add_argument("-md", "--max-distance", nargs="?", type=int, default=42, help="For Minecraft outputs: Restricts the maximum block distance the notes may be placed from the centre line of the structure, in increments of 3 (one module). Controls the ratio of compactness vs note volume accuracy. Defaults to 42")
+	parser.add_argument("-ml", "--mc-legal", action=argparse.BooleanOptionalAction, default=None, help="Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic, .mcfunction and .nbt outputs, FALSE otherwise")
+	return parser
