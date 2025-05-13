@@ -728,7 +728,7 @@ def render_minecraft(transport, ctx):
 					coords[0] += x - main.x
 					coords[1] += y - main.y
 					coords[2] += z - main.z
-					main = setblock(main, coords, target, no_replace=("minecraft:observer", "minecraft:repeater"))
+					main = setblock(main, coords, target, no_replace=("minecraft:observer", "minecraft:repeater", "minecraft:wall_torch") if block == "tripwire" else ())
 
 			for tick in range(ticks_per_segment):
 				if not notes:
@@ -1064,7 +1064,9 @@ def save_litematic(transport, output, ctx):
 					pos = (x, y, z)
 					if mask[pos] != 0:
 						block = str(reg[pos]).removeprefix("minecraft:")
-						lines.append(f"setblock ~{x + reg.x} ~{y + reg.y} ~{z + reg.z} {block} strict\n")
+						if block not in ("end_rod[facing=up]", "wall_torch[facing=west]", "wall_torch[facing=east]", "sea_lantern"):
+							block += " strict"
+						lines.append(f"setblock ~{x + reg.x} ~{y + reg.y} ~{z + reg.z} {block}\n")
 		lines.append("forceload remove all")
 		with open(output, "w") as f:
 			f.writelines(lines)
