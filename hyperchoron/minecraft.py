@@ -650,7 +650,7 @@ def render_minecraft(transport, ctx):
 				skeleton2._Region__x = x
 				skeleton2._Region__y = y
 				skeleton2._Region__z = z
-				main = paste_region(main, skeleton2)
+				main = paste_region(main, skeleton2, ignore_src_air=True)
 				upgraded.add((x, y))
 
 			if backwards and segment == 1:

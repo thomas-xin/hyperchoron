@@ -27,7 +27,12 @@ def wait_procs(procs):
 def convert_files(ctx):
 	procs = []
 	if not ctx.input:
-		ctx.input = "examples/midi"
+		ctx.input = ["examples/midi/" + f for f in os.listdir("examples/midi")]
+	else:
+		for fn in ctx.input:
+			if os.path.isdir(fn):
+				ctx.input.remove(fn)
+				ctx.input.extend(fn + "/" + f for f in os.listdir(fn))
 	if not ctx.output:
 		ctx.output = ["examples/nbs"]
 	for fold in ctx.output:
@@ -35,16 +40,15 @@ def convert_files(ctx):
 			os.mkdir(fold)
 	fmts = [fold.rsplit("/", 1)[-1] for fold in ctx.output]
 	min_timestamp = os.path.getmtime("hyperchoron.py")
-	for fn in sorted(os.listdir(ctx.input), key=lambda fn: (fn.endswith(".zip"), os.path.getsize(f"{ctx.input}/{fn}")), reverse=True):
+	for fn in sorted(ctx.input, key=lambda fn: (fn.endswith(".zip"), os.path.getsize(fn)), reverse=True):
 		if fn.rsplit(".", 1)[-1] not in ("mid", "midi", "nbs", "zip"):
 			print(f"WARNING: File {repr(fn)} has unrecognised extension, skipping...")
 			continue
 		names = [fn.rsplit(".", 1)[0] + "." + fmt for fmt in fmts]
-		fi = f"{ctx.input}/{fn}"
-		fo = [f"{fold}/{n}" for fold, n in zip(ctx.output, names)]
-		if any(not os.path.exists(f) or not os.path.getsize(f) or os.path.getmtime(f) < max(min_timestamp, os.path.getmtime(fi)) for f in fo):
+		fo = [fold + "/" + n.replace("\\", "/").rsplit("/", 1)[-1] for fold, n in zip(ctx.output, names)]
+		if any(not os.path.exists(f) or not os.path.getsize(f) or os.path.getmtime(f) < max(min_timestamp, os.path.getmtime(fn)) for f in fo):
 			wait_procs(procs)
-			procs.append(run_conversion(ctx, fi, *fo))
+			procs.append(run_conversion(ctx, fn, *fo))
 	for proc in procs:
 		proc.wait()
 
