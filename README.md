@@ -92,7 +92,6 @@ Converting a raw audio file into a MIDI project file, transcribing all notes up 
     - .rpp
     - .dawproject
     - .ssp
-    - .soundbridge
     - .mod
     - .xm
     - .s3m
@@ -143,7 +142,6 @@ Converting a raw audio file into a MIDI project file, transcribing all notes up 
     - .lmms
     - .muse
     - .onlineseq
-    - .soundbridge
     - .reaper
     - .soundation
 
