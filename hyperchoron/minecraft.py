@@ -1,6 +1,10 @@
+from collections import deque, namedtuple
+import copy
 import functools
-import itertools
-from math import ceil, inf, trunc
+from math import ceil, sqrt, trunc
+import litemapy
+from nbtlib.tag import Int, Double, String, List, Compound
+import numpy as np
 try:
 	import tqdm
 except ImportError:
@@ -9,34 +13,35 @@ else:
 	import warnings
 	warnings.filterwarnings("ignore", category=tqdm.TqdmWarning)
 from .mappings import (
-	material_map, percussion_mats, pitches,
+	material_map, percussion_mats, pitches, falling_blocks,
 	instrument_names, nbs_names, nbs_values, midi_instrument_selection,
 	instrument_codelist, fixed_instruments, default_instruments,
-	cheap_materials, expensive_materials,
 	fs1,
-	MAIN, SIDE, DIV, BAR,
 )
-from .util import transport_note_priority
+from .util import transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 
 def nbt_from_dict(d):
-	import nbtlib
 	if isinstance(d, int):
-		return nbtlib.tag.Int(d)
+		return Int(d)
 	if isinstance(d, float):
-		return nbtlib.tag.Double(d)
+		return Double(d)
 	if isinstance(d, str):
-		return nbtlib.tag.String(d)
+		return String(d)
 	if isinstance(d, list):
-		return nbtlib.tag.List(map(nbt_from_dict, d))
+		return List(map(nbt_from_dict, d))
 	if isinstance(d, dict):
-		return nbtlib.tag.Compound({str(k): nbt_from_dict(v) for k, v in d.items()})
+		return Compound({str(k): nbt_from_dict(v) for k, v in d.items()})
 	raise NotImplementedError(type(d), d)
 
 def nbt_to_str(d):
 	import json5
 	return json5.dumps(d, separators=(',', ':'))
 
+air = litemapy.BlockState("minecraft:air")
+note_block = litemapy.BlockState("minecraft:note_block", instrument="custom_head")
+end_rod = litemapy.BlockState("minecraft:end_rod")
+black_carpet = litemapy.BlockState("minecraft:black_carpet")
 
 @functools.lru_cache(maxsize=256)
 def get_note_mat(note, odd=False):
@@ -90,7 +95,7 @@ def get_note_mat(note, odd=False):
 			mat = replace[mat]
 		except KeyError:
 			return "PLACEHOLDER", 0
-	elif note[3] and (not odd or mod not in (0, 1, 11, 12, 23, 24)):
+	elif note[3] and not odd:
 		replace = dict(
 			bamboo_planks="pumpkin",
 			bone_block="gold_block",
@@ -136,512 +141,759 @@ def get_note_mat(note, odd=False):
 def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=None):
 	base, pitch = get_note_mat(note, odd=odd)
 	x, y, z = positioning
-	coords = [(x, y, z), (x, y + 1, z), (x, y + 2, z)]
+	coords = [(x, y - 1, z), (x, y, z), (x, y + 1, z)]
 	if replace and base in replace:
 		base = replace[base]
 	if base == "PLACEHOLDER":
-		return (
-			(coords[0], "mangrove_roots"),
-		)
+		return
 	if base.endswith("_head") or base.endswith("_skull"):
-		return (
-			(coords[0], "magma_block"),
+		yield from (
 			(coords[1], "note_block", dict(note=pitch, instrument=instrument_names[base])),
 			(coords[2], base),
 		)
-	return (
+		return
+	if base in falling_blocks:
+		yield ((x, y - 2, z), "tripwire")
+	yield from (
 		(coords[0], base),
 		(coords[1], "note_block", dict(note=pitch, instrument=instrument_names[base])),
+		(coords[2], "air"),
 	)
 
-def render_minecraft(notes, ctx):
-	def extract_notes(notes, offset, direction=1, invert=False, elevations=()):
-		for i in range(16):
-			beat = []
-			for j in range(4):
-				try:
-					block = notes.pop(0)
-				except IndexError:
-					block = []
-				beat.append(block)
-			if not beat:
-				break
-			for pulse in (0, 1, 2, 3):
-				if pulse >= len(beat):
-					break
-				curr = [note for note in beat[pulse] if note[2] >= 0]
-				if not curr:
-					continue
-				cap = MAIN * 2 + SIDE * 2 + 2 if pulse == 0 else SIDE * 4 if pulse == 2 else SIDE * 3
-				padding = (-1, 0, inf, 0, 0)
-				transparent = ("glowstone", "heavy_core", "blue_stained_glass", "red_stained_glass")
-				lowest = min((note[1], note) for note in curr)[1]
-				ordered = sorted(curr, key=lambda note: (transport_note_priority(note, note[0] == -1, multiplier=3), note[1]), reverse=True)[:cap]
-				if lowest != padding and lowest not in ordered:
-					ordered[-1] = lowest
-				if pulse == 0:
-					x = (-3 - i if direction == 1 else -18 + i) * (-1 if invert else 1)
-					y = 0
-					z = offset
-					if len(ordered) > MAIN * 2 + SIDE * 2:
-						found = []
-						taken = False
-						for k, note in enumerate(reversed(ordered)):
-							note = list(note)
-							note[3] = 2
-							note = tuple(note)
-							mat, pitch = get_note_mat(note, odd=pulse & 1)
-							if mat != "PLACEHOLDER":
-								found.append(k)
-								yield ((-x if taken else x, y + 2, z - 1), "note_block", dict(note=pitch, instrument="harp"))
-								if taken:
-									break
-								else:
-									taken = True
-						if found:
-							ordered = [note for k, note in enumerate(reversed(ordered)) if k not in found][::-1]
-					ordered, remainder = ordered[:MAIN * 2], ordered[MAIN * 2:]
-					required_padding = sum(get_note_mat(note, odd=pulse & 1)[0] in transparent for note in ordered) * 2 - len(ordered)
-					for p in range(required_padding):
-						ordered.append(padding)
-					ordered.sort(key=lambda note: get_note_mat(note, odd=pulse & 1)[0] in transparent)
-					while ordered and ordered[-1] == padding:
-						ordered.pop(-1)
-					if ordered:
-						yield ((x, y, z + 1), "observer", dict(facing="north"))
-						if len(ordered) > MAIN / 2:
-							yield ((x, y + 1, z), "observer", dict(facing="down"))
-							if len(ordered) > MAIN:
-								yield ((-x, y, z + 1), "observer", dict(facing="north"))
-								if len(ordered) > MAIN * 3 / 2:
-									yield ((-x, y + 1, z), "observer", dict(facing="down"))
-					if len(ordered) & 1:
-						note = ordered[-1]
-						ordered = list(itertools.chain.from_iterable(zip(ordered[:len(ordered) // 2], ordered[len(ordered) // 2:-1])))
-						if get_note_mat(note, odd=pulse & 1)[0] in transparent:
-							ordered.append(padding)
-						ordered.append(note)
-					else:
-						ordered = list(itertools.chain.from_iterable(zip(ordered[:len(ordered) // 2], ordered[len(ordered) // 2:])))
-					for j, note in enumerate(ordered[:MAIN * 2]):
-						replace = {}
-						match j:
-							case 0:
-								positioning = [x, y, z + 2]
-								replace["glowstone"] = "amethyst_block"
-							case 1:
-								positioning = [x, y - 1, z + 3]
-							case 2:
-								positioning = [x, y + 2, z]
-								replace["glowstone"] = "amethyst_block"
-								replace["heavy_core"] = "black_concrete_powder"
-							case 3:
-								positioning = [x, y + 1, z + 1]
-								replace["heavy_core"] = "black_concrete_powder"
-							case 4:
-								positioning = [-x, y, z + 2]
-								replace["glowstone"] = "amethyst_block"
-							case 5:
-								positioning = [-x, y - 1, z + 3]
-							case 6:
-								positioning = [-x, y + 2, z]
-								replace["glowstone"] = "amethyst_block"
-								replace["heavy_core"] = "black_concrete_powder"
-							case 7:
-								positioning = [-x, y + 1, z + 1]
-								replace["heavy_core"] = "black_concrete_powder"
-							case _:
-								raise ValueError(j)
-						yield from get_note_block(
-							note,
-							positioning,
-							replace,
-							odd=pulse & 1,
-							ctx=ctx,
-						)
-					ordered = ordered[MAIN * 2:] + remainder
-					while True:
-						try:
-							ordered.remove(padding)
-						except ValueError:
-							break
-					ordered = ordered[:SIDE * 2]
-				cap = SIDE
-				flipped = False # direction == 1
-				for y, r in elevations[pulse]:
-					if not ordered:
-						break
-					taken, ordered = ordered[:cap], ordered[cap:]
-					if i >= 8:
-						x = (1 - (17 - i) * 2 if flipped else -22 + (17 - i) * 2) * (-1 if invert ^ r else 1)
-						v = 0 if y < 0 else -2
-						z = offset + 2
-					else:
-						x = (-4 - i * 2 if flipped else -17 + i * 2) * (-1 if invert ^ r else 1)
-						v = -1
-						z = offset
-					for w, note in enumerate(taken):
-						yield from get_note_block(
-							note,
-							[x, y + v, z - w],
-							odd=pulse & 1,
-							ctx=ctx,
-						)
+def tile_region(reg, axes):
+	"""
+	Tile a Region's block data by specified repetition factors.
 
-	def generate_layer(direction="right", offset=0, elevation=0):
-		right = direction == "right"
-		x = -1 if right else 1
-		y = elevation
-		z = offset
-		mirrored = offset % 8 < 4
-		if y == 0:
-			yield ((x * 19, y - 1, z), "black_stained_glass")
-			if mirrored:
-				yield from (
-					((x * 19, y, z), "observer", dict(facing="north")),
-					((x * 19, y + 1, z), "torch"),
-					((x * 19, y, z + 1), "redstone_lamp"),
-					((x * 2, y - 1, z + 3), "black_stained_glass"),
-					((x * 2, y, z + 2), "black_stained_glass"),
-					((x * 2, y, z + 1), "target"),
-					((x * 2, y + 1, z + 2), "activator_rail", dict(shape="north_south")),
-					((x * 2, y + 1, z + 1), "activator_rail", dict(shape="north_south")),
-					((x * 2, y, z + 3), "activator_rail", dict(shape="ascending_north")),
-					((x * 2, y - 1, z), "sculk"),
-					((x, y - 2, z), "sculk"),
-					((0, y - 3, z), "polished_blackstone_slab", dict(type="top")),
-					((-x, y - 2, z), "sculk"),
-					((-x * 2, y - 1, z), "sculk"),
-					((x * 2, y, z), "redstone_wire", dict(east="side", west="side", north="none", south="side")),
-					((x, y - 1, z), "redstone_wire", dict(east="up" if not right else "side", west="up" if right else "side", north="none", south="none")),
-					((0, y - 2, z), "redstone_wire", dict(east="up", west="up", north="none", south="none")),
-					((-x, y - 1, z), "redstone_wire", dict(east="up" if right else "side", west="up" if not right else "side", north="none", south="none")),
-					((-x * 2, y, z), "redstone_wire", dict(east="side", west="side", north="none", south="side")),
-					((-x * 2, y - 1, z + 3), "black_stained_glass"),
-					((-x * 2, y, z + 2), "black_stained_glass"),
-					((-x * 2, y, z + 1), "target"),
-					((-x * 2, y + 1, z + 2), "activator_rail", dict(shape="north_south")),
-					((-x * 2, y + 1, z + 1), "activator_rail", dict(shape="north_south")),
-					((-x * 2, y, z + 3), "activator_rail", dict(shape="ascending_north")),
-				)
-			else:
-				yield from (
-					((x * 2, y - 1, z), "black_stained_glass"),
-					((x * 2, y, z), "observer", dict(facing="north")),
-					((x * 2, y + 1, z), "torch"),
-					((x * 2, y, z + 1), "redstone_lamp"),
-					((x, y - 1, z + 1), "glass"),
-					((x, y, z + 1), "repeater", dict(facing="west" if right else "east", delay=4)),
-					((x, y + 1, z + 1), "glass"),
-					((0, y, z), "glass"),
-					((0, y, z + 1), "powered_rail", dict(shape="ascending_north")),
-					((0, y, z - 1), "activator_rail", dict(shape="ascending_south")),
-					((0, y + 1, z), "rail", dict(shape="north_south")),
-					((x * 19, y - 1, z + 3), "black_stained_glass"),
-					((x * 19, y, z + 1), "black_stained_glass"),
-					((x * 19, y, z + 2), "black_stained_glass"),
-					((x * 19, y, z), "activator_rail", dict(shape="ascending_south")),
-					((x * 19, y, z + 3), "activator_rail", dict(shape="ascending_north")),
-					((x * 19, y + 1, z + 1), "activator_rail", dict(shape="north_south")),
-					((x * 19, y + 1, z + 2), "activator_rail", dict(shape="north_south")),
-				)
-			yield ((x * 3, y - 1, z), "shroomlight")
-			for i in range(4, 18):
-				yield ((x * i, y - 1, z), "crimson_trapdoor" if i & 1 == right else "acacia_trapdoor", dict(facing="south", half="top"))
-			yield ((x * 18, y - 1, z), "shroomlight")
-			yield ((x * (18 if mirrored else 3), y, z), "observer", dict(facing="east" if right ^ mirrored else "west"))
-			for i in range(3, 18):
-				yield ((x * (i if mirrored else i + 1), y, z), "repeater", dict(facing="east" if right ^ mirrored else "west", delay=2))
-			for i in range(3, 19):
-				yield ((x * i, y + 3, z + 2), "sea_lantern")
-			if z <= 1:
-				for i in range(3, 19):
-					yield ((x * i, y + 3, z - 2), "sea_lantern")
-		elif y != 0:
-			reverse = True
-			lower = y < 0
-			mid = y == -3
-			block = "ochre_froglight" if mid else "verdant_froglight" if lower else "pearlescent_froglight"
-			slab = "waxed_cut_copper_slab" if mid else "bamboo_mosaic_slab" if lower else "prismarine_slab"
-			edge = "purpur_slab" if mid else "resin_brick_slab" if lower else "dark_prismarine_slab"
-			o1 = 3 + reverse
-			o2 = 4 - reverse
-			for i in range(8):
-				yield from (
-					((x * (i * 2 + o2), y, z), block),
-					((x * (i * 2 + o2 - 1), y - 1, z), slab, dict(type="top")),
-					((x * (i * 2 + o2 - 1), y, z), "repeater", dict(facing="east" if right ^ reverse else "west", delay=2)),
-					((x * (i * 2 + o2 - 1), y + 1, z), "glass"),
-					((x * (i * 2 + o1), y + (1 if lower else -1), z + 2), block),
-				)
-				if i < 7:
-					yield ((x * (i * 2 + o1 + 1), y + (0 if lower else -2), z + 2), slab, dict(type="top"))
-					yield ((x * (i * 2 + o1 + 1), y + (1 if lower else -1), z + 2), "repeater", dict(facing="west" if right ^ reverse else "east", delay=2))
-					yield ((x * (i * 2 + o1 + 1), y + (1 if lower else -1) + 1, z + 2), "sea_lantern")
-			x2 = x * 2 if reverse else x * 19 
-			yield from (
-				((x * (18 if reverse else 3), y, z), "observer", dict(facing="east" if right ^ reverse else "west")),
-				((x * (18 if reverse else 3), y + 1, z), "sea_lantern"),
-				((x * (3 if reverse else 18), y + (1 if lower else -1), z + 2), "observer", dict(facing="west" if right ^ reverse else "east")),
-				((x * (3 if reverse else 18), y + (1 if lower else -1) + 1, z + 2), "sea_lantern"),
-				((x2, y + (1 if lower else -1), z + 2), "observer", dict(facing="north")),
-				((x2, y - 1, z), edge, dict(type="top")),
-				((x2, y + (0 if lower else -2), z + 1), edge, dict(type="top")),
-				((x2, y + (1 if lower else -1), z + 1), "powered_rail", dict(shape="north_south" if lower else "ascending_north")),
-				((x2, y, z), "powered_rail", dict(shape="ascending_south" if lower else "north_south")),
-			)
-			if not mirrored:
-				x3 = x * 19
-				x4 = x * 18
-				yield ((x3, y, z), "observer", dict(facing="north"))
-				yield ((x3, y - 1, z - 1), edge, dict(type="top"))
-				if lower:
-					yield from (
-						((x4, y + (0 if lower else -2), z - 1), edge, dict(type="top")),
-						((x4, y + (1 if lower else -1), z - 1), "powered_rail", dict(shape="east_west")),
-						((x3, y, z - 1), "powered_rail", dict(shape="ascending_east" if right else "ascending_west")),
-					)
+	Parameters
+	----------
+	reg : litemapy.Region
+		The source region whose blocks and palette will be used.
+	axes : sequence of int
+		The number of times to repeat the block array along each axis
+		(x, y, z).
+
+	Returns
+	-------
+	litemapy.Region
+		A new Region instance with its blocks array tiled according to
+		the given axes and its palette copied from the original region.
+	"""
+	blocks = reg._Region__blocks
+	new_blocks = np.tile(blocks, axes)
+	
+	region = litemapy.Region(reg.x, reg.y, reg.z, *new_blocks.shape)
+	region._Region__blocks = new_blocks
+	region._Region__palette = reg._Region__palette.copy()
+	return region
+
+def paste_region(dst, src, ignore_src_air=False, ignore_dst_non_air=False):
+	"""
+	Paste a source Litemapy Region into a destination Litemapy Region, optionally
+	skipping air blocks or preserving existing non-air blocks.
+
+	Parameters
+	----------
+	dst : litemapy.Region
+		The destination region to paste into. Must be an instance of litemapy.Region.
+	src : litemapy.Region
+		The source region to paste from. Must be an instance of litemapy.Region.
+	ignore_src_air : bool, optional
+		If True, any air blocks (block ID 0) in the source will not overwrite
+		the destination. Defaults to False.
+	ignore_dst_non_air : bool, optional
+		If True, any non-air blocks already present in the destination will not
+		be overwritten by the source. Defaults to False.
+
+	Returns
+	-------
+	litemapy.Region
+		A region containing the combined blocks of dst and src. If the source
+		completely covers the destination and neither ignore flag is set,
+		the source region is returned directly. If the destination needs to be
+		expanded to fit the source, a new larger region is created and returned.
+
+	Raises
+	------
+	AssertionError
+		If either `dst` or `src` is not an instance of litemapy.Region.
+
+	Notes
+	-----
+	- Performs a fast in-place copy when the source fits entirely within the
+	  destination and palettes match (or destination palette is trivial).
+	- Falls back to a slower element-wise copy with a custom palette lookup
+	  dictionary when palettes differ or a full rebuild is required.
+	- Recursively resizes the destination only once if the source region lies
+	  outside its bounds, ensuring no infinite recursion.
+	"""
+	assert isinstance(dst, litemapy.Region) and isinstance(src, litemapy.Region), "Both regions must be Litematic regions."
+	dst_size = Region(dst.min_x() + dst.x, dst.min_y() + dst.y, dst.min_z() + dst.z, dst.max_x() + dst.x, dst.max_y() + dst.y, dst.max_z() + dst.z)
+	src_size = Region(src.min_x() + src.x, src.min_y() + src.y, src.min_z() + src.z, src.max_x() + src.x, src.max_y() + src.y, src.max_z() + src.z)
+	# If the source completely covers the destination, return the source with no changes
+	if not ignore_src_air and not ignore_dst_non_air and is_contained(dst_size, src_size):
+		return src
+	mask = None
+	if ignore_src_air:
+		mask = src._Region__blocks != 0
+	# Check if a reallocation is necessary (dst_size does not fit src_size)
+	if is_contained(src_size, dst_size):
+		# Check if the palettes match or if the destination palette is empty, allowing a direct copy
+		if dst._Region__palette == src._Region__palette or len(dst._Region__palette) in range(2):
+			target = dst._Region__blocks[src.x - dst.x:src.x - dst.x + src.width, src.y - dst.y:src.y - dst.y + src.height, src.z - dst.z:src.z - dst.z + src.length]
+			if ignore_dst_non_air:
+				if mask is not None:
+					mask &= target == 0
 				else:
-					yield from (
-						((x4, y + (0 if lower else -2), z - 1), edge, dict(type="top")),
-						((x4, y + (1 if lower else -1), z - 1), "powered_rail", dict(shape="ascending_west" if right else "ascending_east")),
-						((x3, y, z - 1), "powered_rail", dict(shape="east_west")),
-					)
-
-	def ensure_layer(direction="right", offset=0):
-		right = direction == "right"
-		x = -1 if right else 1
-		z = offset
-		mirrored = offset % 8 < 4
-		x2 = x * 19 if mirrored else x * 2
-		yield from (
-			((x2, -1, z + 1), "oxidized_copper_trapdoor", dict(facing="south", half="top")),
-			((x2, -1, z), "prismarine_wall"),
-			((x2, -2, z), "prismarine_wall"),
-			((x2, -3, z), "observer", dict(facing="up")),
-			((x2, -4, z), "redstone_lamp"),
-			((x2, -5, z), "warped_fence_gate", dict(facing="north")),
-			((x2, -6, z), "observer", dict(facing="up")),
-			((x2, -7, z), "gilded_blackstone"),
-			((x2, -9, z), "note_block"),
-			((x2, -8, z), "redstone_wire", dict(east="none", north="none", south="none", west="none")),
-			((x * (20 if mirrored else 1), -1, z), "glass"),
-			((x * (20 if mirrored else 1), -2, z), "glass"),
-			((x * (18 if mirrored else 3), -2, z), "glass"),
+					mask = target == 0
+			target[mask] = src._Region__blocks[mask]
+			dst._Region__palette = src._Region__palette.copy()
+			for e in src.tile_entities:
+				e = copy.deepcopy(e)
+				e.position = (
+					e.position[0] + src.x - dst.x,
+					e.position[1] + src.y - dst.y,
+					e.position[2] + src.z - dst.z,
+				)
+				dst.tile_entities.append(e)
+			return dst
+		# Otherwise fall through to the slower copy method
+	else:
+		# Create a new destination region that is large enough to fit the source region
+		bounding = Region(
+			min(dst_size.mx, src_size.mx),
+			min(dst_size.my, src_size.my),
+			min(dst_size.mz, src_size.mz),
+			max(dst_size.Mx, src_size.Mx),
+			max(dst_size.My, src_size.My),
+			max(dst_size.Mz, src_size.Mz),
 		)
-
-	def ensure_top(direction="right", offset=0):
-		right = direction == "right"
-		x = -1 if right else 1
-		z = offset
-		mirrored = offset % 8 < 4
-		if mirrored:
-			x1, x2 = x * 20, x * 19
-		else:
-			x1, x2 = x, x * 2
-		z2 = z + 1
-		opposing = offset % 16 >= 8
-		yield from (
-			((x1, 1, z2), "glass"),
-			((x1, 2, z2), "scaffolding", dict(distance=0)),
-			((x2, 1, z2), "bamboo_trapdoor", dict(facing="south", half="top")),
-			((x2, 2, z2), "scaffolding", dict(distance=0)),
-			((x2, 3, z2), "observer", dict(facing="down")),
-			((x2, 4, z2), "redstone_lamp"),
+		new_dest = litemapy.Region(
+			bounding.mx, bounding.my, bounding.mz,
+			bounding.Mx - bounding.mx + 1,
+			bounding.My - bounding.my + 1,
+			bounding.Mz - bounding.mz + 1,
 		)
-		if right ^ opposing:
-			yield from (
-				((x2, 5, z2), "redstone_wire", dict(north="up", south="side")),
-				((x2, 5, z), "white_stained_glass"),
-				((x2, 6, z), "redstone_wire", dict(south="up", north="side")),
-				((x2, 6, z2), "white_stained_glass"),
-				((x2, 7, z2), "redstone_wire", dict(north="up", south="side")),
-				((x2, 7, z), "white_stained_glass"),
-				((x2, 8, z), "redstone_wire", dict(south="up", north="side")),
-				((x2, 8, z2), "white_stained_glass"),
-				((x2, 9, z2), "redstone_wire", dict(north="up", south="side")),
-				((x2, 9, z), "oxidized_copper_bulb", dict(lit="false")),
-				((x2, 10, z), "redstone_wire", dict(south="up", north="side")),
-				((x2, 10, z2), "white_stained_glass"),
-				((x2, 11, z2), "redstone_wire", dict(north="up", south="side")),
-				((x2, 11, z), "white_stained_glass"),
-				((x2, 12, z), "redstone_wire", dict(south="side", north="side")),
-			)
-		else:
-			yield from (
-				((x2, 5, z2), "warped_fence_gate", dict(facing="west")),
-				((x2, 6, z2), "observer", dict(facing="down")),
-				((x2, 6, z), "oxidized_copper_bulb", dict(lit="false")),
-				((x2, 7, z2), "mangrove_roots"),
-				((x2, 7, z), "redstone_wire", dict(south="up", north="side")),
-				((x2, 8, z), "white_stained_glass"),
-				((x2, 8, z2), "redstone_wire", dict(north="up", south="side")),
-				((x2, 9, z2), "white_stained_glass"),
-				((x2, 9, z), "redstone_wire", dict(south="up", north="side")),
-				((x2, 10, z), "white_stained_glass"),
-				((x2, 10, z2), "redstone_wire", dict(north="up", south="side")),
-				((x2, 11, z2), "white_stained_glass"),
-				((x2, 11, z), "redstone_wire", dict(south="up", north="side")),
-				((x2, 12, z), "oxidized_copper_bulb", dict(lit="false")),
-				((x2, 12, z2), "redstone_wire", dict(north="side", south="side")),
-				((x2, 13, z), "torch"),
-			)
-
-	def profile_notes(notes, early=False):
-		return (max(map(len, notes[i:(128 if early else 64):4]), default=0) for i in range(4))
-
-	print("Preparing output...")
-	bars = ceil(len(notes) / BAR / DIV)
-	elevations = (
-		((-3, 0), (-3, 1)),
-		((6, 1), (9, 1), (12, 1)),
-		((-6, 0), (-6, 1), (-9, 0), (-9, 1)),
-		((6, 0), (9, 0), (12, 0)),
-	)
-	b = 0
-	for b in (tqdm.trange(bars) if tqdm else range(bars)):
-		inverted = not b & 1
-		offset = b * 8 + 1
-		for i in range(offset, offset + 8):
-			yield from (
-				((0, -1, i), "tinted_glass"),
-				((-1, 0, i), "glass"),
-				((1, 0, i), "glass"),
-				((0, 0, i), "rail", dict(shape="north_south")),
-			)
-
-		def iter_half(inverted=False, ensure=False):
-			left, right = ("left", "right") if not inverted else ("right", "left")
-			strong, weak1, mid, weak2 = profile_notes(notes, early=ensure)
-			yield from generate_layer(right, offset, 0)
-			yield from generate_layer(left, offset, 0)
-			if weak1:
-				if ensure:
-					yield from ensure_top(left, offset)
-				yield from generate_layer(left, offset, 6)
-				if weak1 > SIDE:
-					yield from generate_layer(left, offset, 9)
-					if weak1 > SIDE * 2:
-						yield from generate_layer(left, offset, 12)
-			if weak2:
-				if ensure:
-					yield from ensure_top(right, offset)
-				yield from generate_layer(right, offset, 6)
-				if weak2 > SIDE:
-					yield from generate_layer(right, offset, 9)
-					if weak2 > SIDE * 2:
-						yield from generate_layer(right, offset, 12)
-			if strong > MAIN * 2 or mid or weak2:
-				if ensure:
-					yield from ensure_layer(right, offset)
-					if strong > MAIN * 2 + SIDE or mid > SIDE:
-						yield from ensure_layer(left, offset)
-				if strong > MAIN * 2:
-					yield from generate_layer(right, offset, -3)
-					if strong > MAIN * 2 + SIDE:
-						yield from generate_layer(left, offset, -3)
-				if mid:
-					yield from generate_layer(right, offset, -6)
-					if mid > SIDE:
-						yield from generate_layer(left, offset, -6)
-						if mid > SIDE * 2:
-							yield from generate_layer(right, offset, -9)
-							if mid > SIDE * 3:
-								yield from generate_layer(left, offset, -9)
-
-		yield from iter_half(inverted, ensure=True)
-		yield from extract_notes(notes, offset, -1, inverted, elevations)
-
-		offset += 4
-		yield from iter_half(inverted)
-		yield from extract_notes(notes, offset, 1, inverted, elevations)
-
-	offset = b * 8 + 8
-	yield from (
-		((0, -1, 1), "hopper", dict(facing="north"), {'Items': [{'Slot': 0, 'id': 'minecraft:wooden_shovel', 'count': 1}, {'Slot': 1, 'id': 'minecraft:wooden_shovel', 'count': 1}, {'Slot': 2, 'id': 'minecraft:wooden_shovel', 'count': 1}, {'Slot': 3, 'id': 'minecraft:wooden_shovel', 'count': 1}, {'Slot': 4, 'id': 'minecraft:wooden_shovel', 'count': 1}]}),
-		((0, 0, 1), "powered_rail", dict(shape="north_south")),
-		((0, 0, 0), "netherite_block"),
-		((0, -1, 0), "honey_block"),
-		((0, 1, 0), "calibrated_sculk_sensor", dict(facing="south")),
-		((1, 0, 0), "oxidized_copper_bulb", dict(lit="false")),
-		((-1, 0, 0), "oxidized_copper_bulb", dict(lit="false")),
-		((1, -1, 0), "obsidian"),
-		((-1, -1, 0), "obsidian"),
-		((1, 1, 0), "redstone_wire", dict(north="side", west="side")),
-		((-1, 1, 0), "redstone_wire", dict(east="side", west="side")),
-		((1, 0, -1), "obsidian"),
-		((-1, 0, -1), "obsidian"),
-		((0, 1, -1), "shroomlight"),
-		((2, 1, -1), "composter", dict(level=6)),
-		((1, 1, -1), "comparator", dict(facing="east", powered="true")),
-		((0, -1, -2), "sticky_piston", dict(facing="south", extended="true")),
-		((0, -1, -1), "piston_head", dict(facing="south", short="false", type="sticky")),
-		((0, -3, -2), "target"),
-		((0, -2, -2), "redstone_torch"),
-		((1, -4, -2), "cobbled_deepslate"),
-		((1, -3, -2), "redstone_wire", dict(east="side", west="side")),
-		((0, -4, -1), "shroomlight"),
-		((1, -5, -1), "cobbled_deepslate"),
-		((1, -4, -1), "repeater", dict(delay=4, facing="south")),
-		((1, -4, 0), "observer", dict(facing="south")),
-		((1, -4, 1), "observer", dict(facing="west")),
-		((1, -6, -2), "cobbled_deepslate"),
-		((1, -5, -2), "redstone_wire"),
-		((1, -7, -2), "note_block"),
-		((0, -7, -2), "observer", dict(facing="east")),
-		((0, -7, -1), "observer", dict(facing="north")),
-		((0, -7, 0), "sticky_piston", dict(facing="up")),
-		((0, -6, 0), "slime_block"),
-		((1, -5, 0), "crying_obsidian"),
-		((-1, -5, 0), "crying_obsidian"),
-		((0, -5, 1), "crying_obsidian"),
-		((0, -5, -1), "crying_obsidian"),
-		((0, -4, 1), "detector_rail", dict(shape="north_south")),
-	)
-	for i in range(2, offset):
-		if i <= 4 or i >= offset - 3 or not i & 15:
-			yield ((0, -4, i), "powered_rail", dict(shape="north_south", powered="true"))
-		else:
-			yield ((0, -4, i), "rail", dict(shape="north_east"))
-		yield ((0, -5, i), "redstone_ore" if i & 1 else "deepslate_redstone_ore")
-		yield ((0, -7, i), "glass")
-		yield ((0, -6, i), "redstone_torch")
-	yield from (
-		((0, -5, offset), "deepslate_redstone_ore"),
-		((0, -7, offset), "glass"),
-		((0, -6, offset), "redstone_torch"),
-		((0, -4, offset + 1), "red_wool"),
-		((0, -3, offset + 2), "red_wool"),
-		((0, -2, offset + 3), "red_wool"),
-		((0, -1, offset + 4), "shroomlight"),
-		((0, -4, offset), "powered_rail", dict(shape="ascending_south", powered="true")),
-		((0, -3, offset + 1), "powered_rail", dict(shape="ascending_south", powered="true")),
-		((0, -2, offset + 2), "powered_rail", dict(shape="ascending_south", powered="true")),
-		((0, -1, offset + 3), "powered_rail", dict(shape="north_south", powered="true")),
-	)
-	for x in (-1, 1):
-		for n in range(2, 20):
-			yield ((x * n, -1, 0), "tinted_glass")
-		yield from (
-			((x * 2, 0, 0), "yellow_wool"),
-			((x * 3, 0, 0), "comparator", dict(facing="east" if x == -1 else "west")),
-			((x * 4, 0, 0), "magma_block"),
-			((x * 5, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 6, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 7, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 8, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 9, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 10, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 11, 0, 0), "observer", dict(facing="east" if x == -1 else "west")),
-			((x * 12, 0, 0), "magma_block"),
-			((x * 13, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 14, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 15, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 16, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 17, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 18, 0, 0), "activator_rail", dict(shape="east_west")),
-			((x * 19, 0, 0), "activator_rail", dict(shape="east_west")),
+		# Complete the reallocation of the destination region with a recursive call (this should never run into infinite recursion as the new region is always large enough)
+		dst = paste_region(new_dest, dst)
+	# We now have a new destination region that is large enough to fit the source region.
+	# Use a custom dictionary-based palette for this paste, to avoid the O(n^2) overhead in litemapy from calling `.index()` and `__contains__()` on the palette for every single entry.
+	palette = {k: i for i, k in enumerate(dst._Region__palette)}
+	for x in src.range_x():
+		for y in src.range_y():
+			for z in src.range_z():
+				if mask is not None and not mask[x, y, z]:
+					continue
+				target = (x + src.x - dst.x, y + src.y - dst.y, z + src.z - dst.z)
+				if ignore_dst_non_air:
+					if dst._Region__blocks[target] != 0:
+						continue
+				block = src[x, y, z]
+				try:
+					dst._Region__blocks[target] = palette[block]
+				except KeyError:
+					# Fallback to litemapy's __setitem__ method for entries not within the palette
+					dst[target] = block
+					palette = {k: i for i, k in enumerate(dst._Region__palette)}
+	for e in src.tile_entities:
+		e = copy.deepcopy(e)
+		e.position = (
+			e.position[0] + src.x - dst.x,
+			e.position[1] + src.y - dst.y,
+			e.position[2] + src.z - dst.z,
 		)
+		dst.tile_entities.append(e)
+	return dst
+
+def duplicate_region(reg):
+	new_region = litemapy.Region(reg.x, reg.y, reg.z, reg.width, reg.height, reg.length)
+	new_region._Region__blocks[:] = reg._Region__blocks
+	new_region._Region__palette = reg._Region__palette.copy()
+	return new_region
+
+def setblock(dst, coords, block, no_replace=()):
+	"""
+	Sets a block in a region at the specified coordinates. Unlike the original method in litemapy, this one accepts out-of-bounds coordinates and will reallocate the region if necessary.
+	"""
+	try:
+		temp = dst[coords]
+	except IndexError:
+		pass
+	else:
+		if temp.id not in no_replace:
+			dst[coords] = block
+		return dst
+
+	assert isinstance(dst, litemapy.Region), "Destination must be a Litematic region."
+	coords = tuple(coords)
+	if len(coords) != 3:
+		raise ValueError("Coordinates must be a 3-tuple.")
+	if not all(isinstance(coord, int) for coord in coords):
+		raise ValueError("All coordinates must be integers.")
+	dst_size = Region(dst.min_x() + dst.x, dst.min_y() + dst.y, dst.min_z() + dst.z, dst.max_x() + dst.x, dst.max_y() + dst.y, dst.max_z() + dst.z)
+	bounding = Region(
+		min(dst_size.mx, coords[0] + dst.x),
+		min(dst_size.my, coords[1] + dst.y),
+		min(dst_size.mz, coords[2] + dst.z),
+		max(dst_size.Mx, coords[0] + dst.x),
+		max(dst_size.My, coords[1] + dst.y),
+		max(dst_size.Mz, coords[2] + dst.z),
+	)
+	new_dest = litemapy.Region(
+		bounding.mx, bounding.my, bounding.mz,
+		bounding.Mx - bounding.mx + 1,
+		bounding.My - bounding.my + 1,
+		bounding.Mz - bounding.mz + 1,
+	)
+	dst = paste_region(new_dest, dst)
+	dst[coords] = block
+	return dst
+
+def setblock_absolute(dst, coords, block, no_replace=()):
+	x, y, z = coords
+	return setblock(dst, (x - dst.x, y - dst.y, z - dst.z), block, no_replace=no_replace)
+
+def merge_regions(regions):
+	"""
+	Merges a list of regions into a single region.
+
+	Parameters
+	----------
+	regions : list of litemapy.Region
+		The regions to merge.
+
+	Returns
+	-------
+	litemapy.Region
+		A new region that encompasses all the input regions.
+	"""
+	if not regions:
+		return litemapy.Region(0, 0, 0, 1, 1, 1)
+	min_x = min(region.min_x() for region in regions)
+	min_y = min(region.min_y() for region in regions)
+	min_z = min(region.min_z() for region in regions)
+	max_x = max(region.max_x() for region in regions)
+	max_y = max(region.max_y() for region in regions)
+	max_z = max(region.max_z() for region in regions)
+	dst = litemapy.Region(min_x, min_y, min_z, max_x - min_x + 1, max_y - min_y + 1, max_z - min_z + 1)
+	for region in regions:
+		dst = paste_region(dst, region)
+	return dst
+
+def extract_bounds(schem):
+	"""
+	Extracts and registers all empty (void) regions within a schematic.
+
+	This function computes the overall bounding box of the given schematic,
+	then subtracts each occupied region to determine the remaining void
+	spaces. It subsequently merges adjacent void regions along the X, Y, and
+	Z axes to form larger contiguous voids. Finally, each void is converted
+	into a `litemapy.Region` and added to `schem.regions` under keys
+	"Void 0", "Void 1", etc.
+
+	Parameters:
+		schem (litemapy.Schematic):
+			The schematic object to analyze. It must expose `width`,
+			`height`, `length` attributes and internal minimum coordinates
+			`_Schematic__x_min`, `_Schematic__y_min`, `_Schematic__z_min`.
+			Existing regions are read from `schem.regions`.
+
+	Returns:
+		litemapy.Schematic:
+			The same schematic instance with additional entries in
+			`schem.regions` for each detected void region.
+
+	"""
+	mx, my, mz = schem._Schematic__x_min, schem._Schematic__y_min, schem._Schematic__z_min
+	bounding = Region(mx, my, mz, mx + schem.width - 1, my + schem.height - 1, mz + schem.length - 1)
+	voids = {bounding}
+	for region in schem.regions.values():
+		remaining_voids = set()
+		mx, my, mz = region.min_x(), region.min_y(), region.min_z()
+		H = Region(mx, my, mz, region.max_x() - mx, region.max_y() - my, region.max_z() - mz)
+		for B in voids:
+			if is_disjoint(B, H):
+				remaining_voids.add(B)
+				continue
+			ix0, iy0, iz0 = max(B.mx, H.mx), max(B.my, H.my), max(B.mz, H.mz)
+			ix1, iy1, iz1 = min(B.Mx, H.Mx), min(B.My, H.My), min(B.Mz, H.Mz)
+			if B.mx < ix0:
+				remaining_voids.add(Region(B.mx, B.my, B.mz, ix0, B.My, B.Mz))
+			if ix1 < B.Mx:
+				remaining_voids.add(Region(ix1, B.my, B.mz, B.Mx, B.My, B.Mz))
+			if B.my < iy0:
+				remaining_voids.add(Region(ix0, B.my, B.mz, ix1, iy0, B.Mz))
+			if iy1 < B.My:
+				remaining_voids.add(Region(ix0, iy1, B.mz, ix1, B.my, B.Mz))
+			if B.mz < iz0:
+				remaining_voids.add(Region(ix0, iy0, B.mz, ix1, iy1, iz0))
+			if iz1 < B.Mz:
+				remaining_voids.add(Region(ix0, iy0, iz1, ix1, iy1, B.Mz))
+		voids = remaining_voids
+	while True:
+		all_voids = sorted(voids)
+		try:
+			for i, A in enumerate(all_voids):
+				for B in all_voids[i + 1:]:
+					if A.Mx == B.mx and A.my == B.my and A.My == B.My and A.mz == B.mz and A.Mz == B.Mz:
+						merged = Region(min(A.mx, B.mx), A.my, A.mz, max(A.Mx, B.Mx), A.My, A.Mz)
+						voids.discard(A)
+						voids.discard(B)
+						voids.add(merged)
+						raise StopIteration
+					if A.My == B.my and A.mx == B.mx and A.Mx == B.Mx and A.mz == B.mz and A.Mz == B.Mz:
+						merged = Region(A.mx, min(A.my, B.my), A.mz, A.Mx, max(A.My, B.My), A.Mz)
+						voids.discard(A)
+						voids.discard(B)
+						voids.add(merged)
+						raise StopIteration
+					if A.Mz == B.mz and A.mx == B.mx and A.Mx == B.Mx and A.my == B.my and A.My == B.My:
+						merged = Region(A.mx, A.my, min(A.mz, B.mz), A.Mx, A.My, max(A.Mz, B.Mz))
+						voids.discard(A)
+						voids.discard(B)
+						voids.add(merged)
+						raise StopIteration
+		except StopIteration:
+			continue
+		break
+	for i, void in enumerate(voids):
+		r = litemapy.Region(void.mx, void.my, void.mz, void.Mx + void.mx + 1, void.My + void.my + 1, void.Mz + void.mz + 1)
+		schem.regions[f"Void {i}"] = r
+	return schem
+
+def crop_region(region, size):
+	"""
+	Crop a subregion from a Litemapy Region.
+
+	Args:
+		region (litemapy.Region): The source region to crop.
+		size (tuple[int, int, int, int, int, int]): A 6-tuple (x, y, z, width, height, length)
+			specifying the origin and dimensions of the desired subregion.
+
+	Returns:
+		litemapy.Region: A new Region instance containing the cropped blocks and a
+		copied palette.
+
+	Raises:
+		AssertionError: If `region` is not a litemapy.Region or `size` does not
+		have exactly six elements.
+	"""
+	assert isinstance(region, litemapy.Region), "Region must be a Litematic region."
+	assert len(size) == 6, "Size must be a tuple of (x, y, z, width, height, length)."
+	x, y, z, width, height, length = size
+	new_blocks = region._Region__blocks[x:x + width, y:y + height, z:z + length]
+	new_region = litemapy.Region(x, y, z, width, height, length)
+	new_region._Region__blocks = new_blocks
+	new_region._Region__palette = region._Region__palette.copy()
+	new_region._optimize_palette()
+	return new_region
+
+def flip_region(region, axis=2):
+	"""
+	Flip (mirror) the block data of a Litematic region along a chosen axis.
+
+	Parameters
+	----------
+	region : litemapy.Region
+		The Litematic region whose internal block array will be flipped.
+	axis : int, optional
+		The axis along which to flip the block data:
+		  0 – x-axis (east–west),
+		  1 – y-axis (vertical),
+		  2 – z-axis (north–south, default).
+
+	Returns
+	-------
+	litemapy.Region
+		The same region instance, now containing flipped block data.
+
+	Raises
+	------
+	AssertionError
+		If `region` is not an instance of `litemapy.Region`.
+	ValueError
+		If `axis` is not one of 0, 1, or 2.
+
+	Notes
+	-----
+	This operation modifies the region in place by directly altering its
+	private `__blocks` NumPy array.
+
+	Examples
+	--------
+	>>> 
+	>>> region = litemapy.Region(...)   # load or create a region
+	>>> flipped_region = flip_region(region, axis=0)
+	>>> # Now `flipped_region` has its blocks mirrored along the x-axis.
+	"""
+	assert isinstance(region, litemapy.Region), "Region must be a Litematic region."
+	if axis not in (0, 1, 2):
+		raise ValueError("Axis must be 0 (x), 1 (y), or 2 (z).")
+	region._Region__blocks = np.flip(region._Region__blocks, axis)
+	flip_palette(region._Region__palette, axis)
+	return region
+
+flips = [
+	{"east": "west", "west": "east"},
+	{"up": "down", "down": "up", "top": "bottom", "bottom": "top"},
+	{"south": "north", "north": "south"},
+]
+def flip_palette(palette, axis=2):
+	"""Flips all directional blocks within the palette. Used by flip_region to have blocks automatically flip along the correct axis."""
+	flip = flips[axis]
+	for i, block in enumerate(palette):
+		properties = {}
+		for k, v in block._BlockState__properties.items():
+			properties[k] = v
+			for x, y in flip.items():
+				if x in v:
+					if y in v:
+						break
+					properties[k] = v.replace(x, y)
+					break
+		palette[i] = litemapy.BlockState(block.id, **properties)
+	return palette
+
+def _optimize_palette(self) -> None:
+	"""A more computationally efficient version of litemapy.schematic.Region._optimize_palette that does not re-scan the full list of blocks for every entry."""
+	required_blocks = set(np.unique(self._Region__blocks))
+	new_palette = []
+	for old_index, state in enumerate(self._Region__palette):
+		# Skip unused entries, except air that needs to remain at index 0
+		if old_index != 0 and old_index not in required_blocks:
+			continue
+		# Do not copy duplicate entries multiple times
+		for i, other_state in enumerate(new_palette):
+			if state == other_state:
+				new_index = i
+				break
+		else:
+			# Keep that entry
+			new_index = len(new_palette)
+			new_palette.append(state)
+		# Update blocks to reflect the new palette
+		self._Region__replace_palette_index(old_index, new_index)
+	self._Region__palette = new_palette
+litemapy.schematic.Region._optimize_palette = _optimize_palette
+
+Region = namedtuple("Region", ("mx", "my", "mz", "Mx", "My", "Mz"))
+
+def is_disjoint(v1, v2):
+	return v1.mx > v2.Mx or v1.my > v2.My or v1.mz > v2.Mz or v1.Mx < v2.mx or v1.My < v2.my or v1.Mz < v2.mz
+def is_contained(v1, v2):
+	return v1.mx >= v2.mx and v1.my >= v2.my and v1.mz >= v2.mz and v1.Mx <= v2.Mx and v1.My <= v2.My and v1.Mz <= v2.Mz
+
+
+note_locations = (
+	(1, 2), (1, 4), (1, 6), (1, 8),
+	(3, 7), (3, 5), (3, 3), (3, 1),
+	(5, 2), (5, 4), (5, 6), (5, 8),
+	(7, 7), (7, 5), (7, 3), (7, 1),
+)
+def render_minecraft(transport, ctx):
+	ticks_per_segment = 32
+	total_duration = len(transport)
+	total_segments = ceil(total_duration / ticks_per_segment)
+	half_segments = ceil(total_segments / 2)
+	attenuation_distance_limit = max(3, int(ctx.max_distance / 3) * 3)
+	tile_width = attenuation_distance_limit * 2 + 3
+	primary_width = 0
+	secondary_width = 0
+	master = litemapy.Region(0, 0, 0, 1, 1, 1)
+	header, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Header.litematic").regions.values()
+	header._Region__x = -8
+	header._Region__z = -3
+	timer, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Timer.litematic").regions.values()
+	track, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Track.litematic").regions.values()
+	skeleton1, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 skeleton 1.litematic").regions.values()
+	skeleton2, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 skeleton 2.litematic").regions.values()
+	start = header.z + header.length - 2
+	notes = deque(transport)
+	nc = 0
+	buffer = 4
+	# The song is split into two halves going in opposite directions, allowing for the player to be returned to the beginning without extra travel time.
+	for backwards in range(2):
+		dz = half_segments * skeleton1.length if backwards else half_segments * skeleton1.length + buffer
+		main = litemapy.Region(0, 0, 0, 1, 30, dz)
+		timer1 = tile_region(timer, (1, 1, half_segments - backwards))
+		timer1._Region__y = 2
+		main = paste_region(main, timer1)
+		timer1._Region__y = 18
+		main = paste_region(main, timer1)
+		if backwards:
+			main[1 - main.x, 2, (half_segments - 1) * skeleton1.length] = litemapy.BlockState("minecraft:acacia_trapdoor", half="top", facing="south")
+			main[1 - main.x, 3, (half_segments - 1) * skeleton1.length] = litemapy.BlockState("minecraft:powered_rail", shape="east_west")
+			main[1 - main.x, 18, (half_segments - 1) * skeleton1.length] = litemapy.BlockState("minecraft:acacia_trapdoor", half="top", facing="south")
+			main[1 - main.x, 19, (half_segments - 1) * skeleton1.length] = litemapy.BlockState("minecraft:powered_rail", shape="east_west")
+		for segment in range(half_segments):
+			z = segment * skeleton1.length
+			skeletons = {}
+			upgraded = set()
+
+			def get_skeleton(x, y):
+				nonlocal main
+				try:
+					return skeletons[x, y]
+				except KeyError:
+					pass
+				skeleton1._Region__x = x
+				skeleton1._Region__y = y
+				skeleton1._Region__z = z
+				main = paste_region(main, skeleton1)
+				taken = skeletons[x, y] = set()
+				return taken
+
+			def upgrade_skeleton(x, y):
+				# A skeleton gets "upgraded" if it needs to support more than a single lane of note blocks. For simplicity, the upgraded variants are identical to the regular ones for now, except for added torches on the sides.
+				nonlocal main
+				if (x, y) in upgraded:
+					return
+				skeleton2._Region__x = x
+				skeleton2._Region__y = y
+				skeleton2._Region__z = z
+				main = paste_region(main, skeleton2)
+				upgraded.add((x, y))
+
+			if backwards and segment == 1:
+				get_skeleton(0, 4)
+			if backwards and segment in range(2):
+				dyn_range_downscale = 3
+			elif not backwards and segment in range(half_segments - 2, half_segments):
+				dyn_range_downscale = 3
+			else:
+				dyn_range_downscale = 1
+
+			def add_note(note, tick):
+				nonlocal main, nc
+				note_hash = note[0] ^ note[1] // 36
+				panning = note[5]
+				volume = note[4]
+				if note[2] <= 0:
+					volume *= 2 / 3
+				if panning == 0:
+					panning = 1 if note_hash & 1 else -1
+				base, pitch = get_note_mat(note, odd=tick & 1)
+				if base == "amethyst_block":
+					volume *= 1.25
+				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
+				x = round(max(0, 1 - volume / 100) ** 0.75 * 0.9 * attenuation_multiplier / 3 / dyn_range_downscale) * (3 if panning > 0 else -3)
+				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
+				if x > attenuation_distance_limit - 3:
+					x = attenuation_distance_limit - 3
+				if x < -attenuation_distance_limit + 3:
+					x = -attenuation_distance_limit + 3
+				y = (not tick & 1) * 16 + 4
+				swapped = False
+
+				try:
+					ordering = (1, 0, 2) if x > 0 else (1, 2, 0)
+					while True:
+						taken = get_skeleton(x, y)
+						for xi in ordering:
+							pos = (xi, *note_locations[tick // 2])
+							if pos not in taken:
+								raise StopIteration
+						x += 3 if panning > 0 else -3
+						if x > attenuation_distance_limit:
+							if swapped or (tick & 1 and vel < 0.25):
+								return
+							x = -attenuation_distance_limit
+							panning = -panning
+							swapped = True
+						elif x < -attenuation_distance_limit:
+							if swapped or (tick & 1 and vel < 0.25):
+								return
+							x = attenuation_distance_limit
+							panning = -panning
+							swapped = True
+				except StopIteration:
+					pass
+				if xi != 1:
+					upgrade_skeleton(x, y)
+				blocks = get_note_block(
+					note,
+					pos,
+					None,
+					odd=tick & 1,
+					ctx=ctx,
+				)
+				for coords, block, *kwargs in blocks:
+					if kwargs:
+						target = litemapy.BlockState(f"minecraft:{block}", **{k: str(v) for k, v in kwargs[0].items()})
+					else:
+						target = litemapy.BlockState(f"minecraft:{block}")
+					if target.id == "minecraft:note_block":
+						taken.add(coords)
+						nc += 1
+					coords = list(coords)
+					coords[0] += x - main.x
+					coords[1] += y - main.y
+					coords[2] += z - main.z
+					main = setblock(main, coords, target, no_replace=("minecraft:observer", "minecraft:repeater"))
+
+			for tick in range(ticks_per_segment):
+				if not notes:
+					break
+				beat = notes.popleft()
+				ordered = sorted((note for note in beat if note[2] >= 0), key=lambda note: (transport_note_priority(note), note[1]), reverse=True)
+				for note in ordered[:96]:
+					add_note(note, tick)
+
+			for x, y in skeletons:
+				if y >= 16 and x in range(-3, 4):
+					# We must get rid of copper bulbs too close to the player that would make a significant amount of sound. The new block needs to produce a shape update (trigger observers).
+					# This block *cannot* be replaced with a note block, crafter etc that would be more quiet, because it must not power adjacent dust when strongly powered (conductive), must not be a QC component (pistons) which would get re-powered by the lane above, and all except the centre one must not be any rail as it would silently bud the rail lines below causing a clock!
+					if x == 0:
+						main[x + 1 - main.x, 21, z] = litemapy.BlockState("minecraft:powered_rail", shape="ascending_south", powered="false")
+					# TODO: Figure out what to do with segments 1 unit away from the player, as they are still (very barely) in range of copper bulb sound, but must not be a rail, meaning a hopper is the only other candidate, but we want to avoid this as it causes passive block entity ticking lag when in large amounts.
+					else:
+						main[x + 1 - main.x, 21, z] = litemapy.BlockState("minecraft:hopper", facing="south")
+			# Connect all modules in each segment
+			layers = [sorted(k for k in skeletons if k[1] < 16), sorted(k for k in skeletons if k[1] >= 16)]
+			for yi, indices in enumerate(layers):
+				if not indices:
+					continue
+				y = yi * 16 + 2
+				y2 = y + 1
+				mx, Mx = indices[0][0], indices[-1][0]
+				if mx < 0:
+					if mx >= -7:
+						# No extended lines necessary for short distances; default to powered rail
+						for x in range(mx + 1, 1):
+							primary = (x - main.x, y2, z)
+							secondary = (x - main.x, y, z)
+							main[secondary] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="west")
+							main[primary] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="false")
+					else:
+						# Long range necessary; use instant wire design by Kahyzen (https://youtu.be/nJx-o9fDVm4) for lag optimisation
+						for x in range(mx + 1, 1):
+							primary = (x - main.x, y2, z)
+							secondary = (x - main.x, y, z)
+							thresh = mx + 8
+							offset = x - thresh
+							phase = offset % 9 if x <= -9 or offset < 9 else -1
+							if phase == 1 or x == 0:
+								main[x - main.x, y - 2, z] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="west")
+								main[x - main.x, y - 1, z] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="false")
+								main[secondary] = litemapy.BlockState("minecraft:observer", facing="up")
+								main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
+								continue
+							if phase == 0 or x == -1:
+								main[x - main.x, y - 1, z] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="west")
+								main[secondary] = litemapy.BlockState("minecraft:activator_rail", shape="ascending_west", powered="true")
+								main[primary] = litemapy.BlockState("minecraft:observer", facing="east")
+								main[x - main.x, y + 2, z] = black_carpet
+								continue
+							main[secondary] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="west")
+							main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
+				if Mx > 0:
+					if Mx <= 8:
+						for x in range(2, Mx + 2):
+							primary = (x - main.x, y2, z)
+							secondary = (x - main.x, y, z)
+							main[secondary] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="east")
+							main[primary] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="false")
+					else:
+						for x in range(2, Mx + 2):
+							primary = (x - main.x, y2, z)
+							secondary = (x - main.x, y, z)
+							thresh = Mx - 6
+							offset = thresh - x
+							phase = offset % 9 if x >= 11 or offset < 9 else -1
+							if phase == 1 or x == 2:
+								main[x - main.x, y - 2, z] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="east")
+								main[x - main.x, y - 1, z] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="false")
+								main[secondary] = litemapy.BlockState("minecraft:observer", facing="up")
+								main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
+								continue
+							if phase == 0 or x == 3:
+								main[x - main.x, y - 1, z] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="east")
+								main[secondary] = litemapy.BlockState("minecraft:activator_rail", shape="ascending_east", powered="true")
+								main[primary] = litemapy.BlockState("minecraft:observer", facing="west")
+								main[x - main.x, y + 2, z] = black_carpet
+								continue
+							main[secondary] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="east")
+							main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
+		track1 = tile_region(track, (1, 1, half_segments - 2))
+		if backwards:
+			track1._Region__z = 2 * skeleton1.length
+		track1._Region__y = 12
+		main = paste_region(main, track1, ignore_src_air=True)
+		if backwards:
+			secondary_width = main.max_x() + main.x
+			tile_width = primary_width + secondary_width
+			# print(primary_width, secondary_width, tile_width)
+			main = flip_region(main)
+			main._Region__x -= tile_width
+		else:
+			primary_width = main.min_x() - main.x + 1
+		main._Region__z = start + backwards
+		master = paste_region(master, main, ignore_src_air=True, ignore_dst_non_air=True)
+	end = half_segments * skeleton1.length + 4
+
+	def locate(pos):
+		x, y, z = pos
+		return (x - master.x, y - master.y, z - master.z)
+
+	for yi in range(2):
+		master[locate((1, yi * 16 + 3, end - 2))] = litemapy.BlockState("minecraft:shroomlight")
+		master[locate((1, yi * 16 + 2, end - 1))] = litemapy.BlockState("minecraft:quartz_slab", type="top")
+		master[locate((1, yi * 16 + 3, end - 1))] = litemapy.BlockState("minecraft:redstone_wire", north="side", south="side")
+		master[locate((1, yi * 16 + 3, end))] = litemapy.BlockState("minecraft:target")
+		master[locate((1, yi * 16 + 4, end))] = black_carpet
+		master[locate((1, yi * 16 + 3, end + 1))] = note_block
+		master[locate((1, yi * 16 + 4, end + 1))] = black_carpet
+		# Generate a new instant wire to connect ends
+		for j in range(tile_width):
+			phase = j % 16 if j < tile_width - 11 or tile_width < 16 else -1
+			x, y, z = -j, yi * 16, end + 1
+			if phase == 1 or j == tile_width - 10:
+				master[locate((x, y + 1, z))] = litemapy.BlockState("minecraft:warped_trapdoor", half="top", facing="south")
+				master[locate((x, y + 2, z))] = litemapy.BlockState("minecraft:powered_rail", shape="ascending_west", powered="true")
+				master[locate((x, y + 3, z))] = litemapy.BlockState("minecraft:observer", facing="east")
+				master[locate((x, y + 4, z))] = black_carpet
+				continue
+			if phase == 0 or j == tile_width - 11:
+				master[locate((x, y, z))] = litemapy.BlockState("minecraft:warped_trapdoor", half="top", facing="south")
+				master[locate((x, y + 1, z))] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="false")
+				master[locate((x, y + 2, z))] = litemapy.BlockState("minecraft:observer", facing="up")
+				master[locate((x, y + 3, z))] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="true")
+				continue
+			master[locate((x, y + 2, z))] = litemapy.BlockState("minecraft:warped_trapdoor", half="top", facing="south")
+			master[locate((x, y + 3, z))] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="true")
+		master[locate((1 - tile_width, yi * 16 + 3, end))] = litemapy.BlockState("minecraft:observer", facing="south")
+		master[locate((1 - tile_width, yi * 16 + 4, end))] = black_carpet
+	x, y, z = 0, 13, end - 22
+	turn1, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Turn 1.litematic").regions.values()
+	turn2, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Turn 2.litematic").regions.values()
+	turn3, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Turn 3.litematic").regions.values()
+	turn1._Region__x, turn1._Region__y, turn1._Region__z = x, y, z
+	master = paste_region(master, turn1, ignore_src_air=True)
+	turn2._Region__x, turn2._Region__y, turn2._Region__z = x - tile_width, y - 1, z
+	master = paste_region(master, turn2, ignore_src_air=True)
+	turn3._Region__x, turn3._Region__y, turn3._Region__z = x - tile_width, y, 2
+	master = paste_region(master, turn3, ignore_src_air=True)
+	for i in range(1, tile_width - 5):
+		if i % 32 == 0:
+			master[locate((-i, y + 1, z + 1))] = litemapy.BlockState("minecraft:redstone_block")
+			master[locate((-i, y + 2, z + 1))] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="true")
+		elif i >= tile_width - 13:
+			master[locate((-i, y + 1, z + 1))] = litemapy.BlockState("minecraft:tinted_glass")
+			master[locate((-i, y + 2, z + 1))] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="true")
+		else:
+			master[locate((-i, y + 1, z + 1))] = litemapy.BlockState("minecraft:tinted_glass")
+			master[locate((-i, y + 2, z + 1))] = litemapy.BlockState("minecraft:rail", shape="south_west")
+	for i in range(tile_width - 3, 8, -1):
+		if i % 32 == 0 or i == 9:
+			master[locate((-i, y + 1, 3))] = litemapy.BlockState("minecraft:redstone_block")
+			master[locate((-i, y + 2, 3))] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="true")
+		else:
+			master[locate((-i, y + 1, 3))] = litemapy.BlockState("minecraft:tinted_glass")
+			master[locate((-i, y + 2, 3))] = litemapy.BlockState("minecraft:rail", shape="south_east")
+	master = paste_region(master, header, ignore_src_air=True)
+
+	extremities = Region(master.min_x() + master.x, master.min_y() + master.y, master.min_z() + master.z, master.max_x() + master.x, master.max_y() + master.y, master.max_z() + master.z)
+	print(extremities)
+	return master, extremities, nc
 
 
 def load_nbs(file):
@@ -653,6 +905,7 @@ def load_nbs(file):
 		[0, 0, "header", 1, 9 + 1, 1],
 		[1, 0, "tempo", 1000 * 1000 / header.tempo],
 	]
+	print(header.tempo)
 	for i in range(9):
 		events.append([i + 2, 0, "program_c", i, midi_instrument_selection[i]])
 	ticked = {}
@@ -663,12 +916,12 @@ def load_nbs(file):
 				ins = 6
 				default = 6
 			else:
-				default = instrument_codelist.index(default_instruments[nbs_values[note.instrument]])
+				default = instrument_codelist.index(default_instruments[nbs_values.get(note.instrument, "snare")])
 				try:
 					ins = instrument_codelist.index(instrument_name)
 				except ValueError:
 					ins = default
-			pitch = note.key - 33 + fs1 + pitches[nbs_values[note.instrument]]
+			pitch = note.key - 33 + fs1 + pitches[nbs_values.get(note.instrument, "snare")]
 			bucket = (note.layer, pitch)
 			if note.panning not in range(-1, 2):
 				events.append([ins + 2, tick, "control_c", ins, 10, note.panning / 100 * 63 + 64])
@@ -685,7 +938,6 @@ def load_nbs(file):
 	events.sort(key=lambda e: e[1])
 	return events
 
-
 def save_nbs(transport, output, speed_info, ctx):
 	print("Exporting NBS...")
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
@@ -699,8 +951,8 @@ def save_nbs(transport, output, speed_info, ctx):
 		tempo=round(tempo, 3),
 	)
 	nbs.header.song_origin = ctx.input[0].replace("\\", "/").rsplit("/", 1)[-1]
-	nbs.header.song_author="Hyperchoron"
-	nbs.header.description="Exported MIDI"
+	nbs.header.song_author=DEFAULT_NAME
+	nbs.header.description=DEFAULT_DESCRIPTION
 	layer_poly = {}
 	for i, beat in enumerate(transport):
 		current_poly = {}
@@ -729,12 +981,17 @@ def save_nbs(transport, output, speed_info, ctx):
 				current_poly[ins] += 1
 			except KeyError:
 				current_poly[ins] = 1
+			volume = note[4] / 127 * 100
+			if note[2] <= 0:
+				volume *= min(1, sqrt(20 / tempo) * 2 / 3)
+			if base == "amethyst_block":
+				volume *= 1.25
 			rendered = pynbs.Note(
 				tick=i,
 				layer=ins,
 				key=pitch + 33,
 				instrument=nbi,
-				velocity=round(note[4] / 127 * 100) if note[2] >= 0 else 0,
+				velocity=round(volume),
 				panning=trunc(note[5] * 49) * 2 + (0 if note[2] > 0 else 1 if i & 1 else -1),
 			)
 			nbs.notes.append(rendered)
@@ -774,62 +1031,48 @@ def save_nbs(transport, output, speed_info, ctx):
 	nbs.save(output)
 	return len(nbs.notes)
 
-def save_mcfunction(transport, output, ctx):
-	print("Exporting MCFunction...")
-	block_replacements = cheap_materials if ctx.cheap else expensive_materials
-	blocks = render_minecraft(list(transport), ctx=ctx)
-	nc = 0
-	with open(output, "w") as f:
-		for (x, y, z), block, *kwargs in blocks:
-			if block in block_replacements:
-				block = block_replacements[block]
-				if block == "cobblestone_slab":
-					kwargs = [dict(type="top")]
-			if block == "sand":
-				f.write(f"setblock ~{x} ~{y - 1} ~{z} dirt keep\n")
-			nc += block == "note_block"
-			info = nbt = ""
-			if kwargs:
-				info = "[" + ",".join(f"{k}={v}" for k, v in kwargs[0].items()) + "]"
-				if len(kwargs) > 1:
-					nbt = nbt_to_str(kwargs[1])
-			f.write(f"setblock ~{x} ~{y} ~{z} {block}{info}{nbt} strict\n")
-	return nc
-
 def save_litematic(transport, output, ctx):
-	print("Exporting Litematic...")
-	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	block_replacements = cheap_materials if ctx.cheap else expensive_materials
-	blocks = render_minecraft(list(transport), ctx=ctx)
-	import litemapy
-	air = litemapy.BlockState("minecraft:air")
-	mx, my, mz = 20, 13, 2
-	bars = ceil(len(transport) / BAR / DIV)
-	depth = bars * 8 + 8
-	reg = litemapy.Region(-mx, -my, -mz, mx * 2 + 1, my * 2 + 1, depth + mz + 8)
-	schem = reg.as_schematic(
-		name=out_name,
-		author="Hyperchoron",
-		description="Exported MIDI",
-	)
-	nc = 0
-	for (x, y, z), block, *kwargs in blocks:
-		pos = (x + mx, y + my, z + mz)
-		if block in block_replacements:
-			block = block_replacements[block]
-			if block == "cobblestone_slab":
-				kwargs = [dict(type="top")]
-		if block == "sand" and reg[x + mx, y + my - 1, z + mz] == air:
-			reg[x + mx, y + my - 1, z + mz] = litemapy.BlockState("minecraft:dirt")
-		nc += block == "note_block"
-		if kwargs:
-			block = litemapy.BlockState("minecraft:" + block, **{k: str(v) for k, v in kwargs[0].items()})
-			if len(kwargs) > 1:
-				tile_entity = litemapy.TileEntity(nbt_from_dict(kwargs[1]))
-				tile_entity.position = pos
-				reg.tile_entities.append(tile_entity)
+	is_nbt = output.casefold().endswith(".nbt")
+	if is_nbt:
+		print("Exporting NBT...")
+	else:
+		is_mcfunction = output.casefold().endswith(".mcfunction")
+		if is_mcfunction:
+			print("Exporting MCFunction...")
 		else:
-			block = litemapy.BlockState("minecraft:" + block)
-		reg[pos] = block
-	schem.save(output)
+			print("Exporting Litematic...")
+	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+	reg, ext, nc = render_minecraft(transport, ctx=ctx)
+	if is_nbt:
+		nbt = reg.to_structure_nbt(mc_version=4325)
+		nbt.filename = out_name
+		with open(output, "wb") as f:
+			nbt.save(f)
+	elif is_mcfunction:
+		zrange = 16 * 16
+		lines = ["gamerule maxCommandChainLength 2147483647\n"]
+		lines.extend(f"forceload add ~{ext.mx} ~{z} ~{ext.Mx} ~{z + zrange}\n" for z in range(ext.mz, ext.Mz + zrange - 1, zrange))
+		lines.extend((
+			"gamerule commandModificationBlockLimit 2147483647\n",
+			f"fill ~{ext.mx} ~{ext.my} ~{ext.mz} ~{ext.Mx} ~{ext.My} ~{ext.Mz} air strict\n",
+		))
+		blocks = reg._Region__blocks
+		mask = blocks != 0
+		for z in reg.range_z():
+			for y in reg.range_y():
+				for x in reg.range_x():
+					pos = (x, y, z)
+					if mask[pos] != 0:
+						block = str(reg[pos]).removeprefix("minecraft:")
+						lines.append(f"setblock ~{x + reg.x} ~{y + reg.y} ~{z + reg.z} {block} strict\n")
+		lines.append("forceload remove all")
+		with open(output, "w") as f:
+			f.writelines(lines)
+	else:
+		schem = reg.as_schematic(
+			name=out_name,
+			author=DEFAULT_NAME,
+			description=DEFAULT_DESCRIPTION,
+		)
+		schem.save(output)
 	return nc

@@ -1,6 +1,5 @@
 # Coco eats a gold block on the 18/2/2025. Nom nom nom nom. Output sound weird? Sorgy accident it was the block I eated. Rarararrarrrr 😋
 
-import sys
 try:
 	import tqdm
 except ImportError:
@@ -9,15 +8,9 @@ else:
 	import warnings
 	warnings.filterwarnings("ignore", category=tqdm.TqdmWarning)
 from hyperchoron import util
-from hyperchoron._version import get_versions
 
 
 def export(transport, instrument_activities, speed_info, ctx=None):
-	block_replacements = {}
-	if ctx.cheap:
-		block_replacements.update()
-	else:
-		block_replacements.update()
 	nc = 0
 	for output in ctx.output:
 		ext = output.rsplit(".", 1)[-1].casefold()
@@ -31,10 +24,7 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 			case "org":
 				from hyperchoron import tracker
 				nc += tracker.save_org(transport, output, instrument_activities=instrument_activities, speed_info=speed_info, ctx=ctx)
-			case "mcfunction":
-				from hyperchoron import minecraft
-				nc += minecraft.save_mcfunction(transport, output, ctx=ctx)
-			case "litematic":
+			case "nbt" | "mcfunction" | "litematic":
 				from hyperchoron import minecraft
 				nc += minecraft.save_litematic(transport, output, ctx=ctx)
 			case _:
@@ -44,7 +34,7 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 
 def convert_file(args):
 	ctx = args
-	if ctx.output and (ctx.output[0].rsplit(".", 1)[-1].casefold() in ("litematic", "mcfunction")):
+	if ctx.output and (ctx.output[0].rsplit(".", 1)[-1].casefold() in ("litematic", "mcfunction", "nbt")):
 		if ctx.mc_legal is None:
 			print("Auto-switching to Minecraft-Legal mode...")
 			ctx.mc_legal = True
@@ -107,23 +97,7 @@ def convert_file(args):
 
 
 def main():
-	import argparse
-	parser = argparse.ArgumentParser(
-		prog=f"hyperchoron",
-		description=f"v{get_versions()['version']} MIDI-Tracker-DAW converter and Minecraft Note Block exporter",
-	)
-	parser.add_argument("-V", "--version", action="version", version=f"%(prog)s v{get_versions()['version']}")
-	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)")
-	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mid | .csv | .nbs | .mcfunction | .litematic | .org | *)")
-	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target resolution of represented data in intermediate formats. Defaults to 20 for Minecraft outputs, 50 otherwise")
-	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
-	parser.add_argument("-v", "--volume", nargs="?", type=float, default=1, help="Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1")
-	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0")
-	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
-	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1")
-	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be treated as regular instrument channels. Defaults to TRUE")
-	parser.add_argument("-c", "--cheap", action=argparse.BooleanOptionalAction, default=False, help="For Minecraft outputs: Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous versions of Minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE")
-	parser.add_argument("-m", "--mc-legal", action=argparse.BooleanOptionalAction, default=None, help="Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic and .mcfunction outputs, FALSE otherwise")
+	parser = util.get_parser()
 	args = parser.parse_args()
 	convert_file(args)
 

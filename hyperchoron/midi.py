@@ -22,7 +22,7 @@ from .mappings import (
 	material_map, sustain_map, instrument_codelist,
 	fs1, c_1,
 )
-from .util import sync_tempo, transport_note_priority
+from .util import sync_tempo, transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 
 def midi2csv(file):
@@ -260,7 +260,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				break
 			curr_step = step_ms
 			time = event_timestamp * real_ms_per_clock / scale
-			if time - curr_step / 2 < timestamp:
+			if time - curr_step / 3 < timestamp:
 				# Process all events at the current timestamp
 				mode = event[2]
 				match mode:
@@ -382,7 +382,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						note.volume = channel_stats.get(note.channel, {}).get("volume", 1) * note.velocity / max_vel * 127 * ctx.volume
 						if note.volume > max_volume:
 							max_volume = note.volume
-						total_value += note.volume * note.length
+						total_value += note.volume * min(4, note.length)
 						poly += note.sustain
 				for instrument, notes in active_notes.items():
 					notes.reverse()
@@ -394,7 +394,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						sms = curr_frac
 						needs_sustain = note.sustain
 						long = length >= sms * 2
-						if note.start + sms * 2 / 3 > timestamp_approx or needs_sustain and timestamp_approx + sms <= end:
+						if note.start + sms * 3 / 4 > timestamp_approx or needs_sustain and timestamp_approx + sms <= end:
 							pitch = channel_stats.get(note.channel, {}).get("bend", 0) + note.pitch
 							normalised = pitch + ctx.transpose - fs1
 							if normalised > max_pitch:
@@ -403,7 +403,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								pitch = -12 - ctx.transpose + fs1
 							priority = note.priority
 							if priority > 0 and volume != 0:
-								period = note.period = round(min(8, max(1, 200 / sqrt(pitch + 24) / ctx.strum_affinity * sqrt(total_value / volume / length) / sms))) if long else 8
+								period = note.period = round(min(8, max(1, 100 / sqrt(pitch + 6) / ctx.strum_affinity * sqrt(total_value / volume / min(4, length) + 8) / sms))) if long else 8
 								offset = note.offset = long_notes % period if long else 0
 							elif round((timestamp_approx - note.start) / sms) % note.period != note.offset:
 								priority = -1
@@ -620,7 +620,7 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 	else:
 		print("Exporting MIDI...")
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	instruments, wait, resolution = list(render_midi(list(transport), instrument_activities, speed_info, ctx=ctx))
+	instruments, wait, resolution = list(render_midi(transport, instrument_activities, speed_info, ctx=ctx))
 	import io
 	b = open(output, "w", newline="", encoding="utf-8") if is_csv else io.StringIO()
 	nc = 0
@@ -631,8 +631,8 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 			[0, 0, "header", 1, len(instruments) + 1, resolution * 24],
 			[1, 0, "start_track"],
 			[1, 0, "title_t", out_name],
-			[1, 0, "copyright_t", "Hyperchoron"],
-			[1, 0, "text_t", "Exported MIDI"],
+			[1, 0, "copyright_t", DEFAULT_NAME],
+			[1, 0, "text_t", DEFAULT_DESCRIPTION],
 			[1, 0, "time_signature", 4, 4, 8, 8],
 			[1, 0, "tempo", wait * 24],
 			[1, 0, "end_track"],

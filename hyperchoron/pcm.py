@@ -16,10 +16,10 @@ semitone = 2 ** (1 / 12)
 
 # def load_templates():
 # 	instruments = {}
-# 	for fn in os.listdir("hyperchoron/wav"):
+# 	for fn in os.listdir("lib/wav"):
 # 		instrument = SimpleNamespace(name=fn.rsplit(".", 1)[0], base_freq=0, sample=None)
 # 		data = io.BytesIO()
-# 		with wave.open("hyperchoron/wav/" + fn, "rb") as w:
+# 		with wave.open("lib/wav/" + fn, "rb") as w:
 # 			assert (sr := w.getframerate()) == 48000
 # 			assert (_nc := w.getnchannels()) == 2
 # 			while True:
@@ -155,56 +155,60 @@ def load_wav(file):
 	bufsize = round(sr / (bpm / 60) / 24)
 	c = librosa.hybrid_cqt(merged, sr=sr, fmin=librosa.note_to_hz("C1"), n_bins=bpo * octaves, bins_per_octave=bpo, hop_length=bufsize)
 	amp = np.abs(c.T, dtype=np.float64)
-	print(amp.shape, c.shape, sr)
 	events = [
 		[0, 0, "header", 1, 1 + 1, 1],
 		[1, 0, "tempo", bufsize / sr * 1000 * 1000 * 1],
 	]
 	events.append([2, 0, "program_c", 0, 46])
-	events.append([2, 0, "program_c", 1, 1])
+	events.append([2, 0, "program_c", 1, 16])
 	events.append([2, 0, "program_c", 2, 2])
 	events.append([2, 0, "program_c", 3, 80])
 	events.append([2, 0, "program_c", 4, 81])
-	amp *= np.tile(np.arange(1, 1 + len(amp[0])), (len(amp), 1))
-	loudest = np.max(amp) / 4
+	eq = np.concatenate([np.arange(1, 1 + len(amp[0]) // 2), np.arange(len(amp[0]), len(amp[0]) // 2, -1) / 2])
+	amp *= np.tile(eq, (len(amp), 1))
+	norm = np.mean((np.max(amp), np.mean(amp)))
 	active_notes = {}
-	overtone_cost = 0.25
-	overtone_value = 2
+	overtone_tolerance = 0.75
+	overtone_value = 3
 	last_bassdrum = 0
 	for tick, bins in enumerate(amp):
 		chord = bins[::2]
 		note_instruments = [0] * len(chord)
 		has_bassdrum = False
 		for i, v in enumerate(chord):
-			if v <= loudest / 4096:
+			if v <= norm / 4096:
 				continue
-			if i < 12 and not has_bassdrum and v >= loudest / 32:
+			if i < 12 and not has_bassdrum and v >= norm / 32:
 				drum_candidates = 0
+				last_v = v
+				max_v = v
 				for j in range(i * 2, i * 2 + 24):
 					v2 = bins[j]
-					if abs(v - v2) < v / 2:
+					if abs(last_v - v2) < v / 3:
+						last_v = v2
+						max_v = max(v2, max_v)
 						drum_candidates += 1
-				if drum_candidates >= 12:
+				if drum_candidates >= 8:
 					has_bassdrum = True
-					for j in range(i, i + 12):
-						chord[j] = max(0, chord[j] - v)
-					vel = min(127, v * 1024 / loudest)
+					for j in range(i, i + 8):
+						chord[j] = max(0, chord[j] - max_v * 2)
+					vel = min(127, v * 1024 / norm)
 					if vel > last_bassdrum * 1.2:
 						events.append([2, tick, "note_on_c", 9, 35, vel, 1, 1])
 						# print(events[-1])
 						last_bassdrum = vel
 					continue
-			overtone_matches = dict.fromkeys(harmonics, 0)
+			overtone_mismatches = dict.fromkeys(harmonics, 0)
 			for k, values in harmonics.items():
 				for j, harmonic in values:
 					if i + j < len(chord):
-						overtone_matches[k] += abs(chord[i + j] - v * harmonic) / len(values)
-			k, overtone_match = sorted(overtone_matches.items(), key=lambda t: t[1])[-1]
-			if overtone_match <= overtone_cost:
+						overtone_mismatches[k] += abs(chord[i + j] - v * harmonic) / len(values)
+			k, overtone_mismatch = sorted(overtone_mismatches.items(), key=lambda t: t[1])[-1]
+			if overtone_mismatch <= overtone_tolerance:
 				for j, harmonic in harmonics[k]:
 					if i + j < len(chord):
 						v2 = chord[i + j] - v * harmonic
-						chord[i + j] = 0 if v2 <= chord[i + j] * overtone_cost else v2
+						chord[i + j] = 0 if v2 <= chord[i + j] * overtone_tolerance else v2
 				chord[i] = v * overtone_value
 				match k:
 					case "default":
@@ -220,18 +224,15 @@ def load_wav(file):
 				note_instruments[i] = ins
 		if not has_bassdrum:
 			last_bassdrum = 0
-		# betweens = bins[1::2] * 0.5
-		# chord -= betweens
-		# chord[1:] -= betweens[:-1]
 		high = np.max(chord)
-		if high <= loudest / 4096:
+		if high <= norm / 4096:
 			continue
-		norm = np.clip(chord * (1 / loudest), 0, 1)
-		inds = list(np.argsort(norm))
-		for attempt in range(24):
+		clipped = np.clip(chord * (1 / norm), 0, 1)
+		inds = list(np.argsort(clipped))
+		for attempt in range(32):
 			i = inds.pop(-1)
-			v = norm[i]
-			if v < 1 / 16:
+			v = clipped[i]
+			if v < 1 / 48:
 				break
 			if active_notes.get(i, 0) >= v * 1.0625:
 				priority = -1

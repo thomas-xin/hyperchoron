@@ -194,6 +194,10 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 			except KeyError:
 				next_active[h] = [instrument.index]
 		active = next_active
+	if not conservative:
+		for instrument in instruments:
+			if len(instrument.notes) > 4096:
+				instrument.notes = [note for i, note in enumerate(instrument.notes) if note.pitch != 255 or note.volume in (0, 64, 128, 192, 254)]
 	return instruments, wait
 
 
@@ -355,7 +359,7 @@ def load_xm(file):
 def save_org(transport, output, instrument_activities, speed_info, ctx):
 	print("Exporting ORG...")
 	import struct
-	instruments, wait = list(render_org(list(transport), instrument_activities, speed_info, ctx=ctx))
+	instruments, wait = list(render_org(transport, instrument_activities, speed_info, ctx=ctx))
 	nc = 0
 	with open(output, "wb") as org:
 		org.write(b"\x4f\x72\x67\x2d\x30\x32")
