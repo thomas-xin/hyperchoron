@@ -1,7 +1,7 @@
 import math
 
 
-falling_blocks = ("sand", "black_concrete_powder", "gravel")
+falling_blocks = ("sand", "red_sand", "black_concrete_powder", "gravel")
 # Predefined list attempting to match instruments across pitch ranges
 material_map = [
 	["bamboo_planks", "black_wool", "black_wool+", "amethyst_block+", "gold_block", "gold_block+"],
@@ -241,26 +241,13 @@ percussion_mats = {int((data := line.split("#", 1)[0].strip().split("\t"))[0]): 
 86	obsidian	8	# Mute Surdo
 87	obsidian	0	# Open Surdo
 """.strip().splitlines()}
-
-# palette_flips = (
-# 	None,
-# 	None,
-# 	dict(
-# 		observer={
-# 			"north": "south",
-# 			"south": "north",
-# 		},
-# 		crafter={
-# 			"north_up": "south_up",
-# 			"south_up": "north_up",
-# 		},
-# 		activator_rail={
-# 			"ascending_north": "ascending_south",
-# 			"ascending_south": "ascending_north",
-# 		},
-
-# 	),
-# )
+non_note_blocks = {
+	"warped_trapdoor",
+	"bamboo_trapdoor",
+	"oak_trapdoor",
+	"bamboo_fence_gate",
+	"dropper",
+}
 
 # Remapping of midi note range to note block note range
 c4 = 60
