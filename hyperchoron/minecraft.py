@@ -13,7 +13,7 @@ else:
 	import warnings
 	warnings.filterwarnings("ignore", category=tqdm.TqdmWarning)
 from .mappings import (
-	material_map, percussion_mats, pitches, falling_blocks,
+	material_map, percussion_mats, pitches, falling_blocks, non_note_blocks,
 	instrument_names, nbs_names, nbs_values, midi_instrument_selection,
 	instrument_codelist, fixed_instruments, default_instruments,
 	fs1,
@@ -145,6 +145,12 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=Non
 	if replace and base in replace:
 		base = replace[base]
 	if base == "PLACEHOLDER":
+		return
+	if base in non_note_blocks:
+		yield from (
+			(coords[0], base),
+			(coords[1], "sculk"),
+		)
 		return
 	if base.endswith("_head") or base.endswith("_skull"):
 		yield from (
