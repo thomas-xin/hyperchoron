@@ -3,7 +3,6 @@ import datetime
 import itertools
 from math import ceil, isqrt, sqrt, log2, gcd
 from .mappings import note_names
-from ._version import get_versions
 
 DEFAULT_NAME = "Hyperchoron"
 DEFAULT_DESCRIPTION = f"Exported by Hyperchoron on {datetime.datetime.now().date()}"
@@ -257,12 +256,33 @@ def get_parser():
 	import argparse
 	parser = argparse.ArgumentParser(
 		prog="hyperchoron",
-		description=f"v{get_versions()['version']} MIDI-Tracker-DAW converter and Minecraft Note Block exporter",
+		# drop the eager version interpolation here:
+		description="MIDI-Tracker-DAW converter and Minecraft Note Block exporter",
 	)
-	parser.add_argument("-V", "--version", action="version", version=f"%(prog)s v{get_versions()['version']}")
+	# install our lazy action instead of action="version"; _version.py takes an additional 0.5~1s overhead which we do not want to introduce to the whole program
+	from ._version import get_versions
+	class LazyVersion(argparse.Action):
+		def __init__(self, option_strings, dest=argparse.SUPPRESS,
+					default=argparse.SUPPRESS,
+					help="show program's version and exit"):
+			super().__init__(
+				option_strings=option_strings,
+				dest=dest,
+				default=default,
+				nargs=0,
+				help=help
+			)
+		def __call__(self, parser, namespace, values, option_string=None):
+			ver = get_versions()['version']
+			print(f"{parser.prog} v{ver}")
+			parser.exit()
+	parser.add_argument(
+		"-V", "--version",
+		action=LazyVersion
+	)
 	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)", required=True)
 	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | *)", required=True)
-	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target resolution of represented data in intermediate formats. Defaults to 20 for Minecraft outputs, 50 otherwise")
+	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target time resolution of data, in hertz (per-second). Defaults to 20 for Minecraft outputs, 50 otherwise")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
 	parser.add_argument("-v", "--volume", nargs="?", type=float, default=1, help="Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1")
 	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0")
