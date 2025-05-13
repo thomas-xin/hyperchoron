@@ -260,8 +260,8 @@ def get_parser():
 		description=f"v{get_versions()['version']} MIDI-Tracker-DAW converter and Minecraft Note Block exporter",
 	)
 	parser.add_argument("-V", "--version", action="version", version=f"%(prog)s v{get_versions()['version']}")
-	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)")
-	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | *)")
+	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)", required=True)
+	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | *)", required=True)
 	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target resolution of represented data in intermediate formats. Defaults to 20 for Minecraft outputs, 50 otherwise")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
 	parser.add_argument("-v", "--volume", nargs="?", type=float, default=1, help="Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1")
@@ -269,6 +269,6 @@ def get_parser():
 	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
 	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be treated as regular instrument channels. Defaults to TRUE")
-	parser.add_argument("-md", "--max-distance", nargs="?", type=int, default=42, help="For Minecraft outputs: Restricts the maximum block distance the notes may be placed from the centre line of the structure, in increments of 3 (one module). Controls the ratio of compactness vs note volume accuracy. Defaults to 42")
+	parser.add_argument("-md", "--max-distance", nargs="?", type=int, default=42, help="For Minecraft outputs: Restricts the maximum block distance the notes may be placed from the centre line of the structure, in increments of 3 (one module). Decreasing this value makes the output more compact, at the cost of note volume accuracy. Defaults to 42")
 	parser.add_argument("-ml", "--mc-legal", action=argparse.BooleanOptionalAction, default=None, help="Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic, .mcfunction and .nbt outputs, FALSE otherwise")
 	return parser

@@ -11,8 +11,9 @@
 `python3 -m pip install -r DawVert/requirements.txt`
 ## Usage
 ```ini
-usage:  [-h] [-i INPUT [INPUT ...]] [-o [OUTPUT ...]] [-r [RESOLUTION]] [-s [SPEED]] [-v [VOLUME]] [-t [TRANSPOSE]] [-ik | --invert-key | --no-invert-key]
-        [-sa [STRUM_AFFINITY]] [-d | --drums | --no-drums] [-c | --cheap | --no-cheap] [-m | --mc-legal | --no-mc-legal]
+usage: hyperchoron [-h] [-V] -i INPUT [INPUT ...] -o [OUTPUT ...] [-r [RESOLUTION]] [-s [SPEED]] [-v [VOLUME]]
+                   [-t [TRANSPOSE]] [-ik | --invert-key | --no-invert-key] [-sa [STRUM_AFFINITY]]
+                   [-d | --drums | --no-drums] [-md [MAX_DISTANCE]] [-ml | --mc-legal | --no-mc-legal]
 
 MIDI-Tracker-DAW converter and Minecraft Note Block exporter
 
@@ -22,25 +23,34 @@ options:
   -i, --input INPUT [INPUT ...]
                         Input file (.zip | .mid | .csv | .nbs | .org | *)
   -o, --output [OUTPUT ...]
-                        Output file (.mid | .csv | .nbs | .mcfunction | .litematic | .org | *)
+                        Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | *)
   -r, --resolution [RESOLUTION]
-                        Target resolution of represented data in intermediate formats. Defaults to 20 for Minecraft outputs, 50 otherwise
-  -s, --speed [SPEED]   Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1
+                        Target resolution of represented data in intermediate formats. Defaults to 20 for
+                        Minecraft outputs, 50 otherwise
+  -s, --speed [SPEED]   Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster.
+                        Defaults to 1
   -v, --volume [VOLUME]
-                        Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1
+                        Scales volume of all notes up/down as a multiplier, applied before note quantisation.
+                        Defaults to 1
   -t, --transpose [TRANSPOSE]
-                        Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0
+                        Transposes song up/down a certain amount of semitones, applied before instrument
+                        material mapping; higher = higher pitched. Defaults to 0
   -ik, --invert-key, --no-invert-key
-                        Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE
+                        Experimental: During transpose step, autodetects song key signature, then inverts it
+                        (e.g. C Major <=> C Minor). Defaults to FALSE
   -sa, --strum-affinity [STRUM_AFFINITY]
-                        Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1
+                        Increases or decreases threshold for sustained notes to be cut into discrete segments;
+                        higher = more notes. Defaults to 1
   -d, --drums, --no-drums
-                        Allows percussion channel. If disabled, percussion channels will be treated as regular instrument channels. Defaults to TRUE
-  -c, --cheap, --no-cheap
-                        For Minecraft outputs: Restricts the list of non-instrument blocks to a more survival-friendly set. Also enables compatibility with previous
-                        versions of Minecraft. May cause spacing issues with the sand/snare drum instruments. Defaults to FALSE
-  -m, --mc-legal, --no-mc-legal
-                        Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic and .mcfunction outputs, FALSE otherwise
+                        Allows percussion channel. If disabled, percussion channels will be treated as regular
+                        instrument channels. Defaults to TRUE
+  -md, --max-distance [MAX_DISTANCE]
+                        For Minecraft outputs: Restricts the maximum block distance the notes may be placed
+                        from the centre line of the structure, in increments of 3 (one module). Controls the
+                        ratio of compactness vs note volume accuracy. Defaults to 42
+  -ml, --mc-legal, --no-mc-legal
+                        Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic,
+                        .mcfunction and .nbt outputs, FALSE otherwise
 ```
 ### Examples
 Converting a MIDI file into a Minecraft Litematica schematic:
@@ -116,9 +126,10 @@ Converting a raw audio file into a MIDI project file, transcribing all notes up 
   - .mid/.midi
   - .csv
   - .nbs
-    - If you want to ensure that the output stays vanilla Minecraft compliant, be sure to use the `--mc-legal` argument. This option is normally enabled by default for `.litematic` and `.mcfunction` outputs. If not specified, Hyperchoron will attempt to utilise the full capacity of the `.nbs` format including non-integer tick rates, and will only switch instruments if notes fall outside even the extended range provided by Note Block Studio.
+    - If you want to ensure that the output stays vanilla Minecraft compliant, be sure to use the `--mc-legal` argument. This option is normally enabled by default for `.litematic`, `.mcfunction` and `.nbt` outputs. If not specified, Hyperchoron will attempt to utilise the full capacity of the `.nbs` format including non-integer tick rates, and will only switch instruments if notes fall outside even the extended range provided by Note Block Studio.
   - .mcfunction: A list of Minecraft `/setblock` commands, to be run through a modded client or a datapack. The notes will be mapped to a multi-layered structure enabling 20Hz playback, but with limitations on polyphony, volume and pan control.
   - .litematic: Similar output to `.mcfunction`, but more easily viewed and pasted using the [Litematica](https://modrinth.com/mod/litematica) mod.
+  - .nbt: A Minecraft NBT structure file, normally intended for use with structure blocks. However, in practice the outputs are usually too large, and will need a third-party mod (litematica included) to paste properly.
   - .org
 - WIP:
   - .xm
@@ -138,8 +149,8 @@ Converting a raw audio file into a MIDI project file, transcribing all notes up 
 
 ## Minecraft info
 Odds are, most people finding their way to this repository will be mainly interested in the Minecraft export capabilities and instructions. As such, all information listed below will specifically be about exporting to Minecraft note blocks.
-- If exporting to `.mcfunction`, you will need to make some sort of template datapack to be able to load it in. It is recommended to perform the `/gamerule maxCommandChainLength 2147483647` command prior to pasting the note blocks to avoid longer songs being cut off.
-- If you are intending to build the output schematic in vanilla survival mode, the `-c`/`--cheap` option will force the program to use cobblestone for most of the structure. This removes the excessive use of decorative blocks such as beacons, crying obsidian and froglights, as well as heavy core as an instrument. Note that the latter may cause alignment issues arbitrarily depending on the complexity of the song, as sand requires a supporting block, and there are no blocks (besides customised player heads) in vanilla that can perform this role without also possibly silencing a note block that happens to be directly below.
+- If exporting to `.mcfunction`, you will need to make some sort of template datapack to be able to load it in. When pasting for the first time, it is recommended to perform the `/gamerule maxCommandChainLength 2147483647` command prior to pasting the note blocks to avoid longer songs being cut off. Alternatively, you may run the mcfunction twice, which will do this automatically.
+- As of 2025/05, the structure has been redesigned to enable support for note volume and panning, alongside a new `--max-distance` parameter; this controls the maximum distance notes may be placed from the centreline where the player will travel. If the size of the output is too large for your use case, you may decrease this for a more compact structure. However, this comes at the cost of decreasing volume accuracy.
 
 ### What is the purpose of another Minecraft exporter like this?
 - Converting music to Minecraft note blocks programmatically has been a thing for a long time, the most popular program being Note Block Studio. This program is not intended to entirely replace them, and is meant to be a standalone feature.
@@ -148,11 +159,12 @@ Odds are, most people finding their way to this repository will be mainly intere
   - Instrument Mapping: Rather than map all MIDI instruments to a list of blocks and call it a day, this program has the full 6-octave range for all instruments, automatically swapping the materials if a note exceeds the current range. This is very important for most songs as the default range of 2 octaves in vanilla Minecraft means notes will frequently fall out of range. Clipping, dropping or wrapping notes at the boundary are valid methods of handling this, but they do not permit an accurate recreation of the full song.
   - Adding to the previous point, all drums are implemented separately, rather than using only the three drum instruments in vanilla (which end up drowning each other out), some percussion instruments are mapped to other instruments or mob heads, which allows for a greater variety of sound effects.
   - Pitch Bends: Interpret pitch bends from MIDI files, and automatically convert them into grace notes. This is very important for any MIDI file that includes this mechanic, as the pitch of notes involved will often be very wrong without it.
-  - Polyphonic Budget: If there are too many notes being played at any given moment, the quietest notes and intermediate notes used for sustain will be discarded first.
+  - Polyphonic Budget: If there are too many notes being played at any given moment, the quietest notes and intermediate notes used for sustain will be discarded first. Depending on the `--max-distance` parameter, the schematic allows for up to 87 notes at any point in time, which decreases if a more compact structure is desired.
   - Full Tick Rate: Using the scaffolding-on-trapdoor circuit, a 3-gametick delay can be achieved, which allows offsetting from the (usual) even-numbered ticks redstone components are capable of operating at. This means the full 20Hz tick speed of vanilla Minecraft can be accessed, allowing much greater timing precision.
   - Tempo Alignment: The tempo of songs is automatically synced to Minecraft's default tick rate not using the song's time signature, but rather the greatest common denominator of the notes' timestamps, pruning outliers as necessary. This allows keeping in sync with songs with triplets, quintuplets, or any other measurement not divisible by a power of 2. The algorithm falls back to unsynced playback if a good timing candidate cannot be found, which allows songs with tempo changes or that do not follow their defined time signature at all to still function.
+  - Note Volume: Notes are automatically spread out further from the centreline where the player is, depending on their volume/velocity. This additionally respects the direction of the notes' panning if specified.
 
 ### Additional notes
 - Hyperchoron's design is focused on importing and exporting to vanilla Minecraft as accurately and as reasonably as possible. That means, there are limitations when attempting to convert songs with a much higher speed or many stacked notes; in both cases the notes will be compacted and quantised.
 - Please note that conversion quality may vary significantly between different versions of Hyperchoron. This is an unavoidable nuance that comes with attempting to provide a one-size-fits-all solution for MIDI files; often making one thing sound better will make another sound worse.
-- Here is a video showcasing some of the example outputs: https://youtu.be/Vtmh1Qi0w9s
+- Here is a video showcasing some of the example outputs in an earlier version: https://youtu.be/Vtmh1Qi0w9s
