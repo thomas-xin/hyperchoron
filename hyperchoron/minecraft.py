@@ -166,6 +166,14 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=Non
 		(coords[2], "air"),
 	)
 
+def map_palette(reg):
+	try:
+		return reg._last_palette
+	except AttributeError:
+		pass
+	reg._last_palette = {k: i for i, k in enumerate(reg._Region__palette)}
+	return reg._last_palette
+
 def tile_region(reg, axes):
 	"""
 	Tile a Region's block data by specified repetition factors.
@@ -186,7 +194,6 @@ def tile_region(reg, axes):
 	"""
 	blocks = reg._Region__blocks
 	new_blocks = np.tile(blocks, axes)
-	
 	region = litemapy.Region(reg.x, reg.y, reg.z, *new_blocks.shape)
 	region._Region__blocks = new_blocks
 	region._Region__palette = reg._Region__palette.copy()
@@ -238,14 +245,14 @@ def paste_region(dst, src, ignore_src_air=False, ignore_dst_non_air=False):
 	# If the source completely covers the destination, return the source with no changes
 	if not ignore_src_air and not ignore_dst_non_air and is_contained(dst_size, src_size):
 		return src
-	mask = None
-	if ignore_src_air:
-		mask = src._Region__blocks != 0
 	# Check if a reallocation is necessary (dst_size does not fit src_size)
 	if is_contained(src_size, dst_size):
 		# Check if the palettes match or if the destination palette is empty, allowing a direct copy
 		if dst._Region__palette == src._Region__palette or len(dst._Region__palette) in range(2):
 			target = dst._Region__blocks[src.x - dst.x:src.x - dst.x + src.width, src.y - dst.y:src.y - dst.y + src.height, src.z - dst.z:src.z - dst.z + src.length]
+			mask = None
+			if ignore_src_air:
+				mask = src._Region__blocks != 0
 			if ignore_dst_non_air:
 				if mask is not None:
 					mask &= target == 0
@@ -253,6 +260,7 @@ def paste_region(dst, src, ignore_src_air=False, ignore_dst_non_air=False):
 					mask = target == 0
 			target[mask] = src._Region__blocks[mask]
 			dst._Region__palette = src._Region__palette.copy()
+			dst._last_palette = map_palette(src)
 			for e in src.tile_entities:
 				e = copy.deepcopy(e)
 				e.position = (
@@ -282,24 +290,37 @@ def paste_region(dst, src, ignore_src_air=False, ignore_dst_non_air=False):
 		# Complete the reallocation of the destination region with a recursive call (this should never run into infinite recursion as the new region is always large enough)
 		dst = paste_region(new_dest, dst)
 	# We now have a new destination region that is large enough to fit the source region.
-	# Use a custom dictionary-based palette for this paste, to avoid the O(n^2) overhead in litemapy from calling `.index()` and `__contains__()` on the palette for every single entry.
-	palette = {k: i for i, k in enumerate(dst._Region__palette)}
-	for x in src.range_x():
-		for y in src.range_y():
-			for z in src.range_z():
-				if mask is not None and not mask[x, y, z]:
-					continue
-				target = (x + src.x - dst.x, y + src.y - dst.y, z + src.z - dst.z)
-				if ignore_dst_non_air:
-					if dst._Region__blocks[target] != 0:
-						continue
-				block = src[x, y, z]
-				try:
-					dst._Region__blocks[target] = palette[block]
-				except KeyError:
-					# Fallback to litemapy's __setitem__ method for entries not within the palette
-					dst[target] = block
-					palette = {k: i for i, k in enumerate(dst._Region__palette)}
+	target = dst._Region__blocks[src.x - dst.x:src.x - dst.x + src.width, src.y - dst.y:src.y - dst.y + src.height, src.z - dst.z:src.z - dst.z + src.length]
+	palette = map_palette(dst)
+	dst_mask = target == 0 if ignore_dst_non_air else None
+	for i, block in enumerate(src._Region__palette):
+		if i == 0 and ignore_src_air:
+			continue
+		try:
+			j = palette[block]
+		except KeyError:
+			j = len(dst._Region__palette)
+			dst._Region__palette.append(block)
+			palette[block] = j
+		mask = src._Region__blocks == i
+		if ignore_dst_non_air:
+			mask &= dst_mask
+		target[mask] = j
+	# for x in src.range_x():
+	# 	for y in src.range_y():
+	# 		for z in src.range_z():
+	# 			b_id = src._Region__blocks[x, y, z]
+	# 			if ignore_src_air and b_id == 0:
+	# 				continue
+	# 			target = (x + src.x - dst.x, y + src.y - dst.y, z + src.z - dst.z)
+	# 			if ignore_dst_non_air:
+	# 				if dst._Region__blocks[target] != 0:
+	# 					continue
+	# 			if b_id == 0:
+	# 				dst._Region__blocks[target] = 0
+	# 				continue
+	# 			block = src._Region__palette[b_id]
+	# 			setblock(dst, target, block)
 	for e in src.tile_entities:
 		e = copy.deepcopy(e)
 		e.position = (
@@ -318,15 +339,31 @@ def duplicate_region(reg):
 
 def setblock(dst, coords, block, no_replace=()):
 	"""
-	Sets a block in a region at the specified coordinates. Unlike the original method in litemapy, this one accepts out-of-bounds coordinates and will reallocate the region if necessary.
+	Sets a block in a region at the specified coordinates. Unlike the original method in litemapy, this one accepts out-of-bounds coordinates and will reallocate the region if necessary. Returns the (possibly reallocated) region, alongside a dictionary of the (possible reallocated) palette. Use a custom dictionary-based palette to avoid the O(n^2) overhead in litemapy from calling `.index()` and `__contains__()` on the palette for every single entry.
 	"""
+	palette = map_palette(dst)
 	try:
+		if not no_replace:
+			try:
+				dst._Region__blocks[coords] = palette[block]
+				return dst
+			except KeyError:
+				pass
+			dst[coords] = block
+			palette[block] = dst._Region__blocks[coords]
+			return dst
 		temp = dst[coords]
 	except IndexError:
 		pass
 	else:
 		if temp.id not in no_replace:
+			try:
+				dst._Region__blocks[coords] = palette[block]
+				return dst
+			except KeyError:
+				pass
 			dst[coords] = block
+			palette[block] = dst._Region__blocks[coords]
 		return dst
 
 	assert isinstance(dst, litemapy.Region), "Destination must be a Litematic region."
@@ -351,7 +388,13 @@ def setblock(dst, coords, block, no_replace=()):
 		bounding.Mz - bounding.mz + 1,
 	)
 	dst = paste_region(new_dest, dst)
+	try:
+		dst._Region__blocks[coords] = palette[block]
+		return dst
+	except KeyError:
+		pass
 	dst[coords] = block
+	palette[block] = dst._Region__blocks[coords]
 	return dst
 
 def setblock_absolute(dst, coords, block, no_replace=()):
@@ -407,7 +450,6 @@ def extract_bounds(schem):
 		litemapy.Schematic:
 			The same schematic instance with additional entries in
 			`schem.regions` for each detected void region.
-
 	"""
 	mx, my, mz = schem._Schematic__x_min, schem._Schematic__y_min, schem._Schematic__z_min
 	bounding = Region(mx, my, mz, mx + schem.width - 1, my + schem.height - 1, mz + schem.length - 1)
@@ -589,6 +631,7 @@ def is_contained(v1, v2):
 	return v1.mx >= v2.mx and v1.my >= v2.my and v1.mz >= v2.mz and v1.Mx <= v2.Mx and v1.My <= v2.My and v1.Mz <= v2.Mz
 
 
+static_blocks = {}
 note_locations = (
 	(1, 2), (1, 4), (1, 6), (1, 8),
 	(3, 7), (3, 5), (3, 3), (3, 1),
@@ -619,7 +662,7 @@ def render_minecraft(transport, ctx):
 	# The song is split into two halves going in opposite directions, allowing for the player to be returned to the beginning without extra travel time.
 	for backwards in range(2):
 		dz = half_segments * skeleton1.length if backwards else half_segments * skeleton1.length + buffer
-		main = litemapy.Region(0, 0, 0, 1, 30, dz)
+		main = litemapy.Region(-1, 0, 0, 3, 30, dz)
 		timer1 = tile_region(timer, (1, 1, half_segments - backwards))
 		timer1._Region__y = 2
 		main = paste_region(main, timer1)
@@ -631,6 +674,8 @@ def render_minecraft(transport, ctx):
 			main[1 - main.x, 18, (half_segments - 1) * skeleton1.length] = litemapy.BlockState("minecraft:acacia_trapdoor", half="top", facing="south")
 			main[1 - main.x, 19, (half_segments - 1) * skeleton1.length] = litemapy.BlockState("minecraft:powered_rail", shape="east_west")
 		for segment in range(half_segments):
+			if not backwards and segment == half_segments - 2:
+				primary_width = main.min_x() - main.x + 1
 			z = segment * skeleton1.length
 			skeletons = {}
 			upgraded = set()
@@ -662,9 +707,9 @@ def render_minecraft(transport, ctx):
 			if backwards and segment == 1:
 				get_skeleton(0, 4)
 			if backwards and segment in range(2):
-				dyn_range_downscale = 3
+				dyn_range_downscale = 2
 			elif not backwards and segment in range(half_segments - 2, half_segments):
-				dyn_range_downscale = 3
+				dyn_range_downscale = 2
 			else:
 				dyn_range_downscale = 1
 
@@ -683,6 +728,12 @@ def render_minecraft(transport, ctx):
 				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
 				x = round(max(0, 1 - volume / 100) ** 0.75 * 0.9 * attenuation_multiplier / 3 / dyn_range_downscale) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
+				if not backwards and segment >= half_segments - 2 and primary_width >= 12:
+					offset = -round(min(primary_width / 2, ((segment - half_segments + 2) * 32 + tick) / 2 / 3)) * 3
+					x += offset
+				if backwards and segment < 2 and primary_width >= 12:
+					offset = round(min(primary_width / 2, ((1 - segment) * 32 + (32 - tick)) / 2 / 3)) * 3
+					x += offset
 				if x > attenuation_distance_limit - 3:
 					x = attenuation_distance_limit - 3
 				if x < -attenuation_distance_limit + 3:
@@ -726,15 +777,13 @@ def render_minecraft(transport, ctx):
 					if kwargs:
 						target = litemapy.BlockState(f"minecraft:{block}", **{k: str(v) for k, v in kwargs[0].items()})
 					else:
-						target = litemapy.BlockState(f"minecraft:{block}")
+						target = static_blocks.get(block) or static_blocks.setdefault(block, litemapy.BlockState(f"minecraft:{block}"))
 					if target.id == "minecraft:note_block":
 						taken.add(coords)
 						nc += 1
-					coords = list(coords)
-					coords[0] += x - main.x
-					coords[1] += y - main.y
-					coords[2] += z - main.z
-					main = setblock(main, coords, target, no_replace=("minecraft:observer", "minecraft:repeater", "minecraft:wall_torch") if block == "tripwire" else ())
+					coords = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z - main.z)
+					no_replace = ("minecraft:observer", "minecraft:repeater", "minecraft:wall_torch") if block == "tripwire" else ()
+					main = setblock(main, coords, target, no_replace=no_replace)
 
 			for tick in range(ticks_per_segment):
 				if not notes:
@@ -850,7 +899,7 @@ def render_minecraft(transport, ctx):
 		master[locate((1, yi * 16 + 4, end + 1))] = black_carpet
 		# Generate a new instant wire to connect ends
 		for j in range(tile_width):
-			phase = j % 16 if j < tile_width - 11 or tile_width < 16 else -1
+			phase = j % 9 if j < tile_width - 11 or tile_width < 9 else -1
 			x, y, z = -j, yi * 16, end + 1
 			if phase == 1 or j == tile_width - 10:
 				master[locate((x, y + 1, z))] = litemapy.BlockState("minecraft:warped_trapdoor", half="top", facing="south")
