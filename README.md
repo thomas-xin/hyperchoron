@@ -165,4 +165,4 @@ Odds are, most people finding their way to this repository will be mainly intere
 ### Additional notes
 - Hyperchoron's design is focused on importing and exporting to vanilla Minecraft as accurately and as reasonably as possible. That means, there are limitations when attempting to convert songs with a much higher speed or many stacked notes; in both cases the notes will be compacted and quantised.
 - Please note that conversion quality may vary significantly between different versions of Hyperchoron. This is an unavoidable nuance that comes with attempting to provide a one-size-fits-all solution for MIDI files; often making one thing sound better will make another sound worse.
-- Here is a video showcasing some of the example outputs in an earlier version: https://youtu.be/Vtmh1Qi0w9s, and here is an example of the latest version with volume control: https://youtu.be/RQekloLm9_A
+- Here is a video showcasing some of the example outputs in an earlier version: https://youtu.be/Vtmh1Qi0w9s, and here is an example of the latest version with volume control: https://youtu.be/XJlirm0joc4
