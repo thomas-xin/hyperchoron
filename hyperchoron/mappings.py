@@ -9,7 +9,7 @@ material_map = [
 	["pumpkin", "pumpkin+", "amethyst_block", "clay", "clay+", "packed_ice+"],
 	["pumpkin", "pumpkin+", "emerald_block", "emerald_block+", "gold_block", "gold_block+"],
 	["bamboo_planks", "bamboo_planks+", "iron_block", "iron_block+", "soul_sand+", "bone_block+"],
-	["bamboo_planks", "black_wool", "amethyst_block", "amethyst_block+", "packed_ice", "packed_ice+"],
+	["bamboo_planks", "black_wool", "emerald_block", "emerald_block+", "packed_ice", "packed_ice+"],
 	["netherrack", "netherrack+", "red_stained_glass", "red_stained_glass+", "red_sand", "red_sand+"],
 	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "gold_block", "gold_block+"],
 	None

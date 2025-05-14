@@ -1,9 +1,9 @@
-from collections import deque, namedtuple
+from collections import abc, deque, namedtuple
 import copy
 import functools
 from math import ceil, sqrt, trunc
 import litemapy
-from nbtlib.tag import Int, Double, String, List, Compound
+from nbtlib.tag import Int, Double, String, List, Compound, Byte
 import numpy as np
 try:
 	import tqdm
@@ -174,6 +174,21 @@ def map_palette(reg):
 	reg._last_palette = {k: i for i, k in enumerate(reg._Region__palette)}
 	return reg._last_palette
 
+def move_region(reg, dx, dy, dz):
+	reg._Region__x = dx
+	reg._Region__y = dy
+	reg._Region__z = dz
+	# for e in reg.tile_entities:
+	# 	e.position = (
+	# 		e.position[0] + dx,
+	# 		e.position[1] + dy,
+	# 		e.position[2] + dz,
+	# 	)
+	return reg
+
+def get_bounding(reg):
+	return Region(reg.min_x() + reg.x, reg.min_y() + reg.y, reg.min_z() + reg.z, reg.max_x() + reg.x, reg.max_y() + reg.y, reg.max_z() + reg.z)
+
 def tile_region(reg, axes):
 	"""
 	Tile a Region's block data by specified repetition factors.
@@ -240,8 +255,8 @@ def paste_region(dst, src, ignore_src_air=False, ignore_dst_non_air=False):
 	  outside its bounds, ensuring no infinite recursion.
 	"""
 	assert isinstance(dst, litemapy.Region) and isinstance(src, litemapy.Region), "Both regions must be Litematic regions."
-	dst_size = Region(dst.min_x() + dst.x, dst.min_y() + dst.y, dst.min_z() + dst.z, dst.max_x() + dst.x, dst.max_y() + dst.y, dst.max_z() + dst.z)
-	src_size = Region(src.min_x() + src.x, src.min_y() + src.y, src.min_z() + src.z, src.max_x() + src.x, src.max_y() + src.y, src.max_z() + src.z)
+	dst_size = get_bounding(dst)
+	src_size = get_bounding(src)
 	# If the source completely covers the destination, return the source with no changes
 	if not ignore_src_air and not ignore_dst_non_air and is_contained(dst_size, src_size):
 		return src
@@ -306,21 +321,6 @@ def paste_region(dst, src, ignore_src_air=False, ignore_dst_non_air=False):
 		if ignore_dst_non_air:
 			mask &= dst_mask
 		target[mask] = j
-	# for x in src.range_x():
-	# 	for y in src.range_y():
-	# 		for z in src.range_z():
-	# 			b_id = src._Region__blocks[x, y, z]
-	# 			if ignore_src_air and b_id == 0:
-	# 				continue
-	# 			target = (x + src.x - dst.x, y + src.y - dst.y, z + src.z - dst.z)
-	# 			if ignore_dst_non_air:
-	# 				if dst._Region__blocks[target] != 0:
-	# 					continue
-	# 			if b_id == 0:
-	# 				dst._Region__blocks[target] = 0
-	# 				continue
-	# 			block = src._Region__palette[b_id]
-	# 			setblock(dst, target, block)
 	for e in src.tile_entities:
 		e = copy.deepcopy(e)
 		e.position = (
@@ -372,7 +372,7 @@ def setblock(dst, coords, block, no_replace=()):
 		raise ValueError("Coordinates must be a 3-tuple.")
 	if not all(isinstance(coord, int) for coord in coords):
 		raise ValueError("All coordinates must be integers.")
-	dst_size = Region(dst.min_x() + dst.x, dst.min_y() + dst.y, dst.min_z() + dst.z, dst.max_x() + dst.x, dst.max_y() + dst.y, dst.max_z() + dst.z)
+	dst_size = get_bounding(dst)
 	bounding = Region(
 		min(dst_size.mx, coords[0] + dst.x),
 		min(dst_size.my, coords[1] + dst.y),
@@ -535,49 +535,19 @@ def crop_region(region, size):
 	new_region._optimize_palette()
 	return new_region
 
-def flip_region(region, axis=2):
-	"""
-	Flip (mirror) the block data of a Litematic region along a chosen axis.
-
-	Parameters
-	----------
-	region : litemapy.Region
-		The Litematic region whose internal block array will be flipped.
-	axis : int, optional
-		The axis along which to flip the block data:
-		  0 – x-axis (east–west),
-		  1 – y-axis (vertical),
-		  2 – z-axis (north–south, default).
-
-	Returns
-	-------
-	litemapy.Region
-		The same region instance, now containing flipped block data.
-
-	Raises
-	------
-	AssertionError
-		If `region` is not an instance of `litemapy.Region`.
-	ValueError
-		If `axis` is not one of 0, 1, or 2.
-
-	Notes
-	-----
-	This operation modifies the region in place by directly altering its
-	private `__blocks` NumPy array.
-
-	Examples
-	--------
-	>>> 
-	>>> region = litemapy.Region(...)   # load or create a region
-	>>> flipped_region = flip_region(region, axis=0)
-	>>> # Now `flipped_region` has its blocks mirrored along the x-axis.
-	"""
+def flip_region(region, axes=2):
 	assert isinstance(region, litemapy.Region), "Region must be a Litematic region."
-	if axis not in (0, 1, 2):
-		raise ValueError("Axis must be 0 (x), 1 (y), or 2 (z).")
-	region._Region__blocks = np.flip(region._Region__blocks, axis)
-	flip_palette(region._Region__palette, axis)
+	region._Region__blocks = np.flip(region._Region__blocks, axes)
+	if not isinstance(axes, abc.Iterable):
+		axes = [axes]
+	for axis in axes:
+		flip_palette(region._Region__palette, axis)
+		if axis == 0:
+			region._Region__x -= region.max_x() - region.min_x()
+		elif axis == 1:
+			region._Region__y -= region.max_y() - region.min_y()
+		elif axis == 2:
+			region._Region__z -= region.max_z() - region.min_z()
 	return region
 
 flips = [
@@ -628,6 +598,8 @@ Region = namedtuple("Region", ("mx", "my", "mz", "Mx", "My", "Mz"))
 def is_disjoint(v1, v2):
 	return v1.mx > v2.Mx or v1.my > v2.My or v1.mz > v2.Mz or v1.Mx < v2.mx or v1.My < v2.my or v1.Mz < v2.mz
 def is_contained(v1, v2):
+	if len(v1) == 3:
+		return v1[0] >= v2.mx and v1[1] >= v2.my and v1[2] >= v2.mz and v1[0] <= v2.Mx and v1[1] <= v2.My and v1[2] <= v2.Mz
 	return v1.mx >= v2.mx and v1.my >= v2.my and v1.mz >= v2.mz and v1.Mx <= v2.Mx and v1.My <= v2.My and v1.Mz <= v2.Mz
 
 
@@ -638,7 +610,7 @@ note_locations = (
 	(5, 2), (5, 4), (5, 6), (5, 8),
 	(7, 7), (7, 5), (7, 3), (7, 1),
 )
-def render_minecraft(transport, ctx):
+def render_minecraft(transport, ctx, name="Hyperchoron"):
 	ticks_per_segment = 32
 	total_duration = len(transport)
 	total_segments = ceil(total_duration / ticks_per_segment)
@@ -647,10 +619,10 @@ def render_minecraft(transport, ctx):
 	tile_width = attenuation_distance_limit * 2 + 3
 	primary_width = 0
 	secondary_width = 0
-	master = litemapy.Region(0, 0, 0, 1, 1, 1)
-	header, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Header.litematic").regions.values()
-	header._Region__x = -8
-	header._Region__z = -3
+	master = litemapy.Region(0, 0, -3, 1, 1, 1)
+	schem = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Header.litematic")
+	header, = schem.regions.values()
+	header = move_region(header, -8, 0, -3)
 	timer, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Timer.litematic").regions.values()
 	track, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Track.litematic").regions.values()
 	skeleton1, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 skeleton 1.litematic").regions.values()
@@ -706,12 +678,6 @@ def render_minecraft(transport, ctx):
 
 			if backwards and segment == 1:
 				get_skeleton(0, 4)
-			if backwards and segment in range(2):
-				dyn_range_downscale = 2
-			elif not backwards and segment in range(half_segments - 2, half_segments):
-				dyn_range_downscale = 2
-			else:
-				dyn_range_downscale = 1
 
 			def add_note(note, tick):
 				nonlocal main, nc
@@ -723,17 +689,17 @@ def render_minecraft(transport, ctx):
 				if panning == 0:
 					panning = 1 if note_hash & 1 else -1
 				base, pitch = get_note_mat(note, odd=tick & 1)
-				if base == "amethyst_block":
-					volume *= 1.25
 				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
-				x = round(max(0, 1 - volume / 100) ** 0.75 * 0.9 * attenuation_multiplier / 3 / dyn_range_downscale) * (3 if panning > 0 else -3)
+				x = round(max(0, 1 - volume / 100) ** 0.75 * 0.9 * attenuation_multiplier / 3) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
 				if not backwards and segment >= half_segments - 2 and primary_width >= 12:
-					offset = -round(min(primary_width / 2, ((segment - half_segments + 2) * 32 + tick) / 2 / 3)) * 3
-					x += offset
-				if backwards and segment < 2 and primary_width >= 12:
-					offset = round(min(primary_width / 2, ((1 - segment) * 32 + (32 - tick)) / 2 / 3)) * 3
-					x += offset
+					if x <= -primary_width / 2:
+						x = -x
+					x = round(x / 3 - min(primary_width / 2 / 3, ((segment - half_segments + 2) * 32 + tick) / 2 / 3)) * 3
+				elif backwards and segment < 2 and primary_width >= 12:
+					if x >= primary_width / 2:
+						x = -x
+					x = round(x / 3 + min(primary_width / 2 / 3, ((1 - segment) * 32 + (32 - tick)) / 2 / 3)) * 3
 				if x > attenuation_distance_limit - 3:
 					x = attenuation_distance_limit - 3
 				if x < -attenuation_distance_limit + 3:
@@ -944,11 +910,55 @@ def render_minecraft(transport, ctx):
 		else:
 			master[locate((-i, y + 1, 3))] = litemapy.BlockState("minecraft:tinted_glass")
 			master[locate((-i, y + 2, 3))] = litemapy.BlockState("minecraft:rail", shape="south_east")
-	master = paste_region(master, header, ignore_src_air=True)
+	# Very hacky way to reinstantiate the schematic from the loaded one; litemapy *will not* produce the signs properly otherwise!
+	schem.author = DEFAULT_NAME
+	schem.description = DEFAULT_DESCRIPTION
+	schem.regions.clear()
+	master[locate((1, 16, -3))] = litemapy.BlockState("minecraft:warped_sign", rotation="0")
+	x, y, z = locate((1, 16, -3))
+	lines = []
+	curr = ""
+	tokens = name.replace("_", " ").split()
+	while tokens:
+		word = tokens.pop(0)
+		if len(word) > 15:
+			word, next_word = word[:15], word[15:]
+			tokens.insert(0, next_word)
+		if len(word) + len(curr) > 14:
+			lines.append(curr)
+			curr = ""
+		if curr:
+			curr += " "
+		curr += word
+	if word:
+		lines.append(word)
+	messages = []
+	if len(lines) <= 2:
+		messages.append(Compound({'': String('')}))
+	for line in lines[:4]:
+		texts = []
+		for i, c in enumerate(line):
+			r = i / (len(line) - 1)
+			R, G, B = round(255 * r), 255, round(255 * (1 - r))
+			colour = hex((R << 16) | (G << 8) | B)[2:].upper()
+			while len(colour) < 6:
+				colour = "0" + colour
+			colour = "#" + colour
+			texts.append(Compound({'bold': Byte(0), 'color': String(colour), 'text': String(c)}))
+		messages.append(Compound({'extra': List[Compound](texts), 'text': String('')}))
+	while len(messages) < 4:
+		messages.append(Compound({'': String('')}))
+	master.tile_entities.append(
+		litemapy.TileEntity(
+			Compound({'x': Int(x), 'y': Int(y), 'z': Int(z), 'is_waxed': Byte(1), 'id': String('minecraft:sign'), 'front_text': Compound({'color': String('black'), 'messages': List[Compound](messages), 'has_glowing_text': Byte(0)}), 'back_text': Compound({'color': String('black'), 'messages': List[String]([String(''), String(''), String(''), String('')]), 'has_glowing_text': Byte(0)})})
+		)
+	)
+	# print({e.position: (header[e.position], e.data) for e in header.tile_entities})
+	schem.regions["Hyperchoron"] = paste_region(master, header, ignore_src_air=True)
 
-	extremities = Region(master.min_x() + master.x, master.min_y() + master.y, master.min_z() + master.z, master.max_x() + master.x, master.max_y() + master.y, master.max_z() + master.z)
+	extremities = get_bounding(master)
 	print(extremities)
-	return master, extremities, nc
+	return schem, extremities, nc
 
 
 def load_nbs(file):
@@ -1039,8 +1049,6 @@ def save_nbs(transport, output, speed_info, ctx):
 			volume = note[4] / 127 * 100
 			if note[2] <= 0:
 				volume *= min(1, sqrt(20 / tempo) * 2 / 3)
-			if base == "amethyst_block":
-				volume *= 1.25
 			rendered = pynbs.Note(
 				tick=i,
 				layer=ins,
@@ -1097,8 +1105,11 @@ def save_litematic(transport, output, ctx):
 		else:
 			print("Exporting Litematic...")
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	reg, ext, nc = render_minecraft(transport, ctx=ctx)
+	schem, ext, nc = render_minecraft(transport, ctx=ctx, name=ctx.input[0].replace("\\", "/").rsplit("/", 1)[-1])
 	if is_nbt:
+		reg, *extra = schem.regions.values()
+		for e in extra:
+			reg = paste_region(reg, e, ignore_src_air=True)
 		nbt = reg.to_structure_nbt(mc_version=4325)
 		nbt.filename = out_name
 		with open(output, "wb") as f:
@@ -1111,6 +1122,9 @@ def save_litematic(transport, output, ctx):
 			"gamerule commandModificationBlockLimit 2147483647\n",
 			f"fill ~{ext.mx} ~{ext.my} ~{ext.mz} ~{ext.Mx} ~{ext.My} ~{ext.Mz} air strict\n",
 		))
+		reg, *extra = schem.regions.values()
+		for e in extra:
+			reg = paste_region(reg, e, ignore_src_air=True)
 		blocks = reg._Region__blocks
 		mask = blocks != 0
 		for z in reg.range_z():
@@ -1126,10 +1140,6 @@ def save_litematic(transport, output, ctx):
 		with open(output, "w") as f:
 			f.writelines(lines)
 	else:
-		schem = reg.as_schematic(
-			name=out_name,
-			author=DEFAULT_NAME,
-			description=DEFAULT_DESCRIPTION,
-		)
+		schem.name = out_name
 		schem.save(output)
 	return nc

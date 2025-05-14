@@ -328,6 +328,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 										candidate = note
 							if candidate:
 								candidate.length = max(candidate.length, float(timestamp_approx + curr_frac - candidate.start))
+								candidate.sustain = True
 					case "control_c" if int(event[4]) == 6:
 						channel = int(event[3])
 						pitchbend_ranges[channel] = int(event[5])
