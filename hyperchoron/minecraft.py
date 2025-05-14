@@ -425,8 +425,14 @@ def merge_regions(regions):
 	max_z = max(region.max_z() for region in regions)
 	dst = litemapy.Region(min_x, min_y, min_z, max_x - min_x + 1, max_y - min_y + 1, max_z - min_z + 1)
 	for region in regions:
-		dst = paste_region(dst, region)
+		dst = paste_region(dst, region, ignore_src_air=True)
 	return dst
+
+def get_region(schem):
+	reg, *extra = schem.regions.values()
+	if extra:
+		return merge_regions(schem.regions.values())
+	return reg
 
 def extract_bounds(schem):
 	"""
@@ -542,12 +548,12 @@ def flip_region(region, axes=2):
 		axes = [axes]
 	for axis in axes:
 		flip_palette(region._Region__palette, axis)
-		if axis == 0:
-			region._Region__x -= region.max_x() - region.min_x()
-		elif axis == 1:
-			region._Region__y -= region.max_y() - region.min_y()
-		elif axis == 2:
-			region._Region__z -= region.max_z() - region.min_z()
+		# if axis == 0:
+		# 	region._Region__x -= region.max_x() - region.min_x()
+		# elif axis == 1:
+		# 	region._Region__y -= region.max_y() - region.min_y()
+		# elif axis == 2:
+		# 	region._Region__z -= region.max_z() - region.min_z()
 	return region
 
 flips = [
@@ -636,9 +642,9 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 		dz = half_segments * skeleton1.length if backwards else half_segments * skeleton1.length + buffer
 		main = litemapy.Region(-1, 0, 0, 3, 30, dz)
 		timer1 = tile_region(timer, (1, 1, half_segments - backwards))
-		timer1._Region__y = 2
+		timer1 = move_region(timer1, 0, 2, 0)
 		main = paste_region(main, timer1)
-		timer1._Region__y = 18
+		timer1 = move_region(timer1, 0, 18, 0)
 		main = paste_region(main, timer1)
 		if backwards:
 			main[1 - main.x, 2, (half_segments - 1) * skeleton1.length] = litemapy.BlockState("minecraft:acacia_trapdoor", half="top", facing="south")
@@ -653,26 +659,22 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 			upgraded = set()
 
 			def get_skeleton(x, y):
-				nonlocal main
+				nonlocal main, skeleton1
 				try:
 					return skeletons[x, y]
 				except KeyError:
 					pass
-				skeleton1._Region__x = x
-				skeleton1._Region__y = y
-				skeleton1._Region__z = z
+				skeleton1 = move_region(skeleton1, x, y, z)
 				main = paste_region(main, skeleton1)
 				taken = skeletons[x, y] = set()
 				return taken
 
 			def upgrade_skeleton(x, y):
 				# A skeleton gets "upgraded" if it needs to support more than a single lane of note blocks. For simplicity, the upgraded variants are identical to the regular ones for now, except for added torches on the sides.
-				nonlocal main
+				nonlocal main, skeleton2
 				if (x, y) in upgraded:
 					return
-				skeleton2._Region__x = x
-				skeleton2._Region__y = y
-				skeleton2._Region__z = z
+				skeleton2 = move_region(skeleton2, x, y, z)
 				main = paste_region(main, skeleton2, ignore_src_air=True)
 				upgraded.add((x, y))
 
@@ -887,11 +889,11 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 	turn1, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Turn 1.litematic").regions.values()
 	turn2, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Turn 2.litematic").regions.values()
 	turn3, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Turn 3.litematic").regions.values()
-	turn1._Region__x, turn1._Region__y, turn1._Region__z = x, y, z
+	turn1 = move_region(turn1, x, y, z)
 	master = paste_region(master, turn1, ignore_src_air=True)
-	turn2._Region__x, turn2._Region__y, turn2._Region__z = x - tile_width, y - 1, z
+	turn2 = move_region(turn2, x - tile_width, y - 1, z)
 	master = paste_region(master, turn2, ignore_src_air=True)
-	turn3._Region__x, turn3._Region__y, turn3._Region__z = x - tile_width, y, 2
+	turn3 = move_region(turn3, x - tile_width, y, 2)
 	master = paste_region(master, turn3, ignore_src_air=True)
 	for i in range(1, tile_width - 5):
 		if i % 32 == 0:
@@ -911,6 +913,7 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 			master[locate((-i, y + 1, 3))] = litemapy.BlockState("minecraft:tinted_glass")
 			master[locate((-i, y + 2, 3))] = litemapy.BlockState("minecraft:rail", shape="south_east")
 	# Very hacky way to reinstantiate the schematic from the loaded one; litemapy *will not* produce the signs properly otherwise!
+	# I suspect this is due to litemapy exposing raw NBT data rather than parsing it to determine version, leading to exporting as an older schematic version and causing litematic to fallback to placing an empty sign.
 	schem.author = DEFAULT_NAME
 	schem.description = DEFAULT_DESCRIPTION
 	schem.regions.clear()
@@ -1107,9 +1110,7 @@ def save_litematic(transport, output, ctx):
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 	schem, ext, nc = render_minecraft(transport, ctx=ctx, name=ctx.input[0].replace("\\", "/").rsplit("/", 1)[-1])
 	if is_nbt:
-		reg, *extra = schem.regions.values()
-		for e in extra:
-			reg = paste_region(reg, e, ignore_src_air=True)
+		reg = get_region(schem)
 		nbt = reg.to_structure_nbt(mc_version=4325)
 		nbt.filename = out_name
 		with open(output, "wb") as f:
@@ -1122,9 +1123,7 @@ def save_litematic(transport, output, ctx):
 			"gamerule commandModificationBlockLimit 2147483647\n",
 			f"fill ~{ext.mx} ~{ext.my} ~{ext.mz} ~{ext.Mx} ~{ext.My} ~{ext.Mz} air strict\n",
 		))
-		reg, *extra = schem.regions.values()
-		for e in extra:
-			reg = paste_region(reg, e, ignore_src_air=True)
+		reg = get_region(schem)
 		blocks = reg._Region__blocks
 		mask = blocks != 0
 		for z in reg.range_z():
