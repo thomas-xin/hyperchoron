@@ -109,7 +109,7 @@ def render_org(notes, instrument_activities, speed_info, ctx):
 				ins = instrument_names[mat]
 				match ins:
 					case "basedrum":
-						if mat == "netherrack":
+						if mat in ("netherrack", "cobblestone"):
 							iid = 8
 							pitch = rpitch - 12
 						else:

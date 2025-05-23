@@ -39,7 +39,7 @@ def convert_file(args):
 			print("Auto-switching to Minecraft-Legal mode...")
 			ctx.mc_legal = True
 	if not ctx.resolution:
-		ctx.resolution = 50 if not ctx.mc_legal else 20
+		ctx.resolution = 40 if not ctx.mc_legal else 20
 	inputs = list(ctx.input)
 	if not ctx.output or not any("." in fn for fn in ctx.output):
 		*path, name = inputs[0].replace("\\", "/").rsplit("/", 1)
@@ -52,7 +52,7 @@ def convert_file(args):
 		inputs.extend(z.open(f) for f in z.filelist)
 	imported = []
 	for file in inputs:
-		if isinstance(file, str) and file.startswith("https://"):
+		if isinstance(file, str) and (file.startswith("https://") or file.startswith("http://")):
 			import io
 			import urllib.request
 			req = urllib.request.Request(file, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"})
@@ -79,9 +79,9 @@ def convert_file(args):
 			case "mid" | "midi":
 				from hyperchoron import midi
 				data = midi.load_midi(file)
-			case "wav":
+			case "wav" | "flac" | "mp3" | "aac" | "ogg" | "opus" | "m4a" | "wma" | "weba" | "webm":
 				from hyperchoron import pcm
-				data = pcm.load_wav(file)
+				data = pcm.load_wav(file, ctx=ctx)
 			case _:
 				from hyperchoron import dawvert
 				data = dawvert.load_arbitrary(file, ext)

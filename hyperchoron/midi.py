@@ -229,6 +229,7 @@ class TransportNote:
 	sustain: bool
 	priority: int
 	volume: float
+	panning: float
 	period: int
 	offset: int
 
@@ -246,8 +247,9 @@ def deconstruct(midi_events, speed_info, ctx=None):
 	note_candidates = 0
 	_orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, orig_tempo = speed_info
 	step_ms = orig_step_ms
-	midi_events, instrument_map, channel_stats, note_lengths, max_vel, last_timestamp, is_org = preprocess(midi_events, ctx=ctx)
-	print("Processing notes...")
+	midi_events, instrument_map, _, note_lengths, max_vel, last_timestamp, is_org = preprocess(midi_events, ctx=ctx)
+	channel_stats = {}
+	print("Processing quantised notes...")
 	bar_format = "{l_bar}{bar}| {n:.3g}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
 	progress = tqdm.tqdm(total=ceil(last_timestamp * real_ms_per_clock / scale / 1000), bar_format=bar_format) if tqdm else contextlib.nullcontext()
 	global_index = 0
@@ -269,6 +271,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						instrument = instrument_map[channel]
 						pitch = int(event[4])
 						velocity = int(event[5])
+						panning = 0
 						if velocity == 0:
 							pass
 						elif velocity < loud * 0.0625 and sum(map(len, active_notes.items())) >= 48:
@@ -281,6 +284,8 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							else:
 								sustain = sustain_map[instrument] or (1 if is_org else 2 if not ctx.mc_legal else 0)
 							if len(event) > 6:
+								if len(event) > 8:
+									panning = event[8]
 								priority, length_ticks = event[6], event[7]
 								length = (length_ticks + 0.25) * real_ms_per_clock / scale
 							else:
@@ -306,6 +311,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								sustain=sustain,
 								priority=priority,
 								volume=0,
+								panning=panning,
 								period=1,
 								offset=0,
 							)
@@ -344,11 +350,11 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							for note in active_notes[instrument]:
 								if note.channel == channel:
 									note.priority = max(note.priority, 1)
-						elif volume <= orig_volume * 0.5:
-							instrument = instrument_map[channel]
-							for note in active_notes[instrument]:
-								if note.channel == channel:
-									note.sustain = False
+						# elif volume <= orig_volume * 0.5:
+						# 	instrument = instrument_map[channel]
+						# 	for note in active_notes[instrument]:
+						# 		if note.channel == channel:
+						# 			note.sustain = False
 						channel_stats[channel]["volume"] = volume
 					case "control_c" if int(event[4]) == 10:
 						channel = int(event[3])
@@ -391,6 +397,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						note = notes[i]
 						volume = note.volume
 						length = note.length
+						panning = note.panning + channel_stats.get(note.channel, {}).get("pan", 0)
 						end = note.start + note.length
 						sms = curr_frac
 						needs_sustain = note.sustain
@@ -412,11 +419,11 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							try:
 								temp = ticked[bucket]
 							except KeyError:
-								temp = ticked[bucket] = [priority, long, volume ** 2, channel_stats.get(note.channel, {}).get("pan", 0)]
+								temp = ticked[bucket] = [priority, long, volume ** 2, panning]
 							else:
 								temp[0] = max(temp[0], priority)
 								temp[1] |= long
-								temp[3] = temp[3] if temp[2] > volume ** 2 else channel_stats.get(note.channel, {}).get("pan", 0)
+								temp[3] = temp[3] if temp[2] > volume ** 2 else panning
 								temp[2] = temp[2] + volume ** 2
 							long_notes += long
 						if timestamp_approx >= end or len(notes) >= 64 and not needs_sustain:

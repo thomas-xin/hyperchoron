@@ -1,11 +1,13 @@
 from collections import deque
 import datetime
+import fractions
 import itertools
 from math import ceil, isqrt, sqrt, log2, gcd
 from .mappings import note_names
 
 DEFAULT_NAME = "Hyperchoron"
 DEFAULT_DESCRIPTION = f"Exported by Hyperchoron on {datetime.datetime.now().date()}"
+base_path = __file__.replace("\\", "/").rsplit("/", 1)[0] + "/"
 
 # Thank you deepseek-r1 for optimisation
 def approximate_gcd(arr, min_value=8):
@@ -110,6 +112,10 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 				speed /= div
 			elif div > 2:
 				speed /= div / 2
+	if not use_exact and ctx.mc_legal and (speed < min_value * 0.9 or speed > min_value * 1.1):
+		frac = fractions.Fraction(min_value / speed).limit_denominator(12)
+		print("For MC compliance: rescaling speed by:", frac)
+		speed = float(speed * frac)
 	if use_exact:
 		real_ms_per_clock = milliseconds_per_clock
 	else:
@@ -282,7 +288,7 @@ def get_parser():
 	)
 	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)", required=True)
 	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | *)", required=True)
-	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target time resolution of data, in hertz (per-second). Defaults to 20 for Minecraft outputs, 50 otherwise")
+	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target time resolution of data, in hertz (per-second). Defaults to 20 for Minecraft outputs, 40 otherwise")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
 	parser.add_argument("-v", "--volume", nargs="?", type=float, default=1, help="Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1")
 	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0")
