@@ -1,131 +1,17 @@
+import contextlib
 from dataclasses import dataclass
-import io
-import math
-import wave
+from math import isfinite
+import os
 import librosa
 import numpy as np
-import pywt
-from scipy import signal
-from .mappings import c1, harmonics
+from .mappings import c1
+from .util import base_path
 
 
-# BUFSIZE = 750
+sample_rate = 44100
 bpo = 24
 octaves = 7
 semitone = 2 ** (1 / 12)
-
-# def load_templates():
-# 	instruments = {}
-# 	for fn in os.listdir("lib/wav"):
-# 		instrument = SimpleNamespace(name=fn.rsplit(".", 1)[0], base_freq=0, sample=None)
-# 		data = io.BytesIO()
-# 		with wave.open("lib/wav/" + fn, "rb") as w:
-# 			assert (sr := w.getframerate()) == 48000
-# 			assert (_nc := w.getnchannels()) == 2
-# 			while True:
-# 				b = w.readframes(sr)
-# 				if not b:
-# 					break
-# 				data.write(b)
-# 		buffer = data.getbuffer()
-# 		a = np.frombuffer(buffer, dtype=np.int16).astype(np.float32)
-# 		merged = a[::2] + a[1::2]
-# 		merged *= 1 / 32767
-# 		np.clip(merged, -1, None, out=merged)
-# 		c = librosa.cqt(merged, sr=sr, fmin=librosa.note_to_hz("C1"), n_bins=bpo * octaves, bins_per_octave=bpo, hop_length=BUFSIZE)
-# 		amp = np.abs(c, dtype=np.float64)
-# 		if not np.any(amp):
-# 			continue
-# 		instrument.base_freq = np.argmax(amp.T[0])
-# 		instrument.sample = amp / amp.T[0][instrument.base_freq]
-# 		instruments[instrument.name] = instrument
-# 	return instruments
-# INSTRUMENTS = load_templates()
-
-# Code below adapted from: https://github.com/scaperot/the-BPM-detector-python
-# simple peak detection
-def peak_detect(data):
-	max_val = np.amax(abs(data))
-	peak_ndx = np.where(data == max_val)
-	if len(peak_ndx[0]) == 0:  # if nothing found then the max must be negative
-		peak_ndx = np.where(data == -max_val)
-	return peak_ndx
-
-def bpm_detector(data, fs):
-	cA = []
-	cD = []
-	correl = []
-	cD_sum = []
-	levels = 4
-	max_decimation = 2 ** (levels - 1)
-	min_ndx = math.floor(60.0 / 220 * (fs / max_decimation))
-	max_ndx = math.floor(60.0 / 40 * (fs / max_decimation))
-
-	for loop in range(0, levels):
-		cD = []
-		# 1) DWT
-		if loop == 0:
-			[cA, cD] = pywt.dwt(data, "db4")
-			cD_minlen = len(cD) / max_decimation + 1
-			cD_sum = np.zeros(math.floor(cD_minlen))
-		else:
-			[cA, cD] = pywt.dwt(cA, "db4")
-
-		# 2) Filter
-		cD = signal.lfilter([0.01], [1 - 0.99], cD)
-		# 4) Subtract out the mean.
-		# 5) Decimate for reconstruction later.
-		cD = abs(cD[:: (2 ** (levels - loop - 1))])
-		cD = cD - np.mean(cD)
-
-		# 6) Recombine the signal before ACF
-		#    Essentially, each level the detail coefs (i.e. the HPF values) are concatenated to the beginning of the array
-		cD_sum = cD[0 : math.floor(cD_minlen)] + cD_sum
-
-	if [b for b in cA if b != 0.0] == []:
-		return None, None
-
-	# Adding in the approximate data as well...
-	cA = signal.lfilter([0.01], [1 - 0.99], cA)
-	cA = abs(cA)
-	cA = cA - np.mean(cA)
-	cD_sum = cA[0 : math.floor(cD_minlen)] + cD_sum
-
-	# ACF
-	correl = np.correlate(cD_sum, cD_sum, "full")
-
-	midpoint = math.floor(len(correl) / 2)
-	correl_midpoint_tmp = correl[midpoint:]
-	peak_ndx = peak_detect(correl_midpoint_tmp[min_ndx:max_ndx])
-	if len(peak_ndx) > 1:
-		return None, None
-	peak_ndx_adjusted = peak_ndx[0] + min_ndx
-	bpm = 60.0 / peak_ndx_adjusted * (fs / max_decimation)
-	return bpm, correl
-
-def detect_bpm(wav, sample_rate=48000, window=3):
-	bpm = 0
-	nsamps = len(wav)
-	window_samps = int(window * sample_rate)
-	samps_ndx = 0  # First sample in window_ndx
-	max_window_ndx = math.floor(nsamps / window_samps)
-	bpms = np.zeros(max_window_ndx)
-
-	# Iterate through all windows
-	for window_ndx in range(0, max_window_ndx):
-		# Get a new set of samples
-		# print(n,":",len(bpms),":",max_window_ndx_int,":",fs,":",nsamps,":",samps_ndx)
-		data = wav[samps_ndx : samps_ndx + window_samps]
-		if not ((len(data) % window_samps) == 0):
-			raise AssertionError(str(len(data)))
-		bpm, _correl_temp = bpm_detector(data, sample_rate)
-		if bpm is None:
-			continue
-		bpms[window_ndx] = bpm
-		# correl = correl_temp
-		# Iterate at the end of the loop
-		samps_ndx = samps_ndx + window_samps
-	return np.median(bpms)
 
 @dataclass(slots=True)
 class PCMNote:
@@ -133,113 +19,196 @@ class PCMNote:
 	velocity: float
 	tick: int
 
-def load_wav(file):
-	print("Importing WAV...")
-	data = io.BytesIO()
-	with wave.open(file, "rb") as w:
-		assert (sr := w.getframerate()) == 48000
-		assert (_nc := w.getnchannels()) == 2
-		while True:
-			b = w.readframes(w.getframerate())
-			if not b:
+def load_wav(file, ctx):
+	print(f"Importing {file.rsplit('.', 1)[-1].upper()}...")
+	path = os.path.abspath(file)
+	tmpl = path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+	output_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/temp/"
+	if not os.path.exists(output_dir):
+		os.mkdir(output_dir)
+
+	if ctx.mc_legal:
+		bpm = 20 * 5
+	else:
+		song, *_ = librosa.load(path, sr=sample_rate, mono=True, dtype=np.float32)
+		bpm_, *_ = librosa.beat.beat_track(y=song.astype(np.float16), sr=sample_rate)
+		bpm = bpm_[0]
+		print("Detected BPM:", bpm)
+
+	def separate_audio(model, file, outputs):
+		global separator
+		for o in outputs.values():
+			target = output_dir + o + ".flac"
+			if not os.path.exists(target):
+				print(target)
 				break
-			data.write(b)
-	buffer = data.getbuffer()
-	a = np.frombuffer(buffer, dtype=np.int16).astype(np.float32)
-	merged = a[::2] + a[1::2]
-	merged *= 1 / 32767
-	start = np.nonzero(merged)[0][0]
-	merged = merged[start:]
-	np.clip(merged, -1, None, out=merged)
-	bpm = detect_bpm(merged, sr)
-	bufsize = round(sr / (bpm / 60) / 24)
-	c = librosa.hybrid_cqt(merged, sr=sr, fmin=librosa.note_to_hz("C1"), n_bins=bpo * octaves, bins_per_octave=bpo, hop_length=bufsize)
-	amp = np.abs(c.T, dtype=np.float64)
+		else:
+			return
+		if not globals().get("separator"):
+			from audio_separator.separator import Separator
+			separator = Separator(output_dir=output_dir, output_format="FLAC", sample_rate=sample_rate, use_soundfile=True)
+		separator.load_model(model)
+		with contextlib.chdir(output_dir):
+			return separator.separate(file, output_names)
+
+	output_names = {k: tmpl + "-" + v for k, v in {
+		"No Reverb": "N",
+		"Reverb": "_R",
+	}.items()}
+	separate_audio("UVR-DeEcho-DeReverb.pth", path, output_names)
+	dry = output_names["No Reverb"] + ".flac"
+
+	output_names = {k: tmpl + "-" + v for k, v in dict(
+		Vocals="V",
+		Instrumental="_I",
+	).items()}
+	separate_audio("model_bs_roformer_ep_317_sdr_12.9755.ckpt", dry, output_names)
+	instrumentals = output_names["Instrumental"] + ".flac"
+
+	output_names = {k: tmpl + "-" + v for k, v in dict(
+		Vocals="_V",
+		Drums="_D",
+		Bass="B",
+		Other="O",
+	).items()}
+	separate_audio("htdemucs_ft.yaml", instrumentals, output_names)
+	# others = output_names["Other"] + ".flac"
+	drums = output_names["Drums"] + ".flac"
+
+	output_names = {k: tmpl + "-" + v for k, v in dict(
+		Kick="K",
+		Snare="S",
+		Toms="T",
+		HH="H",
+		Ride="R",
+		Crash="C",
+	).items()}
+	separate_audio("MDX23C-DrumSep-aufr33-jarredou.ckpt", drums, output_names)
+
+	# TODO: Find a better model to break down the remaining instruments
+	# output_names = {k: tmpl + "-" + v for k, v in dict(
+	# 	Vocals="_V2",
+	# 	Drums="_D2",
+	# 	Bass="_B",
+	# 	Guitar="G",
+	# 	Piano="P",
+	# 	Other="O",
+	# ).items()}
+	# separate_audio("htdemucs_6s.yaml", others, output_names)
+
+	bufsize = round(sample_rate / (bpm / 60) / 12)
+
+	def decompose_stem(fn, instrument=0, pitch=None, monophonic=True, pitch_range=("C1", "C7"), tolerance=256, mult=1):
+		ins = hash(fn) if instrument != -1 else 9
+		events = [[ins, 0, "program_c", ins, instrument]]
+		song, *_ = librosa.load(output_dir + fn + ".flac", sr=sample_rate, mono=False, dtype=np.float32)
+		mono = librosa.to_mono(song)
+		volumes = np.array([np.mean(np.abs(mono[i:i + bufsize])) for i in range(0, len(mono), bufsize)])
+		max_volume = np.max(volumes)
+		if monophonic:
+			if pitch is not None:
+				for tick, v in enumerate(volumes):
+					# if tick <= 0:
+					# 	continue
+					if v < max_volume / tolerance:
+						continue
+					if volumes[tick - 1] < v * 1 / 2:
+						if tick < len(volumes) - 1 and volumes[tick + 1] >= v and volumes[tick + 1] < v * 2:
+							v = volumes[tick + 1]
+						v = min(1, v * mult)
+						events.append([ins, tick, "note_on_c", ins, pitch, v * 127, 2, 1])
+				return events
+			left, right = song[0], song[1]
+			pannings = np.array([(R - L) / max(L, R) if max(
+				(R := np.mean(np.abs(right[i:i + bufsize]))),
+				(L := np.mean(np.abs(left[i:i + bufsize]))),
+			) > 0 else 0 for i in range(0, len(right), bufsize)])
+			# print(len(pannings), pannings)
+			f0, voiced_flag, _ = librosa.pyin(
+				mono,
+				sr=sample_rate,
+				fmin=librosa.note_to_hz(pitch_range[0]),
+				fmax=librosa.note_to_hz(pitch_range[1]),
+				frame_length=bufsize * 4,
+				hop_length=bufsize,
+				resolution=1 / 3,
+				switch_prob=0.5,
+				fill_na=0,
+			)
+			notes = np.round(librosa.hz_to_midi(f0))
+			# print(len(notes), notes)
+			for tick, note in enumerate(notes):
+				v = volumes[tick]
+				if v < max_volume / tolerance:
+					continue
+				if not isfinite(note):
+					continue
+				if tick == 0 or volumes[tick - 1] < v * 2 / 3:
+					priority = 2
+				elif notes[tick - 1] != note:
+					priority = 1
+				else:
+					priority = 0
+				v = min(1, v * mult)
+				events.append([ins, tick, "note_on_c", ins, note, v * 127, priority, 1, pannings[tick]])
+			return events
+		c = librosa.hybrid_cqt(
+			mono,
+			sr=sample_rate,
+			fmin=librosa.note_to_hz(pitch_range[0]),
+			n_bins=bpo * octaves,
+			bins_per_octave=bpo,
+			hop_length=bufsize,
+		)
+		amp = np.abs(c.T, dtype=np.float32)
+		eq = np.concatenate([np.arange(1, 1 + len(amp[0]) // 2), np.arange(len(amp[0]), len(amp[0]) // 2, -1) / 2])
+		eq **= 2
+		eq *= 0.5 / np.max(eq)
+		eq += 0.5
+		amp *= np.tile(eq, (len(amp), 1))
+		active_notes = {}
+		for tick, bins in enumerate(amp):
+			volume = volumes[tick] if tick < len(volumes) else volumes[-1]
+			chord = bins[::2]
+			high = np.max(chord)
+			if high <= 1 / 256:
+				continue
+			chord *= volume / max_volume / high * mult
+			clipped = np.clip(chord, 0, 1)
+			inds = list(np.argsort(clipped))
+			for attempt in range(32):
+				i = inds.pop(-1)
+				v = clipped[i]
+				if v < 1 / tolerance:
+					break
+				if active_notes.get(i, 0) >= v * 1.0625:
+					priority = -1
+				elif active_notes.get(i, 0) <= v * 0.25:
+					priority = 2
+				else:
+					priority = 1
+				active_notes[i] = v
+				p = i + c1
+				events.append([ins, tick, "note_on_c", ins, p, v * 127, priority, 1])
+		return events
+
 	events = [
 		[0, 0, "header", 1, 1 + 1, 1],
-		[1, 0, "tempo", bufsize / sr * 1000 * 1000 * 1],
+		[1, 0, "tempo", bufsize / sample_rate * 1000 * 1000 * 1],
 	]
-	events.append([2, 0, "program_c", 0, 46])
-	events.append([2, 0, "program_c", 1, 16])
-	events.append([2, 0, "program_c", 2, 2])
-	events.append([2, 0, "program_c", 3, 80])
-	events.append([2, 0, "program_c", 4, 81])
-	eq = np.concatenate([np.arange(1, 1 + len(amp[0]) // 2), np.arange(len(amp[0]), len(amp[0]) // 2, -1) / 2])
-	amp *= np.tile(eq, (len(amp), 1))
-	norm = np.mean((np.max(amp), np.mean(amp)))
-	active_notes = {}
-	overtone_tolerance = 0.75
-	overtone_value = 3
-	last_bassdrum = 0
-	for tick, bins in enumerate(amp):
-		chord = bins[::2]
-		note_instruments = [0] * len(chord)
-		has_bassdrum = False
-		for i, v in enumerate(chord):
-			if v <= norm / 4096:
-				continue
-			if i < 12 and not has_bassdrum and v >= norm / 32:
-				drum_candidates = 0
-				last_v = v
-				max_v = v
-				for j in range(i * 2, i * 2 + 24):
-					v2 = bins[j]
-					if abs(last_v - v2) < v / 3:
-						last_v = v2
-						max_v = max(v2, max_v)
-						drum_candidates += 1
-				if drum_candidates >= 8:
-					has_bassdrum = True
-					for j in range(i, i + 8):
-						chord[j] = max(0, chord[j] - max_v * 2)
-					vel = min(127, v * 1024 / norm)
-					if vel > last_bassdrum * 1.2:
-						events.append([2, tick, "note_on_c", 9, 35, vel, 1, 1])
-						# print(events[-1])
-						last_bassdrum = vel
-					continue
-			overtone_mismatches = dict.fromkeys(harmonics, 0)
-			for k, values in harmonics.items():
-				for j, harmonic in values:
-					if i + j < len(chord):
-						overtone_mismatches[k] += abs(chord[i + j] - v * harmonic) / len(values)
-			k, overtone_mismatch = sorted(overtone_mismatches.items(), key=lambda t: t[1])[-1]
-			if overtone_mismatch <= overtone_tolerance:
-				for j, harmonic in harmonics[k]:
-					if i + j < len(chord):
-						v2 = chord[i + j] - v * harmonic
-						chord[i + j] = 0 if v2 <= chord[i + j] * overtone_tolerance else v2
-				chord[i] = v * overtone_value
-				match k:
-					case "default":
-						ins = 1
-					case "triangle":
-						ins = 2
-					case "square":
-						ins = 3
-					case "saw":
-						ins = 4
-					case _:
-						ins = 0
-				note_instruments[i] = ins
-		if not has_bassdrum:
-			last_bassdrum = 0
-		high = np.max(chord)
-		if high <= norm / 4096:
-			continue
-		clipped = np.clip(chord * (1 / norm), 0, 1)
-		inds = list(np.argsort(clipped))
-		for attempt in range(32):
-			i = inds.pop(-1)
-			v = clipped[i]
-			if v < 1 / 48:
-				break
-			if active_notes.get(i, 0) >= v * 1.0625:
-				priority = -1
-			elif active_notes.get(i, 0) <= v * 0.25:
-				priority = 2
-			else:
-				priority = 1
-			active_notes[i] = v
-			events.append([2, tick, "note_on_c", note_instruments[i], i + c1, v * 127, priority, 1])
+	print("Decomposing Bass...")
+	events.extend(decompose_stem(tmpl + "-B", 46, monophonic=True, pitch_range=("C0", "C6"), mult=3))
+	print("Decomposing Voice...")
+	events.extend(decompose_stem(tmpl + "-V", 73, monophonic=False, pitch_range=("C1", "C8"), tolerance=16, mult=1.5))
+	# events.extend(decompose_stem(tmpl + "-G", 48, monophonic=True, pitch_range=("C2", "C7")))
+	print("Decomposing Others...")
+	events.extend(decompose_stem(tmpl + "-O", 46, monophonic=False, pitch_range=("C2", "C9"), tolerance=12, mult=2))
+	# events.extend(decompose_stem(tmpl + "-P", 0, monophonic=True, pitch_range=("C2", "C7")))
+	print("Decomposing Drums...")
+	events.extend(decompose_stem(tmpl + "-K", -1, monophonic=True, pitch=35, tolerance=24, mult=4))
+	events.extend(decompose_stem(tmpl + "-S", -1, monophonic=True, pitch=38, tolerance=24, mult=4))
+	events.extend(decompose_stem(tmpl + "-T", -1, monophonic=True, pitch=47, tolerance=24, mult=4))
+	events.extend(decompose_stem(tmpl + "-H", -1, monophonic=True, pitch=42, tolerance=24, mult=4))
+	events.extend(decompose_stem(tmpl + "-R", -1, monophonic=True, pitch=46, tolerance=24, mult=4))
+	events.extend(decompose_stem(tmpl + "-C", -1, monophonic=True, pitch=49, tolerance=24, mult=4))
 	return events

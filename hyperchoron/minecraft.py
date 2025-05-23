@@ -1,7 +1,7 @@
 from collections import abc, deque, namedtuple
 import copy
 import functools
-from math import ceil, sqrt, trunc
+from math import ceil, sqrt
 import litemapy
 from nbtlib.tag import Int, Double, String, List, Compound, Byte
 import numpy as np
@@ -18,7 +18,7 @@ from .mappings import (
 	instrument_codelist, fixed_instruments, default_instruments,
 	fs1,
 )
-from .util import transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
+from .util import base_path, transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 
 def nbt_from_dict(d):
@@ -626,20 +626,19 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 	primary_width = 0
 	secondary_width = 0
 	master = litemapy.Region(0, 0, -3, 1, 1, 1)
-	schem = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Header.litematic")
+	schem = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Header.litematic")
 	header, = schem.regions.values()
 	header = move_region(header, -8, 0, -3)
-	timer, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Timer.litematic").regions.values()
-	track, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Track.litematic").regions.values()
-	skeleton1, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 skeleton 1.litematic").regions.values()
-	skeleton2, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 skeleton 2.litematic").regions.values()
+	timer, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Timer.litematic").regions.values()
+	track, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Track.litematic").regions.values()
+	skeleton, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 skeleton.litematic").regions.values()
 	start = header.z + header.length - 2
 	notes = deque(transport)
 	nc = 0
 	buffer = 4
 	# The song is split into two halves going in opposite directions, allowing for the player to be returned to the beginning without extra travel time.
 	for backwards in range(2):
-		dz = half_segments * skeleton1.length if backwards else half_segments * skeleton1.length + buffer
+		dz = half_segments * skeleton.length if backwards else half_segments * skeleton.length + buffer
 		main = litemapy.Region(-1, 0, 0, 3, 30, dz)
 		timer1 = tile_region(timer, (1, 1, half_segments - backwards))
 		timer1 = move_region(timer1, 0, 2, 0)
@@ -647,36 +646,26 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 		timer1 = move_region(timer1, 0, 18, 0)
 		main = paste_region(main, timer1)
 		if backwards:
-			main[1 - main.x, 2, (half_segments - 1) * skeleton1.length] = litemapy.BlockState("minecraft:acacia_trapdoor", half="top", facing="south")
-			main[1 - main.x, 3, (half_segments - 1) * skeleton1.length] = litemapy.BlockState("minecraft:powered_rail", shape="east_west")
-			main[1 - main.x, 18, (half_segments - 1) * skeleton1.length] = litemapy.BlockState("minecraft:acacia_trapdoor", half="top", facing="south")
-			main[1 - main.x, 19, (half_segments - 1) * skeleton1.length] = litemapy.BlockState("minecraft:powered_rail", shape="east_west")
+			main[1 - main.x, 2, (half_segments - 1) * skeleton.length] = litemapy.BlockState("minecraft:acacia_trapdoor", half="top", facing="south")
+			main[1 - main.x, 3, (half_segments - 1) * skeleton.length] = litemapy.BlockState("minecraft:powered_rail", shape="east_west")
+			main[1 - main.x, 18, (half_segments - 1) * skeleton.length] = litemapy.BlockState("minecraft:acacia_trapdoor", half="top", facing="south")
+			main[1 - main.x, 19, (half_segments - 1) * skeleton.length] = litemapy.BlockState("minecraft:powered_rail", shape="east_west")
 		for segment in range(half_segments):
 			if not backwards and segment == half_segments - 2:
 				primary_width = main.min_x() - main.x + 1
-			z = segment * skeleton1.length
+			z = segment * skeleton.length
 			skeletons = {}
-			upgraded = set()
 
 			def get_skeleton(x, y):
-				nonlocal main, skeleton1
+				nonlocal main, skeleton
 				try:
 					return skeletons[x, y]
 				except KeyError:
 					pass
-				skeleton1 = move_region(skeleton1, x, y, z)
-				main = paste_region(main, skeleton1)
+				skeleton = move_region(skeleton, x, y, z)
+				main = paste_region(main, skeleton)
 				taken = skeletons[x, y] = set()
 				return taken
-
-			def upgrade_skeleton(x, y):
-				# A skeleton gets "upgraded" if it needs to support more than a single lane of note blocks. For simplicity, the upgraded variants are identical to the regular ones for now, except for added torches on the sides.
-				nonlocal main, skeleton2
-				if (x, y) in upgraded:
-					return
-				skeleton2 = move_region(skeleton2, x, y, z)
-				main = paste_region(main, skeleton2, ignore_src_air=True)
-				upgraded.add((x, y))
 
 			if backwards and segment == 1:
 				get_skeleton(0, 4)
@@ -732,8 +721,6 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 							swapped = True
 				except StopIteration:
 					pass
-				if xi != 1:
-					upgrade_skeleton(x, y)
 				blocks = get_note_block(
 					note,
 					pos,
@@ -749,6 +736,15 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 					if target.id == "minecraft:note_block":
 						taken.add(coords)
 						nc += 1
+						if xi != 1:
+							if tick & 8:
+								before = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z - main.z + 1)
+							else:
+								before = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z - main.z - 1)
+							if xi == 0:
+								main = setblock(main, before, litemapy.BlockState("minecraft:wall_torch", facing="west"))
+							elif xi == 2:
+								main = setblock(main, before, litemapy.BlockState("minecraft:wall_torch", facing="east"))
 					coords = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z - main.z)
 					no_replace = ("minecraft:observer", "minecraft:repeater", "minecraft:wall_torch") if block == "tripwire" else ()
 					main = setblock(main, coords, target, no_replace=no_replace)
@@ -838,7 +834,7 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 							main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
 		track1 = tile_region(track, (1, 1, half_segments - 2))
 		if backwards:
-			track1._Region__z = 2 * skeleton1.length
+			track1._Region__z = 2 * skeleton.length
 		track1._Region__y = 12
 		main = paste_region(main, track1, ignore_src_air=True)
 		if backwards:
@@ -851,7 +847,7 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 			primary_width = main.min_x() - main.x + 1
 		main._Region__z = start + backwards
 		master = paste_region(master, main, ignore_src_air=True, ignore_dst_non_air=True)
-	end = half_segments * skeleton1.length + 4
+	end = half_segments * skeleton.length + 4
 
 	def locate(pos):
 		x, y, z = pos
@@ -886,12 +882,12 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 		master[locate((1 - tile_width, yi * 16 + 3, end))] = litemapy.BlockState("minecraft:observer", facing="south")
 		master[locate((1 - tile_width, yi * 16 + 4, end))] = black_carpet
 	x, y, z = 0, 13, end - 22
-	turn1, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Turn 1.litematic").regions.values()
-	turn2, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Turn 2.litematic").regions.values()
-	turn3, = litemapy.Schematic.load("hyperchoron/litematic/Hyperchoron V2 Turn 3.litematic").regions.values()
-	turn1 = move_region(turn1, x, y, z)
+	turn1, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Turn 1.litematic").regions.values()
+	turn2, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Turn 2.litematic").regions.values()
+	turn3, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Turn 3.litematic").regions.values()
+	turn1 = move_region(turn1, x - 1, y, z)
 	master = paste_region(master, turn1, ignore_src_air=True)
-	turn2 = move_region(turn2, x - tile_width, y - 1, z)
+	turn2 = move_region(turn2, x - tile_width, y - 1, z - 1)
 	master = paste_region(master, turn2, ignore_src_air=True)
 	turn3 = move_region(turn3, x - tile_width, y, 2)
 	master = paste_region(master, turn3, ignore_src_air=True)
@@ -917,6 +913,7 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 	schem.author = DEFAULT_NAME
 	schem.description = DEFAULT_DESCRIPTION
 	schem.regions.clear()
+	schem.regions["Hyperchoron"] = master = paste_region(master, header, ignore_src_air=True)
 	master[locate((1, 16, -3))] = litemapy.BlockState("minecraft:warped_sign", rotation="0")
 	x, y, z = locate((1, 16, -3))
 	lines = []
@@ -956,9 +953,6 @@ def render_minecraft(transport, ctx, name="Hyperchoron"):
 			Compound({'x': Int(x), 'y': Int(y), 'z': Int(z), 'is_waxed': Byte(1), 'id': String('minecraft:sign'), 'front_text': Compound({'color': String('black'), 'messages': List[Compound](messages), 'has_glowing_text': Byte(0)}), 'back_text': Compound({'color': String('black'), 'messages': List[String]([String(''), String(''), String(''), String('')]), 'has_glowing_text': Byte(0)})})
 		)
 	)
-	# print({e.position: (header[e.position], e.data) for e in header.tile_entities})
-	schem.regions["Hyperchoron"] = paste_region(master, header, ignore_src_air=True)
-
 	extremities = get_bounding(master)
 	print(extremities)
 	return schem, extremities, nc
@@ -1058,7 +1052,7 @@ def save_nbs(transport, output, speed_info, ctx):
 				key=pitch + 33,
 				instrument=nbi,
 				velocity=round(volume),
-				panning=trunc(note[5] * 49) * 2 + (0 if note[2] > 0 else 1 if i & 1 else -1),
+				panning=int(note[5] * 49) * 2 + (0 if note[2] > 0 else 1 if i & 1 else -1),
 			)
 			nbs.notes.append(rendered)
 		for k, v in current_poly.items():
