@@ -616,7 +616,7 @@ note_locations = (
 	(5, 2), (5, 4), (5, 6), (5, 8),
 	(7, 7), (7, 5), (7, 3), (7, 1),
 )
-def render_minecraft(transport, ctx, name="Hyperchoron"):
+def build_minecraft(transport, ctx, name="Hyperchoron"):
 	ticks_per_segment = 32
 	total_duration = len(transport)
 	total_segments = ceil(total_duration / ticks_per_segment)
@@ -1102,7 +1102,7 @@ def save_litematic(transport, output, ctx):
 		else:
 			print("Exporting Litematic...")
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	schem, ext, nc = render_minecraft(transport, ctx=ctx, name=ctx.input[0].replace("\\", "/").rsplit("/", 1)[-1])
+	schem, ext, nc = build_minecraft(transport, ctx=ctx, name=ctx.input[0].replace("\\", "/").rsplit("/", 1)[-1])
 	if is_nbt:
 		reg = get_region(schem)
 		nbt = reg.to_structure_nbt(mc_version=4325)

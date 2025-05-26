@@ -73,9 +73,9 @@ def convert_file(args):
 			case "org":
 				from hyperchoron import tracker
 				data = tracker.load_org(file)
-			# case "xm":
-			# 	from hyperchoron import tracker
-			# 	data = tracker.load_xm(file)
+			case "xm":
+				from hyperchoron import tracker
+				data = tracker.load_xm(file)
 			case "mid" | "midi":
 				from hyperchoron import midi
 				data = midi.load_midi(file)

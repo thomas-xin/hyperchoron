@@ -139,7 +139,6 @@ def preprocess(midi_events, ctx):
 	if title and title.startswith("Organya Symphony No. 1") and copyright == "(C) AUTHOR xxxxx, 2014":
 		print("Using Org mapping...")
 		is_org = True
-	instrument_map = {}
 	channel_stats = {}
 	note_lengths = {}
 	temp_active = {}
@@ -150,12 +149,6 @@ def preprocess(midi_events, ctx):
 	for i, e in enumerate(midi_events):
 		m = e[2]
 		match m:
-			case "program_c":
-				c = int(e[3])
-				if c == 9 and ctx.drums:
-					continue
-				value = int(e[4])
-				instrument_map[c] = org_instrument_mapping[value] if is_org else instrument_mapping[value]
 			case "note_on_c":
 				ti = e[0]
 				t = e[1]
@@ -163,8 +156,6 @@ def preprocess(midi_events, ctx):
 				p = int(e[4])
 				h = (ti, c, p)
 				velocity = int(e[5])
-				if c not in instrument_map:
-					instrument_map[c] = -1 if c == 9 and ctx.drums else 0
 				volume = velocity * channel_stats.setdefault(c, {}).get("volume", 1)
 				max_vel = max(max_vel, volume)
 				if velocity < 1:
@@ -208,16 +199,13 @@ def preprocess(midi_events, ctx):
 					value = int(e[5])
 					volume = value / 127
 					channel_stats.setdefault(c, {})["volume"] = volume
-					if c not in instrument_map:
-						instrument_map[c] = -1 if c == 9 and ctx.drums else 0
 	for k, v in temp_active.items():
 		for t in v:
 			h2 = (t, *k)
 			note_lengths.setdefault(h2, 1)
-	print("Instrument mapping:", instrument_map)
 	print("Max volume:", max_vel)
 	midi_events = [e for i, e in enumerate(midi_events) if i not in discard]
-	return midi_events, instrument_map, channel_stats, note_lengths, max_vel, last_timestamp, is_org
+	return midi_events, note_lengths, max_vel, last_timestamp, is_org
 
 @dataclass(slots=True)
 class TransportNote:
@@ -247,7 +235,8 @@ def deconstruct(midi_events, speed_info, ctx=None):
 	note_candidates = 0
 	_orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, orig_tempo = speed_info
 	step_ms = orig_step_ms
-	midi_events, instrument_map, _, note_lengths, max_vel, last_timestamp, is_org = preprocess(midi_events, ctx=ctx)
+	midi_events, note_lengths, max_vel, last_timestamp, is_org = preprocess(midi_events, ctx=ctx)
+	instrument_map = {}
 	channel_stats = {}
 	print("Processing quantised notes...")
 	bar_format = "{l_bar}{bar}| {n:.3g}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
@@ -266,8 +255,17 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				# Process all events at the current timestamp
 				mode = event[2]
 				match mode:
+					case "program_c":
+						channel = int(event[3])
+						if channel == 9 and ctx.drums:
+							pass
+						else:
+							value = int(event[4])
+							instrument_map[channel] = org_instrument_mapping[value] if is_org else instrument_mapping[value]
 					case "note_on_c":
 						channel = int(event[3])
+						if channel not in instrument_map:
+							instrument_map[channel] = -1 if channel == 9 and ctx.drums else 0
 						instrument = instrument_map[channel]
 						pitch = int(event[4])
 						velocity = int(event[5])
@@ -283,12 +281,15 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								sustain = 0
 							else:
 								sustain = sustain_map[instrument] or (1 if is_org else 2 if not ctx.mc_legal else 0)
+							length = 0
 							if len(event) > 6:
-								if len(event) > 8:
-									panning = event[8]
-								priority, length_ticks = event[6], event[7]
-								length = (length_ticks + 0.25) * real_ms_per_clock / scale
-							else:
+								if len(event) > 7:
+									if len(event) > 8:
+										panning = event[8]
+									length_ticks = event[7]
+									length = (length_ticks + 0.25) * real_ms_per_clock / scale
+								priority = event[6]
+							if length == 0:
 								length = 0
 								if sustain or pitchbend_ranges.get(channel):
 									track = int(event[0])
@@ -346,10 +347,11 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						if volume >= orig_volume * 1.1:
 							if note_candidates:
 								note_candidates += 1
-							instrument = instrument_map[channel]
-							for note in active_notes[instrument]:
-								if note.channel == channel:
-									note.priority = max(note.priority, 1)
+							if channel in instrument_map:
+								instrument = instrument_map[channel]
+								for note in active_notes[instrument]:
+									if note.channel == channel:
+										note.priority = max(note.priority, 1)
 						# elif volume <= orig_volume * 0.5:
 						# 	instrument = instrument_map[channel]
 						# 	for note in active_notes[instrument]:
@@ -477,7 +479,7 @@ class MidiNote:
 	events: list
 	aligned: int
 
-def render_midi(notes, instrument_activities, speed_info, ctx):
+def build_midi(notes, instrument_activities, speed_info, ctx):
 	orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
 	speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
 	wait = round(orig_step_ms / speed_ratio * 1000)
@@ -628,7 +630,7 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 	else:
 		print("Exporting MIDI...")
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	instruments, wait, resolution = list(render_midi(transport, instrument_activities, speed_info, ctx=ctx))
+	instruments, wait, resolution = list(build_midi(transport, instrument_activities, speed_info, ctx=ctx))
 	import io
 	b = open(output, "w", newline="", encoding="utf-8") if is_csv else io.StringIO()
 	nc = 0
