@@ -3,11 +3,16 @@ import datetime
 import fractions
 import itertools
 from math import ceil, isqrt, sqrt, log2, gcd
+import os
 from .mappings import note_names
 
+sample_rate = 44100
 DEFAULT_NAME = "Hyperchoron"
 DEFAULT_DESCRIPTION = f"Exported by Hyperchoron on {datetime.datetime.now().date()}"
 base_path = __file__.replace("\\", "/").rsplit("/", 1)[0] + "/"
+temp_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/temp/"
+if not os.path.exists(temp_dir):
+	os.mkdir(temp_dir)
 
 # Thank you deepseek-r1 for optimisation
 def approximate_gcd(arr, min_value=8):

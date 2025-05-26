@@ -5,10 +5,9 @@ import os
 import librosa
 import numpy as np
 from .mappings import c1
-from .util import base_path
+from .util import temp_dir, sample_rate
 
 
-sample_rate = 44100
 bpo = 24
 octaves = 7
 semitone = 2 ** (1 / 12)
@@ -19,13 +18,27 @@ class PCMNote:
 	velocity: float
 	tick: int
 
+def separate_audio(model, file, outputs):
+	global separator
+	for o in outputs.values():
+		target = temp_dir + o + ".flac"
+		if not os.path.exists(target):
+			print(target)
+			break
+	else:
+		return
+	if not globals().get("separator"):
+		from audio_separator.separator import Separator
+		separator = Separator(output_dir=temp_dir, output_format="FLAC", sample_rate=sample_rate, use_soundfile=True)
+	separator.load_model(model)
+	with contextlib.chdir(temp_dir):
+		return separator.separate(file, outputs)
+
+
 def load_wav(file, ctx):
 	print(f"Importing {file.rsplit('.', 1)[-1].upper()}...")
 	path = os.path.abspath(file)
 	tmpl = path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	output_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/temp/"
-	if not os.path.exists(output_dir):
-		os.mkdir(output_dir)
 
 	if ctx.mc_legal:
 		bpm = 20 * 5
@@ -34,22 +47,6 @@ def load_wav(file, ctx):
 		bpm_, *_ = librosa.beat.beat_track(y=song.astype(np.float16), sr=sample_rate)
 		bpm = bpm_[0]
 		print("Detected BPM:", bpm)
-
-	def separate_audio(model, file, outputs):
-		global separator
-		for o in outputs.values():
-			target = output_dir + o + ".flac"
-			if not os.path.exists(target):
-				print(target)
-				break
-		else:
-			return
-		if not globals().get("separator"):
-			from audio_separator.separator import Separator
-			separator = Separator(output_dir=output_dir, output_format="FLAC", sample_rate=sample_rate, use_soundfile=True)
-		separator.load_model(model)
-		with contextlib.chdir(output_dir):
-			return separator.separate(file, output_names)
 
 	output_names = {k: tmpl + "-" + v for k, v in {
 		"No Reverb": "N",
@@ -101,9 +98,10 @@ def load_wav(file, ctx):
 	def decompose_stem(fn, instrument=0, pitch=None, monophonic=True, pitch_range=("C1", "C7"), tolerance=256, mult=1):
 		ins = hash(fn) if instrument != -1 else 9
 		events = [[ins, 0, "program_c", ins, instrument]]
-		song, *_ = librosa.load(output_dir + fn + ".flac", sr=sample_rate, mono=False, dtype=np.float32)
+		song, *_ = librosa.load(temp_dir + fn + ".flac", sr=sample_rate, mono=False, dtype=np.float32)
 		mono = librosa.to_mono(song)
-		volumes = np.array([np.mean(np.abs(mono[i:i + bufsize])) for i in range(0, len(mono), bufsize)])
+		# volumes = np.array([np.mean(np.abs(mono[i:i + bufsize])) for i in range(0, len(mono), bufsize)])
+		volumes = librosa.feature.rms(y=mono, frame_length=bufsize * 4, hop_length=bufsize)
 		max_volume = np.max(volumes)
 		if monophonic:
 			if pitch is not None:
@@ -203,7 +201,7 @@ def load_wav(file, ctx):
 	# events.extend(decompose_stem(tmpl + "-G", 48, monophonic=True, pitch_range=("C2", "C7")))
 	print("Decomposing Others...")
 	events.extend(decompose_stem(tmpl + "-O", 46, monophonic=False, pitch_range=("C2", "C9"), tolerance=12, mult=2))
-	# events.extend(decompose_stem(tmpl + "-P", 0, monophonic=True, pitch_range=("C2", "C7")))
+	# events.extend(decompose_stem(tmpl + "-P", 0, monophonic=True, pitch_range=("C1", "C8")))
 	print("Decomposing Drums...")
 	events.extend(decompose_stem(tmpl + "-K", -1, monophonic=True, pitch=35, tolerance=24, mult=4))
 	events.extend(decompose_stem(tmpl + "-S", -1, monophonic=True, pitch=38, tolerance=24, mult=4))

@@ -1,6 +1,9 @@
 # ruff: noqa: E402
 import os
-assert os.path.exists("DawVert")
+from .util import base_path
+dawvert_path = base_path.rsplit("/", 2)[0] + "/DawVert"
+print(dawvert_path)
+assert os.path.exists(dawvert_path)
 import subprocess
 import sys
 import tempfile
@@ -17,7 +20,7 @@ def load_arbitrary(file, ext):
 			f.write(file.read())
 		fo = f.name + ".mid"
 		args = [sys.executable, "dawvert_cmd.py", "-it", dawvert_inputs[ext], "-i", f.name, "-ot", "midi", "-o", fo]
-		subprocess.check_output(args, cwd="DawVert")
+		subprocess.check_output(args, cwd=dawvert_path)
 		assert os.path.exists(fo) and os.path.getsize(fo), "Unable to locate output."
 	if os.path.exists(f.name):
 		os.remove(f.name)
@@ -37,7 +40,7 @@ def save_arbitrary(transport, output, instrument_activities, speed_info, ctx):
 		os.remove(output)
 	args = [sys.executable, "dawvert_cmd.py", "-it", "midi", "-i", mid, "-ot", dawvert_outputs[ext], "-o", os.path.abspath(output)]
 	print(mid)
-	subprocess.check_output(args, cwd="DawVert")
+	subprocess.check_output(args, cwd=dawvert_path)
 	if os.path.exists(mid):
 		os.remove(mid)
 	assert os.path.exists(output) and os.path.getsize(output), "Unable to locate output."
