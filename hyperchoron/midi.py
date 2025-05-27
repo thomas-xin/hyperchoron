@@ -376,7 +376,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							ratio = 1 / r2
 						new_step = orig_step_ms / ratio
 						step_ms = int(new_step) if new_step.is_integer() else new_step
-						curr_frac = step_ms if step_ms.is_integer() else float(step_ms)
+						curr_frac = step_ms if isinstance(step_ms, (int, float)) else float(step_ms)
 						if not note_candidates:
 							timestamp_approx = timestamp = round(time)
 				global_index += 1
@@ -457,7 +457,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						instrument_activities[instrument] = [volume, poly[instrument]]
 				played_notes.append(beat)
 				timestamp += curr_step
-				if timestamp.is_integer():
+				if isinstance(timestamp, int) or timestamp.is_integer():
 					timestamp_approx = timestamp = int(timestamp)
 				else:
 					timestamp_approx = float(timestamp)

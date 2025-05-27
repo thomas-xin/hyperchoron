@@ -37,7 +37,7 @@ def separate_audio(model, file, outputs):
 
 def load_wav(file, ctx):
 	print(f"Importing {file.rsplit('.', 1)[-1].upper()}...")
-	path = os.path.abspath(file)
+	path = os.path.abspath(file) if isinstance(file, str) else str(hash(file))
 	tmpl = path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 
 	if ctx.mc_legal:
@@ -53,14 +53,14 @@ def load_wav(file, ctx):
 		"Reverb": "_R",
 	}.items()}
 	separate_audio("UVR-DeEcho-DeReverb.pth", path, output_names)
-	dry = output_names["No Reverb"] + ".flac"
+	dry = temp_dir + output_names["No Reverb"] + ".flac"
 
 	output_names = {k: tmpl + "-" + v for k, v in dict(
 		Vocals="V",
 		Instrumental="_I",
 	).items()}
 	separate_audio("model_bs_roformer_ep_317_sdr_12.9755.ckpt", dry, output_names)
-	instrumentals = output_names["Instrumental"] + ".flac"
+	instrumentals = temp_dir + output_names["Instrumental"] + ".flac"
 
 	output_names = {k: tmpl + "-" + v for k, v in dict(
 		Vocals="_V",
@@ -70,7 +70,7 @@ def load_wav(file, ctx):
 	).items()}
 	separate_audio("htdemucs_ft.yaml", instrumentals, output_names)
 	# others = output_names["Other"] + ".flac"
-	drums = output_names["Drums"] + ".flac"
+	drums = temp_dir + output_names["Drums"] + ".flac"
 
 	output_names = {k: tmpl + "-" + v for k, v in dict(
 		Kick="K",
