@@ -278,7 +278,7 @@ def load_xm(file):
 	import numpy as np
 	import soundfile as sf
 	from .pcm import separate_audio
-	path = os.path.abspath(file)
+	path = os.path.abspath(file) if isinstance(file, str) else str(hash(file))
 	tmpl = path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 
 	if isinstance(file, str):
@@ -363,74 +363,83 @@ def load_xm(file):
 				sample_delta = read(offs, size, decode=False)
 				bits = sample_bits[j]
 				if bits == 16:
-					sample = np.clip(np.cumsum(np.frombuffer(sample_delta, dtype=np.int16)) / 32767, -1, None)
+					sample = np.clip(np.cumsum(np.frombuffer(sample_delta, dtype=np.int16), dtype=np.int16) / 32767, -1, 1)
 				elif bits == 8:
-					sample = np.clip(np.cumsum(np.frombuffer(sample_delta, dtype=np.int8)) / 127, -1, None)
+					sample = np.clip(np.cumsum(np.frombuffer(sample_delta, dtype=np.int8), dtype=np.int8) / 127, -1, 1)
 				else:
 					raise NotImplementedError(bits)
 				pitch = 2 ** (sample_pitches[j] / 12)
 				sr = round(pitch * 8363)
+				# print(name, sample_sustains[j], len(sample), sr / 2)
+				if sample_sustains[j] and len(sample) < sr / 2:
+					sample = np.tile(sample, ceil(sr / 2 / len(sample)))
 				adjusted = librosa.resample(sample, orig_sr=sr, target_sr=sample_rate)
 
-				# XM carries NO reliable information about the instruments themselves; this means we have to analyse the samples to decide if they're percussion, and if they're not, analyse the actual pitch they play at!
-				D = librosa.stft(adjusted)
-				H, P = librosa.decompose.hpss(D)
-				rms_harm = librosa.feature.rms(S=H, hop_length=len(adjusted), center=False)
-				rms_perc = librosa.feature.rms(S=P, hop_length=len(adjusted), center=False)
-				harm = np.sum(rms_harm)
-				perc = np.sum(rms_perc)
-				if perc >= harm / 8:
-					if perc < harm / 3:
-						# Instrument may still be percussion; call stem separation to verify
+				if len(adjusted) >= sample_rate / 4 or not sample_sustains[j]:
+					# XM carries NO reliable information about the instruments themselves; this means we have to analyse the samples to decide if they're percussion, and if they're not, analyse the actual pitch they play at!
+					D = librosa.stft(adjusted)
+					H, P = librosa.decompose.hpss(D)
+					rms_harm = librosa.feature.rms(S=H, hop_length=len(adjusted), center=False)
+					rms_perc = librosa.feature.rms(S=P, hop_length=len(adjusted), center=False)
+					harm = np.sum(rms_harm)
+					perc = np.sum(rms_perc)
+					print(name, harm, perc, len(adjusted))
+					if perc >= harm / 8:
 						sample_file = f"{temp_dir}{tmpl}-{i}-{j}.flac"
 						sf.write(sample_file, adjusted, sample_rate)
-						output_names = {k: tmpl + f"-{i}-{j}-" + v for k, v in dict(
-							Vocals="V",
-							Drums="D",
-							Bass="B",
-							Other="O",
-						).items()}
-						separate_audio("htdemucs_ft.yaml", sample_file, output_names)
-						drums, *_ = librosa.load(output_names["Drums"] + ".flac", sr=sample_rate, mono=True)
-						rms_orig = librosa.feature.rms(y=adjusted, frame_length=len(adjusted), hop_length=len(adjusted))
-						rms_drum = librosa.feature.rms(y=drums, frame_length=len(drums), hop_length=len(drums))
-						orig = np.sum(rms_orig)
-						drum = np.sum(rms_drum)
-					else:
-						drum, orig = perc, harm
-					if drum >= orig / 3:
-						# Instrument is more likely percussion; call further stem separation to identify
-						output_names = {k: tmpl + f"-{i}-{j}-" + v for k, v in dict(
-							Kick="K",
-							Snare="S",
-							Toms="T",
-							HH="H",
-							Ride="R",
-							Crash="C",
-						).items()}
-						separate_audio("MDX23C-DrumSep-aufr33-jarredou.ckpt", sample_file, output_names)
-						outputs = {k: librosa.load(v + ".flac", sr=sample_rate, mono=True)[0] for k, v in output_names.items()}
-						scales = [0.5, 1, 1, 1.5, 2, 2]
-						output_volumes = {k: scales[i] * np.sum(librosa.feature.rms(y=v, frame_length=len(v), hop_length=len(v))) for i, (k, v) in enumerate(outputs.items())}
-						highest = np.argmax(tuple(output_volumes.values()))
-						# target = tuple(output_volumes)[highest]
-						notes = [35, 38, 47, 42, 46, 49]
-						for k, p in enumerate(sample_mapping):
-							if p == j:
-								instrument.midi[k] = -1
-								instrument.pitches[k] = notes[highest]
-						offs += size
-						continue
+						if perc < harm / 3:
+							# Instrument may still be percussion; call stem separation to verify
+							output_names = {k: tmpl + f"-{i}-{j}-" + v for k, v in dict(
+								Vocals="V",
+								Drums="D",
+								Bass="B",
+								Other="O",
+							).items()}
+							separate_audio("htdemucs_ft.yaml", sample_file, output_names)
+							drums, *_ = librosa.load(temp_dir + output_names["Drums"] + ".flac", sr=sample_rate, mono=True)
+							rms_orig = librosa.feature.rms(y=adjusted, frame_length=len(adjusted), hop_length=len(adjusted))
+							rms_drum = librosa.feature.rms(y=drums, frame_length=len(drums), hop_length=len(drums))
+							orig = np.sum(rms_orig)
+							drum = np.sum(rms_drum)
+						else:
+							drum, orig = perc, harm
+						if drum >= orig / 3:
+							# Instrument is more likely percussion; call further stem separation to identify
+							output_names = {k: tmpl + f"-{i}-{j}-" + v for k, v in dict(
+								Kick="K",
+								Snare="S",
+								Toms="T",
+								HH="H",
+								Ride="R",
+								Crash="C",
+							).items()}
+							separate_audio("MDX23C-DrumSep-aufr33-jarredou.ckpt", sample_file, output_names)
+							outputs = {k: librosa.load(temp_dir + v + ".flac", sr=sample_rate, mono=True)[0] for k, v in output_names.items()}
+							scales = [0.5, 1, 1, 1.5, 2, 2]
+							output_volumes = {k: scales[i] * np.sum(librosa.feature.rms(y=v, frame_length=len(v), hop_length=len(v))) for i, (k, v) in enumerate(outputs.items())}
+							highest = np.argmax(tuple(output_volumes.values()))
+							# target = tuple(output_volumes)[highest]
+							notes = [35, 38, 47, 42, 46, 49]
+							for k, p in enumerate(sample_mapping):
+								if p == j:
+									instrument.midi[k] = -1
+									instrument.pitches[k] = notes[highest]
+							offs += size
+							continue
+				# Even for melodic instruments, xm does not guarantee the notes being played or the relative/fine tuning would produce the actual pitch a human would hear. Therefore, we must once again analyse the instrument samples, this time for their individual fundamental frequency.
 				f0, voiced_flag, _ = librosa.pyin(
 					adjusted,
 					sr=sample_rate,
-					fmin=librosa.note_to_hz("C2"),
-					fmax=librosa.note_to_hz("C7"),
+					fmin=librosa.note_to_hz("C1"),
+					fmax=librosa.note_to_hz("C8"),
 					resolution=1,
 					switch_prob=1,
 					fill_na=0,
 				)
-				average_note = round(np.mean(librosa.hz_to_midi(f0[f0 != 0])).item())
+				try:
+					average_note = round(np.mean(librosa.hz_to_midi(f0[f0 != 0])).item())
+				except ValueError:
+					average_note = 60
 				for k, p in enumerate(sample_mapping):
 					if p == j:
 						instrument.midi[k] = 73 if sample_sustains[j] else 46
