@@ -37,7 +37,7 @@ def separate_audio(model, file, outputs):
 
 def load_wav(file, ctx):
 	print(f"Importing {file.rsplit('.', 1)[-1].upper()}...")
-	path = os.path.abspath(file) if isinstance(file, str) else str(hash(file))
+	path = os.path.abspath(file)
 	tmpl = path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 
 	if ctx.mc_legal:
@@ -101,7 +101,7 @@ def load_wav(file, ctx):
 		song, *_ = librosa.load(temp_dir + fn + ".flac", sr=sample_rate, mono=False, dtype=np.float32)
 		mono = librosa.to_mono(song)
 		# volumes = np.array([np.mean(np.abs(mono[i:i + bufsize])) for i in range(0, len(mono), bufsize)])
-		volumes = librosa.feature.rms(y=mono, frame_length=bufsize * 4, hop_length=bufsize)
+		volumes = librosa.feature.rms(y=mono, frame_length=bufsize * 4, hop_length=bufsize)[0]
 		max_volume = np.max(volumes)
 		if monophonic:
 			if pitch is not None:
@@ -121,7 +121,6 @@ def load_wav(file, ctx):
 				(R := np.mean(np.abs(right[i:i + bufsize]))),
 				(L := np.mean(np.abs(left[i:i + bufsize]))),
 			) > 0 else 0 for i in range(0, len(right), bufsize)])
-			# print(len(pannings), pannings)
 			f0, voiced_flag, _ = librosa.pyin(
 				mono,
 				sr=sample_rate,
@@ -134,7 +133,6 @@ def load_wav(file, ctx):
 				fill_na=0,
 			)
 			notes = np.round(librosa.hz_to_midi(f0))
-			# print(len(notes), notes)
 			for tick, note in enumerate(notes):
 				v = volumes[tick]
 				if v < max_volume / tolerance:
