@@ -215,6 +215,7 @@ class TransportNote:
 	length: float
 	channel: int
 	sustain: bool
+	# Priority is the value used by downstream encoders to determine how the note should be handled. The highest value is 2, where a note should be created regardless of any other factors. A note with priority 1 may be joined with a previous note ending on the same tick. A note with priority 0 will always be joined with any notes currently active, and a note with less than 0 priority will not be rendered in discrete note segment outputs (e.g. minecraft or nbs).
 	priority: int
 	volume: float
 	panning: float
@@ -325,17 +326,18 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						if offset != channel_stats.get(channel, {}).get("bend", 0):
 							note_candidates += 1
 							pitchbend_ranges.setdefault(channel, 2)
-							instrument = instrument_map[channel]
 							channel_stats.setdefault(channel, {})["bend"] = offset
-							candidate = None
-							for note in active_notes[instrument]:
-								if note.channel == channel:
-									note.priority = max(note.priority, 1)
-									if not candidate or note.start > candidate.start:
-										candidate = note
-							if candidate:
-								candidate.length = max(candidate.length, float(timestamp_approx + curr_frac - candidate.start))
-								candidate.sustain = True
+							if channel in instrument_map:
+								instrument = instrument_map[channel]
+								candidate = None
+								for note in active_notes[instrument]:
+									if note.channel == channel:
+										note.priority = max(note.priority, 1)
+										if not candidate or note.start > candidate.start:
+											candidate = note
+								if candidate:
+									candidate.length = max(candidate.length, float(timestamp_approx + curr_frac - candidate.start))
+									candidate.sustain = True
 					case "control_c" if int(event[4]) == 6:
 						channel = int(event[3])
 						pitchbend_ranges[channel] = int(event[5])
@@ -352,11 +354,6 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								for note in active_notes[instrument]:
 									if note.channel == channel:
 										note.priority = max(note.priority, 1)
-						# elif volume <= orig_volume * 0.5:
-						# 	instrument = instrument_map[channel]
-						# 	for note in active_notes[instrument]:
-						# 		if note.channel == channel:
-						# 			note.sustain = False
 						channel_stats[channel]["volume"] = volume
 					case "control_c" if int(event[4]) == 10:
 						channel = int(event[3])
@@ -413,6 +410,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								pitch = -12 - ctx.transpose + fs1
 							priority = note.priority
 							if priority > 0 and volume != 0:
+								# For sections that are really loud or for sustained notes at a fast tempo; quantise note segments based on the square root of the ratio between the note's volume and total volume, multiplied by the ratio between note lengths
 								period = note.period = round(min(8, max(1, 100 / sqrt(pitch + 6) / ctx.strum_affinity * sqrt(total_value / volume / min(4, length) + 8) / sms))) if long else 8
 								offset = note.offset = long_notes % period if long else 0
 							elif round((timestamp_approx - note.start) / sms) % note.period != note.offset:
@@ -433,6 +431,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						else:
 							note.priority = 0 if note.sustain == 1 else -1
 							if note.sustain == 2 and (length < sms * 3 or (timestamp_approx - note.start) % (sms * 2) >= sms):
+								# Notes that do not have a sustain property should fade out based on their duration
 								note.velocity = max(2, note.velocity - sms / (length + sms * 2) * note.velocity * 2)
 					notes.reverse()
 				beat = []
@@ -440,6 +439,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				for k, v in ticked.items():
 					instrument, pitch = k
 					priority, long, volume, pan = v
+					# After the per-note formula is applied, the result of multiple notes quantised into one will have a volume equal to the root mean square.
 					volume = sqrt(volume)
 					count = max(1, int(volume // 127))
 					vel = max(1, min(127, round(volume / count)))
