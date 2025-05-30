@@ -411,7 +411,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							priority = note.priority
 							if priority > 0 and volume != 0:
 								# For sections that are really loud or for sustained notes at a fast tempo; quantise note segments based on the square root of the ratio between the note's volume and total volume, multiplied by the ratio between note lengths
-								period = note.period = round(min(8, max(1, 100 / sqrt(pitch + 6) / ctx.strum_affinity * sqrt(total_value / volume / min(4, length) + 8) / sms))) if long else 8
+								period = note.period = round(min(8, max(1, 40 / sqrt(pitch + 12) / ctx.strum_affinity * sqrt(total_value / volume / min(4, length) + 8) / sms))) if long else 8
 								offset = note.offset = long_notes % period if long else 0
 							elif round((timestamp_approx - note.start) / sms) % note.period != note.offset:
 								priority = -1
@@ -446,10 +446,13 @@ def deconstruct(midi_events, speed_info, ctx=None):
 					block = NoteSegment(instrument, pitch, priority, long, vel, pan)
 					for w in range(count):
 						beat.append(block)
-					try:
-						poly[instrument] += count
-					except KeyError:
-						poly[instrument] = count
+					if instrument != -1:
+						try:
+							poly[instrument] += count
+						except KeyError:
+							poly[instrument] = count
+					else:
+						poly.setdefault(instrument, 0)
 					try:
 						instrument_activities[instrument][0] += volume
 						instrument_activities[instrument][1] = max(instrument_activities[instrument][1], poly[instrument])
