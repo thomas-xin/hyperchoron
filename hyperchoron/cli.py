@@ -53,11 +53,13 @@ def convert_file(args):
 	imported = []
 	for file in inputs:
 		if isinstance(file, str) and (file.startswith("https://") or file.startswith("http://")):
-			import io
 			import urllib.request
 			req = urllib.request.Request(file, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"})
-			name = file.split("?", 1)[0].rsplit("/", 1)[-1]
-			file = io.BytesIO(urllib.request.urlopen(req).read())
+			name = file.split("?", 1)[0].rsplit("/", 1)[-1].replace("__", "_")
+			fn = util.temp_dir + name
+			with open(fn, "wb") as f:
+				f.write(urllib.request.urlopen(req).read())
+			file = fn
 		elif isinstance(file, str):
 			name = file.replace("\\", "/").rsplit("/", 1)[-1]
 		else:
