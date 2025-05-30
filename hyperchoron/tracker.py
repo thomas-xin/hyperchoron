@@ -68,7 +68,7 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 		if beat:
 			ordered = sorted(beat, key=lambda note: (transport_note_priority(note, sustained=(note[0], note[1] - c1) in active), note[1]), reverse=True)
 			lowest = min((note[0] == -1, note[1], note) for note in beat)[-1]
-			if len(ordered) >= 7 and org_instrument_selection[lowest[0]] >= 0:
+			if sum(note[0] != -1 for note in ordered) >= 8 and org_instrument_selection[lowest[0]] >= 0:
 				lowest_to_remove = True
 				for j, note in enumerate(ordered):
 					if note[0] == -1:
