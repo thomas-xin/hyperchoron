@@ -263,6 +263,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						else:
 							value = int(event[4])
 							instrument_map[channel] = org_instrument_mapping[value] if is_org else instrument_mapping[value]
+						print(instrument_map)
 					case "note_on_c":
 						channel = int(event[3])
 						if channel not in instrument_map:
@@ -411,7 +412,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							priority = note.priority
 							if priority > 0 and volume != 0:
 								# For sections that are really loud or for sustained notes at a fast tempo; quantise note segments based on the square root of the ratio between the note's volume and total volume, multiplied by the ratio between note lengths
-								period = note.period = round(min(8, max(1, 40 / sqrt(pitch + 12) / ctx.strum_affinity * sqrt(total_value / volume / min(4, length) + 8) / sms))) if long else 8
+								period = note.period = round(min(8, max(1, 20 / sqrt(pitch + 12) / ctx.strum_affinity * sqrt(total_value / volume / min(4, length) + 8) / sms))) if long else 8
 								offset = note.offset = long_notes % period if long else 0
 							elif round((timestamp_approx - note.start) / sms) % note.period != note.offset:
 								priority = -1

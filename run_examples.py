@@ -12,10 +12,12 @@ def run_conversion(ctx, fi, *fo):
 		args.append("-ml")
 	if ctx.invert_key:
 		args.append("-ik")
+	if ctx.minecart_improvements:
+		args.append("-mi")
 	print(args)
 	return subprocess.Popen(args)
-def wait_procs(procs):
-	while len(procs) >= 12:
+def wait_procs(procs, max_workers=12):
+	while len(procs) >= max_workers:
 		try:
 			procs[0].wait(timeout=2)
 		except subprocess.TimeoutExpired:
@@ -39,14 +41,14 @@ def convert_files(ctx):
 		if not os.path.exists(fold):
 			os.mkdir(fold)
 	fmts = [fold.rsplit("/", 1)[-1] for fold in ctx.output]
-	min_timestamp = os.path.getmtime("hyperchoron.py")
+	# min_timestamp = os.path.getmtime("hyperchoron.py")
 	for fn in sorted(ctx.input, key=lambda fn: (fn.endswith(".zip"), os.path.getsize(fn)), reverse=True):
 		if fn.rsplit(".", 1)[-1] not in ("mid", "midi", "nbs", "zip"):
 			print(f"WARNING: File {repr(fn)} has unrecognised extension, skipping...")
 			continue
 		names = [fn.rsplit(".", 1)[0] + "." + fmt for fmt in fmts]
 		fo = [fold + "/" + n.replace("\\", "/").rsplit("/", 1)[-1] for fold, n in zip(ctx.output, names)]
-		if any(not os.path.exists(f) or not os.path.getsize(f) or os.path.getmtime(f) < max(min_timestamp, os.path.getmtime(fn)) for f in fo):
+		if any(not os.path.exists(f) or not os.path.getsize(f) or os.path.getmtime(f) < os.path.getmtime(fn) for f in fo):
 			wait_procs(procs)
 			procs.append(run_conversion(ctx, fn, *fo))
 	for proc in procs:

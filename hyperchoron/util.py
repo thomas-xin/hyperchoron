@@ -117,8 +117,8 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 				speed /= div
 			elif div > 2:
 				speed /= div / 2
-	if not use_exact and ctx.mc_legal and (speed < min_value * 0.9 or speed > min_value * 1.1):
-		frac = fractions.Fraction(min_value / speed).limit_denominator(12)
+	if not use_exact and ctx.mc_legal and (speed < min_value * 0.85 or speed > min_value * 1.15):
+		frac = fractions.Fraction(min_value / speed).limit_denominator(5)
 		print("For MC compliance: rescaling speed by:", frac)
 		speed = float(speed * frac)
 	if use_exact:
@@ -300,6 +300,7 @@ def get_parser():
 	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
 	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be treated as regular instrument channels. Defaults to TRUE")
-	parser.add_argument("-md", "--max-distance", nargs="?", type=int, default=42, help="For Minecraft outputs: Restricts the maximum block distance the notes may be placed from the centre line of the structure, in increments of 3 (one module). Decreasing this value makes the output more compact, at the cost of note volume accuracy. Defaults to 42")
 	parser.add_argument("-ml", "--mc-legal", action=argparse.BooleanOptionalAction, default=None, help="Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic, .mcfunction and .nbt outputs, FALSE otherwise")
+	parser.add_argument("-md", "--max-distance", nargs="?", type=int, default=42, help="For Minecraft outputs only: Restricts the maximum block distance the notes may be placed from the centre line of the structure, in increments of 3 (one module). Decreasing this value makes the output more compact, at the cost of note volume accuracy. Defaults to 42")
+	parser.add_argument("-mi", "--minecart-improvements", action=argparse.BooleanOptionalAction, default=False, help="For Minecraft outputs only: Assumes the server is running the [Minecart Improvements](https://minecraft.wiki/w/Minecart_Improvements) version(s). Less powered rails will be applied on the main track, to account for the increased deceleration. Currently only semi-functional; the rail section connecting the midway point may be too slow.")
 	return parser

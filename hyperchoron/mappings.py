@@ -12,6 +12,7 @@ material_map = [
 	["bamboo_planks", "black_wool", "emerald_block", "emerald_block+", "packed_ice", "packed_ice+"],
 	["netherrack", "netherrack+", "red_stained_glass", "red_stained_glass+", "red_sand", "red_sand+"],
 	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "gold_block", "gold_block+"],
+	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "gold_block", "gold_block+"],
 	None
 ]
 default_instruments = dict(
@@ -23,6 +24,7 @@ default_instruments = dict(
 	chime="Bell",
 	basedrum="Unpitched Percussion",
 	banjo="String",
+	banjo2="Banjo",
 	creeper="Drumset",
 )
 instrument_codelist = list(default_instruments.values())
@@ -121,6 +123,7 @@ sustain_map = [
 	0,
 	1,
 	0,
+	0,
 ]
 instrument_mapping = [
 	1, 1, 1, 4, 3, 3, 0, 1, # Piano
@@ -136,7 +139,7 @@ instrument_mapping = [
 	3, 3, 3, 3, 3, 3, 3, 3, # SL
 	2, 2, 2, 2, 2, 2, 2, 2, # SP
 	2, 2, 2, 2, 2, 2, 2, 2, # SE
-	0, 7, 2, 0, 1, 3, 3, 7, # Ethnic
+	0, 8, 8, 8, 1, 3, 3, 7, # Ethnic
 	0, 6, 6, 6, 6, 6, 6, 6, # Percussive
 	6, 6, 6, 6, 6, 6, 6, 6, # Percussive
 ]
@@ -149,6 +152,7 @@ midi_instrument_selection = [
 	14,
 	-2,
 	48,
+	105,
 	-1,
 ]
 org_instrument_mapping = [
@@ -172,6 +176,7 @@ org_instrument_selection = [
 	76,
 	-2,
 	66,
+	62,
 	-1,
 	60,
 	-1,
