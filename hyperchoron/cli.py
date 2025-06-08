@@ -91,7 +91,7 @@ def convert_file(args):
 	transport, instrument_activities, speed_info, note_candidates = util.merge_imports(imported, ctx)
 	util.transpose(transport, ctx)
 	print("Note candidates:", note_candidates)
-	print("Note count:", sum(map(len, transport)))
+	print("Note segment count:", sum(map(len, transport)))
 	print("Max detected polyphony:", max(map(len, transport), default=0))
 	# print("Lowest note:", min(min(n[1] for n in b) for b in transport if b))
 	# print("Highest note:", max(max(n[1] for n in b) for b in transport if b))
