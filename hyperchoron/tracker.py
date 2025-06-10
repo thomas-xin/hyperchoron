@@ -30,7 +30,7 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 		instruments.append(SimpleNamespace(
 			id=60,
 			index=0,
-			type=9,
+			type=10,
 			notes=[],
 		))
 	while len(instruments) < 8:
@@ -80,12 +80,12 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 						vel = hypot(note[4], lowest[4]) * 3 / 2
 						tvel = min(max_vol, vel)
 						keep = lowest[4] - tvel * 2 / 3
-						lowest = (9, lowest[1], max(note[2], lowest[2]), True, tvel, (note[5] + lowest[5]) / 2)
+						lowest = (10, lowest[1], max(note[2], lowest[2]), True, tvel, (note[5] + lowest[5]) / 2)
 						ordered[j - 1 + lowest_to_remove] = (note[0], note[1], min(1, note[2]), note[3], max(1, keep), note[5])
 						break
-				if lowest[0] != 9 and lowest[1] < c4 - 12:
+				if lowest[0] != 10 and lowest[1] < c4 - 12:
 					pitch = lowest[1]
-					lowest = (9, pitch, lowest[2], lowest[3], min(max_vol, lowest[4] * 3 / 2), lowest[5])
+					lowest = (10, pitch, lowest[2], lowest[3], min(max_vol, lowest[4] * 3 / 2), lowest[5])
 				ordered.sort(key=lambda note: (note[2] + round(note[4] * 8 / max_vol), note[1]), reverse=True)
 				ordered.insert(0, lowest)
 			elif len(ordered) > 1:
