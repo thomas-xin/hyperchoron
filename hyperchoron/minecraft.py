@@ -150,6 +150,7 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=Non
 		yield from (
 			(coords[0], base),
 			(coords[1], "sculk"),
+			(coords[2], "air"),
 		)
 		return
 	if base.endswith("_head") or base.endswith("_skull"):

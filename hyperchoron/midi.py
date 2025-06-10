@@ -263,7 +263,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						else:
 							value = int(event[4])
 							instrument_map[channel] = org_instrument_mapping[value] if is_org else instrument_mapping[value]
-						print(instrument_map)
+						# print(instrument_map)
 					case "note_on_c":
 						channel = int(event[3])
 						if channel not in instrument_map:
@@ -279,7 +279,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						else:
 							note_candidates += 1
 							priority = 2
-							if instrument in (-1, 6, 8):
+							if instrument in (-1, 6, 9):
 								sustain = 0
 							else:
 								sustain = sustain_map[instrument] or (1 if is_org else 2 if not ctx.mc_legal else 0)
