@@ -27,6 +27,9 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 			case "nbt" | "mcfunction" | "litematic":
 				from hyperchoron import minecraft
 				nc += minecraft.save_litematic(transport, output, ctx=ctx)
+			case "🗿" | "moai":
+				from hyperchoron import tracker
+				nc += tracker.save_thirtydollar(transport, output, speed_info=speed_info, ctx=ctx)
 			case _:
 				from hyperchoron import dawvert
 				nc += dawvert.save_arbitrary(transport, output, instrument_activities=instrument_activities, speed_info=speed_info, ctx=ctx)
@@ -34,12 +37,18 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 
 def convert_file(args):
 	ctx = args
-	if ctx.output and (ctx.output[0].rsplit(".", 1)[-1].casefold() in ("litematic", "mcfunction", "nbt")):
+	default_resolution = 40
+	fmt = ""
+	if ctx.output and ((fmt := ctx.output[0].rsplit(".", 1)[-1].casefold()) in ("litematic", "mcfunction", "nbt")):
 		if ctx.mc_legal is None:
 			print("Auto-switching to Minecraft-Legal mode...")
 			ctx.mc_legal = True
+	if fmt == "🗿":
+		default_resolution = 12
+	elif ctx.mc_legal:
+		default_resolution = 20
 	if not ctx.resolution:
-		ctx.resolution = 40 if not ctx.mc_legal else 20
+		ctx.resolution = default_resolution
 	inputs = list(ctx.input)
 	if not ctx.output or not any("." in fn for fn in ctx.output):
 		*path, name = inputs[0].replace("\\", "/").rsplit("/", 1)
@@ -84,6 +93,9 @@ def convert_file(args):
 			case "wav" | "flac" | "mp3" | "aac" | "ogg" | "opus" | "m4a" | "wma" | "weba" | "webm":
 				from hyperchoron import pcm
 				data = pcm.load_wav(file, ctx=ctx)
+			case "🗿" | "moai":
+				from hyperchoron import tracker
+				data = tracker.load_thirtydollar(file)
 			case _:
 				from hyperchoron import dawvert
 				data = dawvert.load_arbitrary(file, ext)

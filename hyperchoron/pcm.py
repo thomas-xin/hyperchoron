@@ -8,7 +8,8 @@ from .mappings import c1
 from .util import temp_dir, sample_rate
 
 
-bpo = 24
+bps = 2
+bpo = bps * 12
 octaves = 7
 semitone = 2 ** (1 / 12)
 
@@ -132,7 +133,7 @@ def load_wav(file, ctx):
 				switch_prob=0.5,
 				fill_na=0,
 			)
-			notes = np.round(librosa.hz_to_midi(f0))
+			notes = np.round(librosa.hz_to_midi(f0) * 6) / 6
 			for tick, note in enumerate(notes):
 				v = volumes[tick]
 				if v < max_volume / tolerance:
@@ -165,7 +166,7 @@ def load_wav(file, ctx):
 		active_notes = {}
 		for tick, bins in enumerate(amp):
 			volume = volumes[tick] if tick < len(volumes) else volumes[-1]
-			chord = bins[::2]
+			chord = bins
 			high = np.max(chord)
 			if high <= 1 / 256:
 				continue
@@ -173,7 +174,7 @@ def load_wav(file, ctx):
 			clipped = np.clip(chord, 0, 1)
 			inds = list(np.argsort(clipped))
 			for attempt in range(32):
-				i = inds.pop(-1)
+				i = inds.pop(-1) / bps
 				v = clipped[i]
 				if v < 1 / tolerance:
 					break

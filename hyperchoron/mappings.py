@@ -13,19 +13,27 @@ material_map = [
 	["netherrack", "netherrack+", "red_stained_glass", "red_stained_glass+", "red_sand", "red_sand+"],
 	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "gold_block", "gold_block+"],
 	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "gold_block", "gold_block+"],
+	["pumpkin", "pumpkin+", "amethyst_block", "clay", "clay+", "packed_ice+"],
+	["pumpkin", "pumpkin+", "amethyst_block", "clay", "clay+", "packed_ice+"],
+	["bamboo_planks", "bamboo_planks+", "emerald_block", "emerald_block+", "clay+", "gold_block+"],
+	["pumpkin", "pumpkin+", "emerald_block", "emerald_block+", "packed_ice", "packed_ice+"],
 	None
 ]
 default_instruments = dict(
-	harp="Plucked",
-	pling="Keyboard",
-	flute="Wind",
-	bit="Synth",
-	iron_xylophone="Pitched Percussion",
-	chime="Bell",
-	basedrum="Unpitched Percussion",
-	banjo="String",
-	banjo2="Banjo",
-	creeper="Drumset",
+	harp="Plucked",						# 0
+	pling="Keyboard",					# 1
+	flute="Wind",						# 2
+	bit="Square Synth",					# 3
+	iron_xylophone="Pitched Percussion",# 4
+	chime="Bell",						# 5
+	basedrum="Unpitched Percussion",	# 6
+	banjo="String",						# 7
+	u1="Banjo",							# 8
+	u2="Voice",							# 9
+	didgeridoo="Brass",					#10
+	u3="Saw Synth",						#11
+	u4="Octaves",						#12
+	creeper="Drumset",					#-1
 )
 instrument_codelist = list(default_instruments.values())
 default_instruments.update(dict(
@@ -33,7 +41,6 @@ default_instruments.update(dict(
 	hat="Unpitched Percussion",
 	bell="Plucked",
 	cow_bell="Pitched Percussion",
-	didgeridoo="Wind",
 	guitar="Plucked",
 	bass="Plucked",
 	xylophone="Pitched Percussion",
@@ -93,6 +100,12 @@ nbs_names = {k: i for i, k in enumerate([
 nbs_values = {v: k for k, v in nbs_names.items()}
 for unsupported in ("skeleton", "wither_skeleton", "zombie", "creeper", "piglin", "trapdoor", "fence_gate", "dispenser"):
 	nbs_names[unsupported] = nbs_names["snare"]
+nbs_names.update(dict(
+	u1=14,
+	u2=6,
+	u3=13,
+	u4=13,
+))
 nbs_values.update({i: "creeper" for i in range(16, 32)})
 pitches = dict(
 	harp=24,
@@ -112,6 +125,10 @@ pitches = dict(
 	banjo=24,
 	pling=24,
 	creeper=0,
+	u1=24,
+	u2=24,
+	u3=24,
+	u4=24,
 )
 sustain_map = [
 	0,
@@ -123,25 +140,29 @@ sustain_map = [
 	0,
 	1,
 	0,
+	1,
+	1,
+	1,
+	1,
 	0,
 ]
 instrument_mapping = [
-	1, 1, 1, 4, 3, 3, 0, 1, # Piano
-	5, 5, 5, 4, 4, 5, 5, 1, # CP
-	2, 1, 2, 2, 7, 7, 7, 3, # Organ
-	0, 0, 0, 1, 1, 3, 3, 7, # Guitar
-	0, 0, 0, 0, 4, 4, 3, 3, # Bass
-	7, 7, 7, 7, 3, 0, 0, 6, # Strings
-	2, 2, 2, 2, 2, 2, 2, 3, # Ensemble
-	2, 2, 2, 2, 2, 2, 2, 2, # Brass
-	7, 7, 7, 7, 7, 2, 2, 3, # Reed
-	2, 2, 2, 2, 2, 2, 2, 2, # Pipe
-	3, 3, 3, 3, 3, 3, 3, 3, # SL
-	2, 2, 2, 2, 2, 2, 2, 2, # SP
-	2, 2, 2, 2, 2, 2, 2, 2, # SE
-	0, 8, 8, 8, 1, 3, 3, 7, # Ethnic
-	0, 6, 6, 6, 6, 6, 6, 6, # Percussive
-	6, 6, 6, 6, 6, 6, 6, 6, # Percussive
+	 1, 1, 1, 4, 3, 3, 0, 1, # Piano
+	 5, 5, 5, 4, 4, 5, 5, 1, # CP
+	10, 1,11,12,10,11, 7, 3, # Organ
+	 0, 0, 0, 1, 1, 3,11, 7, # Guitar
+	 0, 0, 0, 0, 4, 4,11,10, # Bass
+	 7, 7, 7, 7, 3, 0, 0, 6, # Strings
+	 2, 2, 2, 2, 9, 9, 9,12, # Ensemble
+	10,10,10, 7,10,10,11,10, # Brass
+	 7, 7, 7,10,10,10, 2,10, # Reed
+	 2, 2, 2, 2, 2, 2, 2, 2, # Pipe
+	 3,11,10,11, 3, 9,12,11, # SL
+	 2,10,11, 9, 9, 2,10,10, # SP
+	 2,12, 2, 2, 2, 2, 9, 2, # SE
+	 0, 8, 8, 8, 1,11, 7, 7, # Ethnic
+	 0, 6, 6, 6, 6, 6, 6, 6, # Percussive
+	 6, 2, 6, 6, 6, 6, 6, 6, # Percussive
 ]
 midi_instrument_selection = [
 	46,
@@ -153,6 +174,10 @@ midi_instrument_selection = [
 	-2,
 	48,
 	105,
+	52,
+	56,
+	81,
+	55,
 	-1,
 ]
 org_instrument_mapping = [
@@ -177,11 +202,147 @@ org_instrument_selection = [
 	-2,
 	66,
 	62,
-	-1,
+	6,
+	57,
+	66,
 	60,
 	-1,
 ]
 org_octave = 60
+nbs2thirtydollar = dict(
+	u1="noteblock_banjo",
+	u2="fnf_up",
+	u3="meowsynth",
+	u4="mariopaint_car",
+)
+thirtydollar_names = [
+	"noteblock_harp",
+	"noteblock_pling",
+	"noteblock_flute",
+	"noteblock_bit",
+	"noteblock_xylophone",
+	"noteblock_chime",
+	"🥁",
+	"stylophone",
+	"noteblock_banjo",
+	"fnf_up",
+	"mariopaint_flower",
+	"meowsynth",
+	"mariopaint_car",
+	"noteblock_",
+]
+thirtydollar_volumes = {
+	"stylophone": 0.75,
+	"meowsynth": 1,
+	"fnf_up": 0.6,
+	"fnf_down": 0.6,
+	"🦴": 0.5,
+	"mariopaint_flower": 0.8,
+}
+thirtydollar_unmap = {
+	"noteblock_banjo": (8, 0),
+	"stylophone": (7, -1 / 3, 0.75),
+	"meowsynth": (11, -6),
+	"fnf_up": (9, 0, 0.6),
+	"🦴": (11, -16, 0.5),
+	"mariopaint_flower": (10, 0, 0.8),
+	"bong": (5, -13),
+	"🔔": (5, 22),
+	"🚫": (12, -6),
+	"🤬": (3, 17),
+	"buzzer": (11, -20),
+	"airhorn": (10, -3),
+	"puyo": (8, 8),
+	"robtopphone": (4, 12),
+	"🎸": (0, -36),
+	"dimrainsynth": (12, 0),
+	"hoenn": (10, 0),
+	"🎺": (10, 0),
+	"obama": (9, 0),
+	"taunt": (10, 6),
+	"samurai": (0, -9),
+	"familyguy": (10, 6),
+	"ultrainstinct": (7, 3),
+	"morshu": (9, -10),
+	"bup": (9, 3),
+	"mariopaint_mario": (4, 12),
+	"mariopaint_luigi": (3, 0),
+	"mariopaint_star": (1, 24),
+	"mariopaint_gameboy": (3, 0),
+	"mariopaint_swan": (12, 12),
+	"mariopaint_plane": (0, 0),
+	"mariopaint_car": (12, 0),
+	"tab_sounds": (5, 18),
+	"choruskid": (9, 0),
+	"builttoscale": (1, -6),
+	"fnf_left": (9, 0, 0.6),
+	"fnf_down": (9, -12, 0.6),
+	"fnf_right": (9, 0, 0.6),
+	"gd_quit": (2, 3),
+	"bwomp": (11, -36),
+	"YOU": (5, -5),
+	"terraria_guitar": (0, -6),
+	"terraria_axe": (0, -42),
+	"amogus_emergency": (3, 4 + 2 / 3),
+	"amongdrip": (11, -30),
+	"minecraft_bell": (5, -25),
+	"💡": (11, 14),
+}
+thirtydollar_drums = {
+	"_pause": (-1, -1),
+	"boom": (-1, 35),
+	"👏": (-1, 39),
+	"💨": (-1, 66),
+	"🏏": (-1, 48),
+	"shatter": (-1, 57),
+	"👌": (-1, 27),
+	"🖐": (-1, 39),
+	"pan": (-1, 50),
+	"hitmarker": (-1, 32),
+	"dodgeball": (-1, 53),
+	"whipcrack": (-1, 40),
+	"taiko_don": (-1, 41),
+	"taiko_ka": (-1, 63),
+	"tf2_crit": (-1, 38),
+	"smw_stomp2": (-1, 39),
+	"sm64_painting": (-1, 84),
+	"shaker": (-1, 82),
+	"🥁": (-1, 35),
+	"hammer": (-1, 38),
+	"🪘": (-1, 47),
+	"sidestick": (-1, 40),
+	"ride2": (-1, 59),
+	"buttonpop": (-1, 75),
+	"skipshot": (-1, 58),
+	"tab_rows": (-1, 36),
+	"tab_actions": (-1, 62),
+	"tab_rooms": (-1, 40),
+	"preecho": (-1, 74),
+	"rdclap": (-1, 42),
+	"midspin": (-1, 40),
+	"adofai_fire": (-1, 36),
+	"adofai_ice": (-1, 38),
+	"adofaikick": (-1, 35),
+	"adofaicymbal": (-1, 55),
+	"cowbell": (-1, 56),
+	"karateman_throw": (-1, 65),
+	"karateman_offbeat": (-1, 66),
+	"karateman_hit": (-1, 36),
+	"karateman_bulb": (-1, 58),
+	"undertale_hit": (-1, 47),
+	"undertale_crack": (-1, 71),
+	"lancersplat": (-1, 74),
+	"isaac_mantle": (-1, 87),
+	"DEFEAT": (-1, 45),
+	"vvvvvv_flash": (-1, 52),
+	"celeste_dash": (-1, 73),
+	"celeste_death": (-1, 47),
+	"celeste_spring": (-1, 74),
+	"celeste_diamond": (-1, 49),
+	"amogus_kill": (-1, 55),
+	"noteblock_snare": (-1, 40),
+	"noteblock_click": (-1, 44),
+}
 percussion_mats = {int((data := line.split("#", 1)[0].strip().split("\t"))[0]): (data[1], int(data[2])) for line in """
 0	PLACEHOLDER	0
 27	obsidian	24	# High Q
@@ -239,7 +400,7 @@ percussion_mats = {int((data := line.split("#", 1)[0].strip().split("\t"))[0]): 
 79	zombie_head	0	# Open Cuica
 80	bone_block	24	# Mute Triangle
 81	packed_ice	24	# Open Triangle
-82	blue_stained_glass	16	# Closed Hi-Hat
+82	blue_stained_glass	16	# Shaker
 83	skeleton_skull	0	# Jingle Bell
 84	packed_ice	20	# Bell Tree
 85	dropper	0	# Castanets
