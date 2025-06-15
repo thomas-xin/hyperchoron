@@ -18,7 +18,7 @@ from .mappings import (
 	instrument_codelist, fixed_instruments, default_instruments,
 	fs1,
 )
-from .util import base_path, transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
+from .util import round_min, base_path, transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 
 def nbt_from_dict(d):
@@ -49,7 +49,7 @@ def get_note_mat(note, odd=False):
 	pitch = note[1]
 	if not material:
 		try:
-			return percussion_mats[pitch]
+			return percussion_mats[round(pitch)]
 		except KeyError:
 			print("WARNING: Note", pitch, "not yet supported for drums, discarding...")
 			return "PLACEHOLDER", 0
@@ -60,6 +60,7 @@ def get_note_mat(note, odd=False):
 		normalised = 60 + normalised % 12
 	assert 0 <= normalised <= 72, normalised
 	ins, mod = divmod(normalised, 12)
+	ins = int(ins)
 	if mod == 0 and (ins > 5 or ins > 0 and odd):
 		mod += 12
 		ins -= 1
@@ -700,7 +701,8 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 
 			def add_note(note, tick):
 				nonlocal main, nc
-				note_hash = note[0] ^ note[1] // 36
+				pitch = round(note[1])
+				note_hash = note[0] ^ pitch // 36
 				panning = note[5]
 				volume = note[4]
 				if note[2] <= 0:
@@ -708,6 +710,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				if panning == 0:
 					panning = 1 if note_hash & 1 else -1
 				base, pitch = get_note_mat(note, odd=tick & 1)
+				pitch = round(pitch)
 				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
 				x = round(max(0, 1 - volume / 100) ** 0.75 * 0.9 * attenuation_multiplier / 3) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
@@ -779,6 +782,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 
 			def add_recurring(half, ins, pitch, volume, panning):
 				nonlocal main, nc
+				pitch = round(pitch)
 				note_hash = ins ^ pitch // 36
 				if panning == 0:
 					panning = 1 if note_hash & 1 else -1
@@ -857,7 +861,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					indices = range(half, ticks_per_segment, 2)
 					target = None
 					for t in indices:
-						beat = notes[t] = sorted((note for note in notes[t] if note[2] >= 0), key=lambda note: (transport_note_priority(note), note[1]), reverse=True)
+						beat = notes[t] = sorted((note for note in notes[t] if note[2] >= 0), key=lambda note: transport_note_priority(note), reverse=True)
 						temp = {}
 						for note in beat[:192]:
 							ins, pitch, volume, panning = note[0], note[1], note[4], note[5]
@@ -1132,8 +1136,8 @@ def load_nbs(file):
 		[1, 0, "tempo", 1000 * 1000 / header.tempo],
 	]
 	print(header.tempo)
-	for i in range(9):
-		events.append([i + 2, 0, "program_c", i, midi_instrument_selection[i]])
+	for i in range(13):
+		events.append([i + 2, 0, "program_c", i + 10, midi_instrument_selection[i]])
 	ticked = {}
 	for tick, chord in nbs:
 		for note in chord:
@@ -1147,10 +1151,10 @@ def load_nbs(file):
 					ins = instrument_codelist.index(instrument_name)
 				except ValueError:
 					ins = default
-			pitch = note.key - 33 + fs1 + pitches[nbs_values.get(note.instrument, "snare")]
+			pitch = note.key + round_min(note.pitch / 100) - 33 + fs1 + pitches[nbs_values.get(note.instrument, "snare")]
 			bucket = (note.layer, pitch)
 			if note.panning not in range(-1, 2):
-				events.append([ins + 2, tick, "control_c", ins, 10, note.panning / 100 * 63 + 64])
+				events.append([ins + 2, tick, "control_c", ins + 10, 10, note.panning / 100 * 63 + 64])
 			volume = round(note.velocity * 127 / 100)
 			if note.panning & 1:
 				if bucket in ticked:
@@ -1158,7 +1162,7 @@ def load_nbs(file):
 					if prev[5] == volume and tick - prev[1] < header.tempo / 2:
 						prev[7] = max(prev[7], 1 + tick - prev[1])
 						continue
-			note_event = [ins + 2, tick, "note_on_c", ins, pitch, volume, 1, 1]
+			note_event = [ins + 2, tick, "note_on_c", ins + 10, pitch, volume, 1, 1]
 			events.append(note_event)
 			ticked[bucket] = note_event
 	events.sort(key=lambda e: e[1])
@@ -1195,12 +1199,12 @@ def save_nbs(transport, output, speed_info, ctx):
 				if not ctx.mc_legal:
 					instrument2 = fixed_instruments[instrument_codelist[ins]]
 					pitch2 = note[1] - pitches[instrument2] - fs1
-					if pitch2 in range(-12, 48):
+					if -12 <= pitch2 < 48:
 						pitch = pitch2
 						instrument = instrument2
 					else:
 						pitch2 = note[1] - pitches[instrument] - fs1
-						if pitch2 in range(-33, 55):
+						if -33 <= pitch2 < 55:
 							pitch = pitch2
 			nbi = nbs_names[instrument]
 			try:
@@ -1209,14 +1213,22 @@ def save_nbs(transport, output, speed_info, ctx):
 				current_poly[ins] = 1
 			volume = note[4] / 127 * 100
 			if note[2] <= 0:
-				volume *= min(1, sqrt(20 / tempo) * 2 / 3)
+				volume *= min(1, (2 / 3) ** (tempo / 20))
+			raw_key = round(pitch)
+			kwargs = {}
+			if volume != 100:
+				kwargs["velocity"] = round(volume)
+			panning = int(note[5] * 49) * 2 + (0 if note[2] > 0 else 1 if i & 1 else -1)
+			if panning != 0:
+				kwargs["panning"] = panning
+			if raw_key != pitch:
+				kwargs["pitch"] = round((pitch - raw_key) * 100)
 			rendered = pynbs.Note(
 				tick=i,
 				layer=ins,
-				key=pitch + 33,
+				key=raw_key + 33,
 				instrument=nbi,
-				velocity=round(volume),
-				panning=int(note[5] * 49) * 2 + (0 if note[2] > 0 else 1 if i & 1 else -1),
+				**kwargs,
 			)
 			nbs.notes.append(rendered)
 		for k, v in current_poly.items():

@@ -6,10 +6,13 @@ from types import SimpleNamespace
 from .mappings import (
 	org_instrument_selection, org_instrument_mapping,
 	instrument_names, midi_instrument_selection,
-	percussion_mats,
-	c4, c1,
+	fixed_instruments, instrument_codelist,
+	thirtydollar_names, thirtydollar_volumes,
+	nbs2thirtydollar, thirtydollar_unmap, thirtydollar_drums,
+	percussion_mats, material_map, pitches, default_instruments,
+	c4, c1, fs1, fs4,
 )
-from .util import create_reader, transport_note_priority, temp_dir, sample_rate
+from .util import round_min, create_reader, transport_note_priority, temp_dir, sample_rate
 
 
 @dataclass(slots=True)
@@ -30,7 +33,7 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 		instruments.append(SimpleNamespace(
 			id=60,
 			index=0,
-			type=10,
+			type=12,
 			notes=[],
 		))
 	while len(instruments) < 8:
@@ -66,7 +69,9 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 		taken = []
 		next_active = {}
 		if beat:
-			ordered = sorted(beat, key=lambda note: (transport_note_priority(note, sustained=(note[0], note[1] - c1) in active), note[1]), reverse=True)
+			if len(beat) >= 12:
+				beat = [note if note[2] >= 0 else (*note[:2], 0, *note[3:]) for note in beat]
+			ordered = sorted(beat, key=lambda note: transport_note_priority(note, sustained=(note[0], note[1] - c1) in active), reverse=True)
 			lowest = min((note[0] == -1, note[1], note) for note in beat)[-1]
 			if sum(note[0] != -1 for note in ordered) >= 8 and org_instrument_selection[lowest[0]] >= 0:
 				lowest_to_remove = True
@@ -80,21 +85,22 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 						vel = hypot(note[4], lowest[4]) * 3 / 2
 						tvel = min(max_vol, vel)
 						keep = lowest[4] - tvel * 2 / 3
-						lowest = (10, lowest[1], max(note[2], lowest[2]), True, tvel, (note[5] + lowest[5]) / 2)
+						lowest = (12, lowest[1], max(note[2], lowest[2]), True, tvel, (note[5] + lowest[5]) / 2)
 						ordered[j - 1 + lowest_to_remove] = (note[0], note[1], min(1, note[2]), note[3], max(1, keep), note[5])
 						break
 				if lowest[0] != 10 and lowest[1] < c4 - 12:
-					pitch = lowest[1]
-					lowest = (10, pitch, lowest[2], lowest[3], min(max_vol, lowest[4] * 3 / 2), lowest[5])
+					pitch = round(lowest[1])
+					lowest = (12, pitch, lowest[2], lowest[3], min(max_vol, lowest[4] * 3 / 2), lowest[5])
 				ordered.sort(key=lambda note: (note[2] + round(note[4] * 8 / max_vol), note[1]), reverse=True)
 				ordered.insert(0, lowest)
 			elif len(ordered) > 1:
 				ordered.remove(lowest)
 				ordered.insert(0, lowest)
 		else:
-			ordered = list(beat)
+			ordered = []
 		for note in ordered:
 			itype, pitch, priority, _long, vel, pan = note
+			pitch = round(pitch)
 			vel -= min_vol
 			volume = max(0, min(254, round(vel * 2 / 64) * 64 if conservative else round(vel * 2 / 8) * 8))
 			panning = round(pan * 6 + 6)
@@ -269,6 +275,7 @@ def load_org(file):
 			if e.pitch != 255:
 				events.append([i + 2, e.tick, "note_on_c", channel, pitch or e.pitch + c1, 127, 1, e.length])
 	return events
+
 
 # TODO: Finish implementation
 def load_xm(file):
@@ -581,4 +588,239 @@ def save_org(transport, output, instrument_activities, speed_info, ctx):
 				org.write(struct.pack("B", note.volume))
 			for note in ins.notes:
 				org.write(struct.pack("B", note.panning))
+	return nc
+
+
+@functools.lru_cache(maxsize=256)
+def get_note_mat_ex(note, odd=False):
+	material = material_map[note[0]]
+	pitch = note[1]
+	if not material:
+		try:
+			return percussion_mats[round(pitch)]
+		except KeyError:
+			print("WARNING: Note", pitch, "not yet supported for drums, discarding...")
+			return "PLACEHOLDER", 0
+	normalised = pitch - fs1
+	if normalised < 0:
+		normalised %= 12
+	elif normalised > 72:
+		normalised = 60 + normalised % 12
+	assert 0 <= normalised <= 72, normalised
+	ins, mod = divmod(normalised, 12)
+	ins = int(ins)
+	if mod == 0 and (ins > 5 or ins > 0 and odd):
+		mod += 12
+		ins -= 1
+	elif odd:
+		leeway = 1
+		if ins > 0 and mod <= leeway and not material[ins - 1].endswith("+"):
+			mod += 12
+			ins -= 1
+		elif ins < 5 and mod >= 24 - leeway and material[ins + 1].endswith("+"):
+			mod -= 12
+			ins += 1
+		elif ins < 5 and mod >= 12 - leeway and material[ins].endswith("+") and material[ins + 1].endswith("+"):
+			mod -= 12
+			ins += 1
+	mat = material[ins]
+	if note[3] == 2:
+		replace = dict(
+			hay_block="amethyst_block",
+			emerald_block="amethyst_block",
+			amethyst_block="amethyst_block",
+			iron_block="amethyst_block",
+			# glowstone="amethyst_block",
+		)
+		replace.update({
+			"hay_block+": "amethyst_block+",
+			"emerald_block+": "amethyst_block+",
+			"amethyst_block+": "amethyst_block+",
+			"black_wool+": "amethyst_block",
+			"iron_block+": "amethyst_block+",
+			# "glowstone+": "amethyst_block+",
+		})
+		try:
+			mat = replace[mat]
+		except KeyError:
+			return "PLACEHOLDER", 0
+	if mat.endswith("+"):
+		mat = mat[:-1]
+		mod += 12
+	return mat, mod
+
+
+def load_thirtydollar(file):
+	print("Importing 🗿...")
+	with open(file, "r", encoding="utf-8") as f:
+		actions = f.read().replace("\n", "|").split("|")
+	events = [
+		[0, 0, "header", 1, 9 + 1, 1],
+		[1, 0, "tempo", 1000 * 1000 / (300 / 60)],
+	]
+	for i in range(13):
+		events.append([i + 2, 0, "program_c", i + 10, midi_instrument_selection[i]])
+	tick = 0
+	vm = 100
+	pm = 0
+	for action in actions:
+		match action:
+			case _ if action.startswith("!speed@"):
+				action = action.split("@", 1)[-1]
+				speed = float(action)
+				events.append([1, 0, "tempo", 1000 * 1000 / (speed / 60)])
+			case _ if action.startswith("!stop@"):
+				action = action.split("@", 1)[-1]
+				stop = float(action)
+				tick += stop
+			case _ if action.startswith("!volume@"):
+				action = action.split("@", 1)[-1]
+				add = action.endswith("+")
+				if add:
+					action = action[:-1]
+					vm += float(action)
+				else:
+					vm = float(action)
+			case _ if action.startswith("!transpose@"):
+				action = action.split("@", 1)[-1]
+				add = action.endswith("+")
+				if add:
+					action = action[:-1]
+					pm += float(action)
+				else:
+					pm = float(action)
+			case "!combine":
+				tick -= 1
+			case "_pause":
+				tick += 1
+			case _:
+				rep = 1
+				velocity = 100
+				pitch = 0
+				vol = 1
+				ins = None
+				pitch_override = None
+				if "=" in action:
+					action, rep = action.rsplit("=", 1)
+				if "%" in action:
+					action, velocity = action.rsplit("%", 1)
+				if "@" in action:
+					action, pitch = action.rsplit("@", 1)
+				try:
+					tup = thirtydollar_unmap[action]
+					if len(tup) >= 3:
+						ins, po, vol = tup
+					else:
+						ins, po = tup
+					po += 24
+				except KeyError:
+					if action in thirtydollar_drums:
+						ins, pitch_override = thirtydollar_drums[action]
+					elif action.startswith("noteblock_"):
+						action = action.split("_", 1)[-1]
+						ins = instrument_codelist.index(default_instruments[action])
+						po = pitches[action]
+				if ins is not None:
+					if pitch_override is None:
+						pitch_override = float(pm) + float(pitch) + float(po) + fs1 + 12
+					elif pitch_override == -1:
+						tick += int(rep)
+						continue
+					for i in range(int(rep)):
+						note_event = [int(ins) + 2, tick, "note_on_c", int(ins) + 10, pitch_override, (float(vm) / 100 * float(velocity) / 100) ** (2 / 3) / float(vol) * 127, 1, 1]
+						events.append(note_event)
+						tick += 1
+	events.sort(key=lambda e: e[1])
+	return events
+
+def save_thirtydollar(transport, output, speed_info, ctx):
+	print("Exporting 🗿...")
+	orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
+	speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
+	wait = max(1, round(orig_step_ms / speed_ratio))
+	bpm = 60 * 1000 / wait
+	nc = 0
+	events = [f"!speed@{round_min(round(bpm, 2))}"]
+	div = 0
+	for i, beat in enumerate(transport):
+		temp = []
+		for note in sorted(beat, key=lambda note: note[0]):
+			itype, pitch, priority, _long, vel, pan = note
+			if priority < 0:
+				continue
+			name = thirtydollar_names[itype]
+			if name.startswith("noteblock_"):
+				mat, mod = get_note_mat_ex(note, odd=i & 1)
+				if mat == "PLACEHOLDER":
+					continue
+				if mat == "cobblestone":
+					name = "🥁"
+				elif mat == "black_concrete_powder":
+					name = "hammer"
+				elif mat == "blue_stained_glass":
+					name = "rdclap"
+					mod += 12
+				elif mat == "creeper_head":
+					name = "celeste_diamond"
+					mod += 12
+				elif mat == "obsidian":
+					name = "🪘"
+				else:
+					instrument = instrument_names[mat]
+					if itype != -1:
+						if not ctx.mc_legal:
+							instrument2 = fixed_instruments[instrument_codelist[itype]]
+							pitch2 = note[1] - pitches[instrument2] - fs1
+							if pitch2 in range(-12, 48):
+								mod = pitch2
+								instrument = instrument2
+							else:
+								pitch2 = note[1] - pitches[instrument] - fs1
+								if pitch2 in range(-33, 55):
+									mod = pitch2
+					if instrument in nbs2thirtydollar:
+						name = nbs2thirtydollar[instrument]
+					else:
+						name = f"noteblock_{instrument}"
+				pitch = mod + fs4 - 12
+			if name == "meowsynth":
+				pitch += 6
+			if name == "noteblock_didgeridoo":
+				name = "fnf_down"
+				pitch -= 12
+			p = pitch - fs4
+			if name in ("stylophone", "fnf_up", "mariopaint_flower") and p < -12:
+				name = "fnf_down"
+				p += 24 - 12
+			elif name == "meowsynth" and p < -12:
+				name = "🦴"
+				pitch += 24 - 8 - 6
+			if name == "stylophone":
+				p += 1 / 3
+			text = name
+			if p != 0:
+				text += f"@{round_min(round(p, 2))}"
+			v = (vel / 127) ** 1.5 * 100
+			if priority == 0:
+				v *= min(1, (2 / 3) ** (50 / wait))
+			v *= thirtydollar_volumes.get(name, 1)
+			v = round(v)
+			if v != 0:
+				text += f"%{v}"
+			temp.append(text)
+		if temp:
+			events.append("|!combine|".join(temp))
+		elif events[-1].startswith("!stop@") and not events[-1].endswith("\n"):
+			n = int(events[-1].split("@", 1)[-1])
+			events[-1] = f"!stop@{n + 1}"
+		elif events[-1] == "_pause":
+			events[-1] = "!stop@2"
+		else:
+			events.append("_pause")
+		if i & 15 == 15 and i != len(transport) - 1:
+			events[-1] += "|!divider\n"
+			div += 1
+		nc += len(temp)
+	with open(output, "w", encoding="utf-8") as thirtydollar:
+		thirtydollar.write("|".join(events))
 	return nc

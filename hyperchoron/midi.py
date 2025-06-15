@@ -22,7 +22,7 @@ from .mappings import (
 	material_map, sustain_map, instrument_codelist,
 	fs1, c_1,
 )
-from .util import sync_tempo, transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
+from .util import round_min, sync_tempo, transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 
 def midi2csv(file):
@@ -215,7 +215,7 @@ class TransportNote:
 	length: float
 	channel: int
 	sustain: bool
-	# Priority is the value used by downstream encoders to determine how the note should be handled. The highest value is 2, where a note should be created regardless of any other factors. A note with priority 1 may be joined with a previous note ending on the same tick. A note with priority 0 will always be joined with any notes currently active, and a note with less than 0 priority will not be rendered in discrete note segment outputs (e.g. minecraft or nbs).
+	# Priority is the value used by downstream encoders to determine how the note should be handled. The highest value is 2, where a note should be created regardless of any other factors. A note with priority 1 may be joined with a previous note ending on the same tick, including through pitchbends. A note with priority 0 will always be joined with any notes currently active, and a note with less than 0 priority will not be rendered in discrete note segment outputs (e.g. minecraft or nbs).
 	priority: int
 	volume: float
 	panning: float
@@ -269,7 +269,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						if channel not in instrument_map:
 							instrument_map[channel] = -1 if channel == 9 and ctx.drums else 0
 						instrument = instrument_map[channel]
-						pitch = int(event[4])
+						pitch = round_min(float(event[4]))
 						velocity = int(event[5])
 						panning = 0
 						if velocity == 0:
@@ -279,7 +279,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						else:
 							note_candidates += 1
 							priority = 2
-							if instrument in (-1, 6, 9):
+							if instrument in (-1,):
 								sustain = 0
 							else:
 								sustain = sustain_map[instrument] or (1 if is_org else 2 if not ctx.mc_legal else 0)
@@ -323,22 +323,19 @@ def deconstruct(midi_events, speed_info, ctx=None):
 					case "pitch_bend_c":
 						channel = int(event[3])
 						value = int(event[4])
-						offset = round((value - 8192) / 8192 * pitchbend_ranges.get(channel, 2))
-						if offset != channel_stats.get(channel, {}).get("bend", 0):
+						offset = round_min(round((value - 8192) / 8192 * pitchbend_ranges.get(channel, 2) * 6) / 6)
+						prev = channel_stats.get(channel, {}).get("bend", 0)
+						if offset != prev:
 							note_candidates += 1
 							pitchbend_ranges.setdefault(channel, 2)
 							channel_stats.setdefault(channel, {})["bend"] = offset
-							if channel in instrument_map:
+							if round(offset) != round(prev) and channel in instrument_map:
 								instrument = instrument_map[channel]
-								candidate = None
 								for note in active_notes[instrument]:
 									if note.channel == channel:
 										note.priority = max(note.priority, 1)
-										if not candidate or note.start > candidate.start:
-											candidate = note
-								if candidate:
-									candidate.length = max(candidate.length, float(timestamp_approx + curr_frac - candidate.start))
-									candidate.sustain = True
+										note.length = max(note.length, float(timestamp_approx + curr_frac - note.start))
+										note.sustain = True
 					case "control_c" if int(event[4]) == 6:
 						channel = int(event[3])
 						pitchbend_ranges[channel] = int(event[5])
@@ -412,7 +409,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							priority = note.priority
 							if priority > 0 and volume != 0:
 								# For sections that are really loud or for sustained notes at a fast tempo; quantise note segments based on the square root of the ratio between the note's volume and total volume, multiplied by the ratio between note lengths
-								period = note.period = round(min(8, max(1, 20 / sqrt(pitch + 12) / ctx.strum_affinity * sqrt(total_value / volume / min(4, length) + 8) / sms))) if long else 8
+								period = note.period = round(min(8, max(1, 50 / sqrt(pitch + 12) / ctx.strum_affinity * sqrt(total_value / volume / min(4, length) + 8) / sms))) if long else 8
 								offset = note.offset = long_notes % period if long else 0
 							elif round((timestamp_approx - note.start) / sms) % note.period != note.offset:
 								priority = -1
@@ -510,11 +507,12 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 		taken = []
 		next_active = {}
 		if beat:
-			ordered = sorted(beat, key=lambda note: (transport_note_priority(note, sustained=(note[0], note[1] - c_1) in active), note[0] == -1, note[1]), reverse=True)
+			ordered = sorted(beat, key=lambda note: (transport_note_priority(note, sustained=(note[0], note[1] - c_1) in active), note[0] == -1), reverse=True)
 		else:
 			ordered = list(beat)
 		for note in ordered:
 			itype, pitch, priority, _long, vel, pan = note
+			pitch = round(pitch)
 			volume = round(min(127, vel))
 			panning = round(pan * 63 + 64)
 			ins = midi_instrument_selection[itype]

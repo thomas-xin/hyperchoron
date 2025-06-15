@@ -14,6 +14,15 @@ temp_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstri
 if not os.path.exists(temp_dir):
 	os.mkdir(temp_dir)
 
+def round_min(x):
+	try:
+		y = int(x)
+	except (ValueError, OverflowError, TypeError):
+		return x
+	if x == y:
+		return y
+	return x
+
 # Thank you deepseek-r1 for optimisation
 def approximate_gcd(arr, min_value=8):
 	if not arr:
@@ -138,7 +147,7 @@ def create_reader(file):
 	return read
 
 def transport_note_priority(n, sustained=False, multiplier=8):
-	return n[2] + round(n[4] * multiplier / 127) + sustained
+	return n[2] + round((n[1] / 127) + n[4] * multiplier / 127) + sustained
 
 def merge_activities(a1, a2):
 	if not a1:
