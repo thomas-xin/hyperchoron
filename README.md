@@ -72,7 +72,7 @@ Converting a raw audio file into a MIDI project file, transcribing all notes up 
   - .csv: Comma Separated Value table representing MIDI data.
   - .nbs: Minecraft Note Block Studio project files, used to represent songs composed of Minecraft sound effects. Supports up to 65535 channels in theory, volume and panning, with various limitations on pitch representations.
   - .org: Cave Story Organya tracker files; a song format supporting 8-bit instruments, with up to 8 channels, sustain, volume and panning.
-  - .🗿/.moai: Discrete sound effect representation functionally similar to .nbs; used for https://thirtydollar.website.
+  - .🗿/.moai: Discrete sound effect representation functionally similar to .nbs, supports most Minecraft note block instruments, used for https://thirtydollar.website.
 - WIP (Currently in the works, not yet supported/functional):
   - .xm: Extended Module tracker; a popular project format used in video games, supporting 16-bit instruments, with up to 32 channels, sustain, volume, panning and pitchbends.
   - .wav: Raw pulse-code modulation representation of audio, including all rendered songs and audio recordings. This means all compressed variants will also gain support, although they will require [FFmpeg](https://www.ffmpeg.org) installed to provide coverage;
