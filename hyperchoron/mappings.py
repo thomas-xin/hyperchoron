@@ -126,7 +126,7 @@ pitches = dict(
 	pling=24,
 	creeper=0,
 	u1=24,
-	u2=24,
+	u2=36,
 	u3=24,
 	u4=24,
 )

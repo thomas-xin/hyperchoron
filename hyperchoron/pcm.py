@@ -174,7 +174,7 @@ def load_wav(file, ctx):
 			clipped = np.clip(chord, 0, 1)
 			inds = list(np.argsort(clipped))
 			for attempt in range(32):
-				i = inds.pop(-1) / bps
+				i = inds.pop(-1)
 				v = clipped[i]
 				if v < 1 / tolerance:
 					break
@@ -185,7 +185,7 @@ def load_wav(file, ctx):
 				else:
 					priority = 1
 				active_notes[i] = v
-				p = i + c1
+				p = i / bps + c1
 				events.append([ins, tick, "note_on_c", ins, p, v * 127, priority, 1])
 		return events
 
@@ -196,7 +196,7 @@ def load_wav(file, ctx):
 	print("Decomposing Bass...")
 	events.extend(decompose_stem(tmpl + "-B", 46, monophonic=True, pitch_range=("C0", "C6"), mult=3))
 	print("Decomposing Voice...")
-	events.extend(decompose_stem(tmpl + "-V", 73, monophonic=False, pitch_range=("C1", "C8"), tolerance=16, mult=1.5))
+	events.extend(decompose_stem(tmpl + "-V", 52, monophonic=False, pitch_range=("C1", "C8"), tolerance=16, mult=1.5))
 	# events.extend(decompose_stem(tmpl + "-G", 48, monophonic=True, pitch_range=("C2", "C7")))
 	print("Decomposing Others...")
 	events.extend(decompose_stem(tmpl + "-O", 46, monophonic=False, pitch_range=("C2", "C9"), tolerance=12, mult=2))
