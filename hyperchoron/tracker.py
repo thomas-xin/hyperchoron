@@ -786,8 +786,9 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 					else:
 						name = f"noteblock_{instrument}"
 				pitch = mod + fs4 - 12
+			# Get rid of instruments that don't exist
 			if name == "noteblock_iron_xylophone":
-				name = "noteblock_xylophone"
+				name = "noteblock_harp"
 			if name == "meowsynth":
 				pitch += 6
 			if name == "noteblock_didgeridoo":
