@@ -763,6 +763,9 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 				elif mat == "creeper_head":
 					name = "celeste_diamond"
 					mod += 12
+				elif mat == "skeleton_skull":
+					name = "skipshot"
+					mod += 12
 				elif mat == "obsidian":
 					name = "🪘"
 				else:
@@ -783,6 +786,8 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 					else:
 						name = f"noteblock_{instrument}"
 				pitch = mod + fs4 - 12
+			if name == "noteblock_iron_xylophone":
+				name = "noteblock_xylophone"
 			if name == "meowsynth":
 				pitch += 6
 			if name == "noteblock_didgeridoo":
