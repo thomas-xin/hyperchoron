@@ -277,10 +277,9 @@ def deconstruct(midi_events, speed_info, ctx=None):
 			event_timestamp = event[1]
 			curr_step = step_ms
 			time = event_timestamp * timescale
-			if latest_timestamp - time >= (curr_step / 3 * min(1, leaked_notes / allowed_leakage)):
+			if latest_timestamp - time >= (curr_step / 3 * (leaked_notes >= allowed_leakage)):
 				if event_timestamp > last_timestamp:
 					break
-				leaked_notes += 1
 				# Process all events at the current timestamp
 				mode = event[2]
 				match mode:
@@ -349,6 +348,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							active_notes[instrument].append(note)
 							active_nc += 1
 							loud = max(loud, velocity)
+						leaked_notes += 1
 					case "pitch_bend_c":
 						channel = int(event[3])
 						value = int(event[4])
