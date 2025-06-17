@@ -269,7 +269,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 	global_index = 0
 	curr_frac = round(step_ms)
 	leaked_notes = 0
-	allowed_leakage = 1
+	allowed_leakage = 16
 	low_precision = len(midi_events) > 262144
 	with progress as bar:
 		while global_index < len(midi_events):
@@ -277,7 +277,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 			event_timestamp = event[1]
 			curr_step = step_ms
 			time = event_timestamp * timescale
-			if latest_timestamp - time >= (curr_step / 3 * (leaked_notes >= allowed_leakage)):
+			if latest_timestamp - time >= curr_step / 3 * (leaked_notes >= allowed_leakage) - curr_step / 3:
 				if event_timestamp > last_timestamp:
 					break
 				# Process all events at the current timestamp
@@ -502,24 +502,24 @@ def deconstruct(midi_events, speed_info, ctx=None):
 					latest_timestamp = timestamp_approx
 				else:
 					latest_timestamp = timestamp
-				if bar:
-					bar.update(curr_step / 1000)
 				loud *= 0.5
+				allowed_leakage = (allowed_leakage - leaked_notes) * 2
 				leaked_notes = 0
-				allowed_leakage = 0
 				for i in range(global_index, len(midi_events)):
 					e = midi_events[i]
 					offs = latest_timestamp - e[1] * timescale
-					if offs >= 0:
+					if offs >= -curr_step / 3:
 						if e[2] != "note_on_c":
 							continue
-						if offs >= curr_step / 3:
+						if offs >= 0:
 							allowed_leakage += 2
 						else:
 							allowed_leakage += 1
 					else:
 						break
-				allowed_leakage = max(1, allowed_leakage / 2)
+				allowed_leakage = max(1, allowed_leakage + 1 >> 1)
+				if bar:
+					bar.update(curr_step / 1000)
 	while played_notes and not played_notes[-1]:
 		played_notes.pop(-1)
 	return played_notes, note_candidates, is_org, instrument_activities, speed_info
