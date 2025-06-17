@@ -1136,7 +1136,7 @@ def load_nbs(file):
 		[1, 0, "tempo", 1000 * 1000 / header.tempo],
 	]
 	print(header.tempo)
-	for i in range(13):
+	for i in range(len(midi_instrument_selection) - 1):
 		events.append([i + 2, 0, "program_c", i + 10, midi_instrument_selection[i]])
 	ticked = {}
 	for tick, chord in nbs:

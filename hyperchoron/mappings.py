@@ -17,6 +17,7 @@ material_map = [
 	["pumpkin", "pumpkin+", "amethyst_block", "clay", "clay+", "packed_ice+"],
 	["bamboo_planks", "bamboo_planks+", "emerald_block", "emerald_block+", "clay+", "gold_block+"],
 	["pumpkin", "pumpkin+", "emerald_block", "emerald_block+", "packed_ice", "packed_ice+"],
+	["bamboo_planks", "black_wool", "emerald_block", "emerald_block+", "gold_block", "gold_block+"],
 	None
 ]
 default_instruments = dict(
@@ -33,6 +34,7 @@ default_instruments = dict(
 	didgeridoo="Brass",					#10
 	u3="Saw Synth",						#11
 	u4="Octaves",						#12
+	u5="Overdrive Guitar",				#13
 	creeper="Drumset",					#-1
 )
 instrument_codelist = list(default_instruments.values())
@@ -105,6 +107,7 @@ nbs_names.update(dict(
 	u2=6,
 	u3=13,
 	u4=13,
+	u5=5,
 ))
 nbs_values.update({i: "creeper" for i in range(16, 32)})
 pitches = dict(
@@ -129,6 +132,7 @@ pitches = dict(
 	u2=36,
 	u3=24,
 	u4=24,
+	u5=12,
 )
 sustain_map = [
 	0,
@@ -144,13 +148,14 @@ sustain_map = [
 	1,
 	1,
 	1,
+	1,
 	0,
 ]
 instrument_mapping = [
 	 1, 1, 1, 4, 3, 3, 0, 1, # Piano
 	 5, 5, 5, 4, 4, 5, 5, 1, # CP
 	10, 1,11,12,10,11, 7, 3, # Organ
-	 0, 0, 0, 1, 1, 3,11, 7, # Guitar
+	 0, 0, 0, 1, 1,13,13, 7, # Guitar
 	 0, 0, 0, 0, 4, 4,11,10, # Bass
 	 7, 7, 7, 7, 3, 0, 0, 6, # Strings
 	 2, 2, 2, 2, 9, 9, 9,12, # Ensemble
@@ -178,19 +183,20 @@ midi_instrument_selection = [
 	56,
 	81,
 	55,
+	30,
 	-1,
 ]
 org_instrument_mapping = [
-	0, 0, 1, 3, 2, 2, 2, 3, 3, 7,
-	1, 2, 3, 3, 2, 2, 3, 7, 7, 7,
-	3, 3, 3, 3, 3, 3, 3, 7, 7, 7,
-	1, 1, 1, 7, 2, 2, 2, 3, 7, 7,
-	7, 3, 3, 3, 3, 3, 7, 2, 3, 2,
-	3, 7, 7, 7, 7, 7, 7, 2, 2, 3,
-	3, 3, 3, 3, 3, 7, 7, 7, 2, 7,
-	0, 1, 2, 3, 2, 3, 7, 5, 4, 5,
-	7, 3, 2, 1, 2, 7, 7, 7, 7, 7,
-	4, 2, 7, 7, 7, 7, 7, 3, 3, 3,
+	 0, 0, 1, 3, 2, 9, 9, 3, 3, 7,
+	 1, 2, 3, 3, 2, 2, 3, 7, 7, 7,
+	 3, 3, 3, 3, 3,13,13, 7, 7, 7,
+	 1, 1, 1, 7, 2, 2, 2, 3, 7, 7,
+	 7, 3, 3, 3, 3, 3, 7, 2, 3, 2,
+	 3, 7, 7, 7, 7, 7, 7,10, 2, 3,
+	12, 3, 3,12, 3, 7,11,11, 2, 7,
+	 0, 1, 2, 3, 2, 3, 7, 5, 4, 5,
+	 7, 3, 2, 1, 2, 7, 7, 7, 7, 7,
+	 4,10,10, 7, 7, 7, 7, 3, 3, 3,
 ]
 org_instrument_selection = [
 	1,
@@ -206,6 +212,7 @@ org_instrument_selection = [
 	57,
 	66,
 	60,
+	25,
 	-1,
 ]
 org_octave = 60
@@ -229,22 +236,24 @@ thirtydollar_names = [
 	"mariopaint_flower",
 	"meowsynth",
 	"mariopaint_car",
+	"🦴",
 	"noteblock_",
 ]
 thirtydollar_volumes = {
-	"stylophone": 0.75,
+	"stylophone": 0.875,
 	"fnf_up": 0.75,
 	"fnf_down": 0.75,
-	"🦴": 0.5,
+	"🦴": 0.75,
 	"mariopaint_flower": 0.8,
+	"mariopaint_car": 0.8,
 	"amogus_emergency": 0.8,
 }
 thirtydollar_unmap = {
 	"noteblock_banjo": (8, 0),
-	"stylophone": (7, -1 / 3, 0.75),
+	"stylophone": (7, -1 / 3, 0.875),
 	"meowsynth": (11, -6),
 	"fnf_up": (9, 0, 0.75),
-	"🦴": (11, -16, 0.5),
+	"🦴": (11, -16, 0.75),
 	"mariopaint_flower": (10, 0, 0.8),
 	"bong": (5, -13),
 	"🔔": (5, 22),
@@ -271,7 +280,7 @@ thirtydollar_unmap = {
 	"mariopaint_gameboy": (3, 0),
 	"mariopaint_swan": (12, 12),
 	"mariopaint_plane": (0, 0),
-	"mariopaint_car": (12, 0),
+	"mariopaint_car": (12, 0, 0.8),
 	"tab_sounds": (5, 18),
 	"choruskid": (9, 0),
 	"builttoscale": (1, -6),
@@ -283,7 +292,7 @@ thirtydollar_unmap = {
 	"YOU": (5, -5),
 	"terraria_guitar": (0, -6),
 	"terraria_axe": (0, -42),
-	"amogus_emergency": (3, 4 + 2 / 3, 0.8),
+	"amogus_emergency": (3, -7.5, 0.8),
 	"amongdrip": (11, -30),
 	"minecraft_bell": (5, -25),
 	"💡": (11, 14),

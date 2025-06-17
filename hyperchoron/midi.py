@@ -61,8 +61,8 @@ def get_step_speed(midi_events, ctx=None):
 	since_tempo = 0
 	has_bends = False
 	for event in midi_events:
-		mode = event[2].strip().casefold()
-		timestamp = int(event[1])
+		mode = event[2]
+		timestamp = event[1]
 		if mode == "note_on_c":
 			if int(event[5]) == 1:
 				continue
@@ -118,7 +118,6 @@ def preprocess(midi_events, ctx):
 	title = None
 	copyright = None
 	is_org = False
-	midi_events = [(int(e[0]), int(e[1]), e[2].strip().casefold(), *e[3:]) for e in midi_events]
 	for event in midi_events[:64]:
 		mode = event[2]
 		match mode:
@@ -139,7 +138,7 @@ def preprocess(midi_events, ctx):
 	if title and title.startswith("Organya Symphony No. 1") and copyright == "(C) AUTHOR xxxxx, 2014":
 		print("Using Org mapping...")
 		is_org = True
-	channel_stats = {}
+	channel_stats = ChannelStats()
 	note_lengths = {}
 	temp_active = {}
 	discard = set()
@@ -156,7 +155,7 @@ def preprocess(midi_events, ctx):
 				p = int(e[4])
 				h = (ti, c, p)
 				velocity = int(e[5])
-				volume = velocity * channel_stats.setdefault(c, {}).get("volume", 1)
+				volume = velocity * channel_stats[c].volume
 				max_vel = max(max_vel, volume)
 				if velocity < 1:
 					try:
@@ -198,7 +197,7 @@ def preprocess(midi_events, ctx):
 					c = int(e[3])
 					value = int(e[5])
 					volume = value / 127
-					channel_stats.setdefault(c, {})["volume"] = volume
+					channel_stats[c].volume = volume
 	for k, v in temp_active.items():
 		for t in v:
 			h2 = (t, *k)
@@ -224,35 +223,57 @@ class TransportNote:
 
 NoteSegment = namedtuple("NoteSegment", ("instrument", "pitch", "priority", "long", "velocity", "panning"))
 
+class ChannelStats:
+	__slots__ = ("c")
+	@dataclass(slots=True)
+	class StatTypes:
+		volume: float
+		bend: float
+		pan: float
+		bend_range: float
+
+	def __init__(self):
+		self.c = []
+
+	def __getitem__(self, i):
+		try:
+			return self.c[i]
+		except IndexError:
+			pass
+		while i >= len(self.c):
+			self.c.append(self.StatTypes(1, 0, 0, 2))
+		return self.c[i]
+
 def deconstruct(midi_events, speed_info, ctx=None):
 	played_notes = []
-	pitchbend_ranges = {}
 	max_pitch = 101 if not ctx.mc_legal else 84
 	active_notes = {i: [] for i in range(len(material_map))}
 	active_notes[-1] = []
+	active_nc = 0
 	instrument_activities = {}
-	timestamp_approx = timestamp = 0
+	latest_timestamp = timestamp_approx = timestamp = 0
 	loud = 0
 	note_candidates = 0
 	_orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, orig_tempo = speed_info
 	step_ms = orig_step_ms
 	midi_events, note_lengths, max_vel, last_timestamp, is_org = preprocess(midi_events, ctx=ctx)
 	instrument_map = {}
-	channel_stats = {}
+	channel_stats = ChannelStats()
 	print("Processing quantised notes...")
 	bar_format = "{l_bar}{bar}| {n:.3g}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
 	progress = tqdm.tqdm(total=ceil(last_timestamp * real_ms_per_clock / scale / 1000), bar_format=bar_format) if tqdm else contextlib.nullcontext()
 	global_index = 0
 	curr_frac = round(step_ms)
+	low_precision = len(midi_events) > 262144
 	with progress as bar:
 		while global_index < len(midi_events):
 			event = midi_events[global_index]
 			event_timestamp = event[1]
-			if event_timestamp > last_timestamp:
-				break
 			curr_step = step_ms
 			time = event_timestamp * real_ms_per_clock / scale
-			if time - curr_step / 3 < timestamp:
+			if time - curr_step / 3 < latest_timestamp:
+				if event_timestamp > last_timestamp:
+					break
 				# Process all events at the current timestamp
 				mode = event[2]
 				match mode:
@@ -274,7 +295,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						panning = 0
 						if velocity == 0:
 							pass
-						elif velocity < loud * 0.0625 and sum(map(len, active_notes.items())) >= 48:
+						elif velocity < loud * 0.0625 and active_nc >= 48:
 							note_candidates += 1
 						else:
 							note_candidates += 1
@@ -293,7 +314,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								priority = event[6]
 							if length == 0:
 								length = 0
-								if sustain or pitchbend_ranges.get(channel):
+								if sustain or channel_stats[channel]:
 									track = int(event[0])
 									h = (event_timestamp, track, channel, pitch)
 									try:
@@ -319,16 +340,16 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								offset=0,
 							)
 							active_notes[instrument].append(note)
+							active_nc += 1
 							loud = max(loud, velocity)
 					case "pitch_bend_c":
 						channel = int(event[3])
 						value = int(event[4])
-						offset = round_min(round((value - 8192) / 8192 * pitchbend_ranges.get(channel, 2) * 6) / 6)
-						prev = channel_stats.get(channel, {}).get("bend", 0)
+						offset = round_min(round((value - 8192) / 8192 * channel_stats[channel].bend_range * 6) / 6)
+						prev = channel_stats[channel].bend
 						if offset != prev:
 							note_candidates += 1
-							pitchbend_ranges.setdefault(channel, 2)
-							channel_stats.setdefault(channel, {})["bend"] = offset
+							channel_stats[channel].bend = offset
 							if round(offset) != round(prev) and channel in instrument_map:
 								instrument = instrument_map[channel]
 								for note in active_notes[instrument]:
@@ -338,12 +359,12 @@ def deconstruct(midi_events, speed_info, ctx=None):
 										note.sustain = True
 					case "control_c" if int(event[4]) == 6:
 						channel = int(event[3])
-						pitchbend_ranges[channel] = int(event[5])
+						channel_stats[channel].bend_range = int(event[5])
 					case "control_c" if int(event[4]) == 7:
 						channel = int(event[3])
 						value = int(event[5])
 						volume = value / 127
-						orig_volume = channel_stats.setdefault(channel, {}).get("volume", 1)
+						orig_volume = channel_stats[channel].volume
 						if volume >= orig_volume * 1.1:
 							if note_candidates:
 								note_candidates += 1
@@ -352,12 +373,12 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								for note in active_notes[instrument]:
 									if note.channel == channel:
 										note.priority = max(note.priority, 1)
-						channel_stats[channel]["volume"] = volume
+						channel_stats[channel].volume = volume
 					case "control_c" if int(event[4]) == 10:
 						channel = int(event[3])
 						value = int(event[5])
 						pan = max(-1, (value - 64) / 63)
-						channel_stats.setdefault(channel, {})["pan"] = pan
+						channel_stats[channel].pan = pan
 					case "tempo":
 						tempo = int(event[3])
 						ratio = tempo / orig_tempo
@@ -370,8 +391,15 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							r2 = fractions.Fraction(1 / ratio).limit_denominator(8)
 							ratio = 1 / r2
 						new_step = orig_step_ms / ratio
-						step_ms = int(new_step) if new_step.is_integer() else new_step
-						curr_frac = step_ms if isinstance(step_ms, (int, float)) else float(step_ms)
+						if isinstance(new_step, fractions.Fraction):
+							temp = float(new_step)
+							if new_step == temp:
+								new_step = temp
+						if isinstance(new_step, float):
+							if new_step.is_integer():
+								new_step = int(new_step)
+						step_ms = new_step
+						curr_frac = float(step_ms) if isinstance(step_ms, fractions.Fraction) else step_ms
 						if not note_candidates:
 							timestamp_approx = timestamp = round(time)
 				global_index += 1
@@ -383,7 +411,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				poly = 0
 				for notes in active_notes.values():
 					for note in notes:
-						note.volume = channel_stats.get(note.channel, {}).get("volume", 1) * note.velocity / max_vel * 127 * ctx.volume
+						note.volume = channel_stats[note.channel].volume * note.velocity / max_vel * 127 * ctx.volume
 						if note.volume > max_volume:
 							max_volume = note.volume
 						total_value += note.volume * min(4, note.length)
@@ -394,13 +422,13 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						note = notes[i]
 						volume = note.volume
 						length = note.length
-						panning = note.panning + channel_stats.get(note.channel, {}).get("pan", 0)
+						panning = note.panning + channel_stats[note.channel].pan
 						end = note.start + note.length
 						sms = curr_frac
 						needs_sustain = note.sustain
 						long = length >= sms * 2
 						if note.start + sms * 3 / 4 > timestamp_approx or needs_sustain and timestamp_approx + sms <= end:
-							pitch = channel_stats.get(note.channel, {}).get("bend", 0) + note.pitch
+							pitch = channel_stats[note.channel].bend + note.pitch
 							normalised = pitch + ctx.transpose - fs1
 							if normalised > max_pitch:
 								pitch = max_pitch - ctx.transpose + fs1
@@ -426,6 +454,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							long_notes += long
 						if timestamp_approx >= end or len(notes) >= 64 and not needs_sustain:
 							notes.pop(i)
+							active_nc -= 1
 						else:
 							note.priority = 0 if note.sustain == 1 else -1
 							if note.sustain == 2 and (length < sms * 3 or (timestamp_approx - note.start) % (sms * 2) >= sms):
@@ -462,6 +491,10 @@ def deconstruct(midi_events, speed_info, ctx=None):
 					timestamp_approx = timestamp = int(timestamp)
 				else:
 					timestamp_approx = float(timestamp)
+				if low_precision:
+					latest_timestamp = timestamp_approx
+				else:
+					latest_timestamp = timestamp
 				if bar:
 					bar.update(curr_step / 1000)
 				loud *= 0.5

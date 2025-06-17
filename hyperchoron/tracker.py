@@ -658,7 +658,7 @@ def load_thirtydollar(file):
 		[0, 0, "header", 1, 9 + 1, 1],
 		[1, 0, "tempo", 1000 * 1000 / (300 / 60)],
 	]
-	for i in range(13):
+	for i in range(len(midi_instrument_selection) - 1):
 		events.append([i + 2, 0, "program_c", i + 10, midi_instrument_selection[i]])
 	tick = 0
 	vm = 100
@@ -802,6 +802,8 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 				p -= 12
 			elif name == "meowsynth":
 				p += 6
+			elif name == "🦴":
+				p += 16
 			elif name == "noteblock_didgeridoo":
 				name = "noteblock_harp"
 				p -= 24
@@ -820,9 +822,12 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 			elif name == "meowsynth" and p < -12:
 				name = "🦴"
 				p += 24 - 8 - 6
+			elif name == "🦴" and p >= 12:
+				name = "amogus_emergency"
+				p -= 16 - 7.5
 			elif name == "noteblock_bit" and p >= 24:
 				name = "amogus_emergency"
-				p -= 4 + 2 / 3
+				p -= -7.5
 			if name == "stylophone":
 				p += 1 / 3
 			text = name
