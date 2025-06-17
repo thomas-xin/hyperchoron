@@ -2,7 +2,7 @@ from collections import deque
 import datetime
 import fractions
 import itertools
-from math import ceil, isqrt, sqrt, log2, gcd
+from math import ceil, isqrt, sqrt, log2, log10, gcd
 from operator import itemgetter
 import os
 from .mappings import note_names
@@ -23,6 +23,16 @@ def round_min(x):
 	if x == y:
 		return y
 	return x
+
+def log2lin(x, min_db=-40):
+	if x <= 0:
+		return 0
+	return 10 ** ((x - 1) * -min_db / 20)
+
+def lin2log(y, min_db=-40):
+	if y <= 0:
+		return 0
+	return 1 + 20 * log10(y) / (-min_db)
 
 # Thank you deepseek-r1 for optimisation
 def approximate_gcd(arr, min_value=8):

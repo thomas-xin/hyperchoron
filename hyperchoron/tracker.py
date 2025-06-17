@@ -12,7 +12,7 @@ from .mappings import (
 	percussion_mats, material_map, pitches, default_instruments,
 	c4, c1, fs1, fs4,
 )
-from .util import round_min, create_reader, transport_note_priority, temp_dir, sample_rate
+from .util import round_min, log2lin, lin2log, create_reader, transport_note_priority, temp_dir, sample_rate
 
 
 @dataclass(slots=True)
@@ -727,7 +727,7 @@ def load_thirtydollar(file):
 						tick += int(rep)
 						continue
 					for i in range(int(rep)):
-						note_event = [int(ins) + 2, tick, "note_on_c", int(ins) + 10, pitch_override, (float(vm) / 100 * float(velocity) / 100) ** (2 / 3) / float(vol) * 127, 1, 1]
+						note_event = [int(ins) + 2, tick, "note_on_c", int(ins) + 10, pitch_override, lin2log(float(vm) / 100 * float(velocity) / 100) / float(vol) * 127, 1, 1]
 						events.append(note_event)
 						tick += 1
 	events.sort(key=lambda e: e[1])
@@ -833,7 +833,7 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 			text = name
 			if p != 0:
 				text += f"@{round_min(round(p, 2))}"
-			v = (vel / 127) ** 1.5 * 100
+			v = log2lin(vel / 127) * 100
 			if priority == 0:
 				v *= min(1, (2 / 3) ** (50 / wait))
 			v *= thirtydollar_volumes.get(name, 1)
