@@ -277,9 +277,10 @@ def deconstruct(midi_events, speed_info, ctx=None):
 			event_timestamp = event[1]
 			curr_step = step_ms
 			time = event_timestamp * timescale
-			if latest_timestamp - time >= (curr_step / 3 * leaked_notes / allowed_leakage):
+			if latest_timestamp - time >= (curr_step / 3 * min(1, leaked_notes / allowed_leakage)):
 				if event_timestamp > last_timestamp:
 					break
+				leaked_notes += 1
 				# Process all events at the current timestamp
 				mode = event[2]
 				match mode:
@@ -509,10 +510,10 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				for i in range(global_index, len(midi_events)):
 					e = midi_events[i]
 					offs = latest_timestamp - e[1] * timescale
-					if offs >= curr_step / 3:
+					if offs >= 0:
 						if e[2] != "note_on_c":
 							continue
-						if offs >= curr_step:
+						if offs >= curr_step / 3:
 							allowed_leakage += 2
 						else:
 							allowed_leakage += 1
