@@ -18,7 +18,7 @@ from .mappings import (
 	instrument_codelist, fixed_instruments, default_instruments,
 	fs1,
 )
-from .util import round_min, base_path, transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
+from .util import round_min, log2lin, lin2log, base_path, transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 
 def nbt_from_dict(d):
@@ -714,7 +714,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				base, pitch = get_note_mat(note, odd=tick & 1)
 				pitch = round(pitch)
 				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
-				x = round(max(0, 1 - volume / 100) ** 0.75 * 0.9 * attenuation_multiplier / 3) * (3 if panning > 0 else -3)
+				x = round(max(0, 1 - log2lin(volume / 100)) * (attenuation_multiplier / 3 - 1)) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
 				if not backwards and segment >= half_segments - 2 and primary_width >= 12:
 					if x <= -primary_width / 2:
@@ -798,7 +798,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					volume *= 1.4
 				else:
 					volume *= 0.8
-				x = round(max(0, 1 - volume / 100) ** 0.75 * 0.9 * attenuation_multiplier / 3) * (3 if panning > 0 else -3)
+				x = round(max(0, 1 - log2lin(volume / 100)) * (attenuation_multiplier / 3 - 1)) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
 				if not backwards and segment >= half_segments - 2 and primary_width >= 12:
 					if x <= -primary_width / 2:
@@ -1157,7 +1157,7 @@ def load_nbs(file):
 			bucket = (note.layer, pitch)
 			if note.panning not in range(-1, 2):
 				events.append([ins + 2, tick, "control_c", ins + 10, 10, note.panning / 100 * 63 + 64])
-			volume = round(note.velocity * 127 / 100)
+			volume = round(lin2log(note.velocity * 127 / 100))
 			if note.panning & 1:
 				if bucket in ticked:
 					prev = ticked[bucket]
@@ -1219,7 +1219,7 @@ def save_nbs(transport, output, speed_info, ctx):
 			raw_key = round(pitch)
 			kwargs = {}
 			if volume != 100:
-				kwargs["velocity"] = round(volume)
+				kwargs["velocity"] = round(log2lin(volume / 100) * 100)
 			panning = int(note[5] * 49) * 2 + (0 if note[2] > 0 else 1 if i & 1 else -1)
 			if panning != 0:
 				kwargs["panning"] = panning
