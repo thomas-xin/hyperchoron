@@ -751,56 +751,78 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 			name = thirtydollar_names[itype]
 			if name.startswith("noteblock_"):
 				mat, mod = get_note_mat_ex(note, odd=i & 1)
-				if mat == "PLACEHOLDER":
-					continue
-				if mat == "cobblestone":
-					name = "🥁"
-				elif mat == "black_concrete_powder":
-					name = "hammer"
-				elif mat == "blue_stained_glass":
-					name = "rdclap"
-					mod += 12
-				elif mat == "creeper_head":
-					name = "celeste_diamond"
-					mod += 12
-				elif mat == "skeleton_skull":
-					name = "skipshot"
-					mod += 12
-				elif mat == "obsidian":
-					name = "🪘"
-				else:
-					instrument = instrument_names[mat]
-					if itype != -1:
-						if not ctx.mc_legal:
-							instrument2 = fixed_instruments[instrument_codelist[itype]]
-							pitch2 = note[1] - pitches[instrument2] - fs1
-							if pitch2 in range(-12, 48):
-								mod = pitch2
-								instrument = instrument2
-							else:
-								pitch2 = note[1] - pitches[instrument] - fs1
-								if pitch2 in range(-33, 55):
+				match mat:
+					case  "PLACEHOLDER":
+						continue
+					case "cobblestone":
+						name = "🥁"
+					case "black_concrete_powder":
+						name = "hammer"
+					case "blue_stained_glass":
+						name = "rdclap"
+						mod += 12
+					case "creeper_head":
+						name = "celeste_diamond"
+						mod += 12
+					case "skeleton_skull":
+						name = "celeste_spring"
+						mod += 12
+					case "obsidian":
+						name = "🪘"
+					case "dropper":
+						name = "hitmarker"
+						mod += 12
+					case _ if "fence_gate" in mat or "trapdoor" in mat:
+						name = "skipshot"
+						mod += 12
+					case _:
+						instrument = instrument_names[mat]
+						if itype != -1:
+							if not ctx.mc_legal:
+								instrument2 = fixed_instruments[instrument_codelist[itype]]
+								pitch2 = note[1] - pitches[instrument2] - fs1
+								if pitch2 in range(-12, 48):
 									mod = pitch2
-					if instrument in nbs2thirtydollar:
-						name = nbs2thirtydollar[instrument]
-					else:
-						name = f"noteblock_{instrument}"
+									instrument = instrument2
+								else:
+									pitch2 = note[1] - pitches[instrument] - fs1
+									if pitch2 in range(-33, 55):
+										mod = pitch2
+						if instrument in nbs2thirtydollar:
+							name = nbs2thirtydollar[instrument]
+						else:
+							name = f"noteblock_{instrument}"
 				pitch = mod + fs4 - 12
+			p = pitch - fs4
 			# Get rid of instruments that don't exist
 			if name == "noteblock_iron_xylophone":
 				name = "noteblock_harp"
-			if name == "meowsynth":
-				pitch += 6
-			if name == "noteblock_didgeridoo":
-				name = "fnf_down"
-				pitch -= 12
-			p = pitch - fs4
+			elif name == "noteblock_cowbell":
+				name = "noteblock_xylophone"
+				p -= 12
+			elif name == "meowsynth":
+				p += 6
+			elif name == "noteblock_didgeridoo":
+				name = "noteblock_harp"
+				p -= 24
+				if p < -24:
+					name = "noteblock_bass"
+					p += 24
 			if name in ("stylophone", "fnf_up", "mariopaint_flower") and p < -12:
 				name = "fnf_down"
-				p += 24 - 12
+				p += 12
+				if p < -12:
+					name = "noteblock_harp"
+					p -= 12
+					if p < -24:
+						name = "noteblock_bass"
+						p += 24
 			elif name == "meowsynth" and p < -12:
 				name = "🦴"
-				pitch += 24 - 8 - 6
+				p += 24 - 8 - 6
+			elif name == "noteblock_bit" and p >= 24:
+				name = "amogus_emergency"
+				p -= 4 + 2 / 3
 			if name == "stylophone":
 				p += 1 / 3
 			text = name
