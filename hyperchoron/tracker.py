@@ -835,7 +835,7 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 				text += f"@{round_min(round(p, 2))}"
 			v = log2lin(vel / 127) * 100
 			if priority == 0:
-				v *= min(1, (2 / 3) ** (50 / wait))
+				v *= min(1, 0.9 ** (50 / wait))
 			v *= thirtydollar_volumes.get(name, 1)
 			v = round(v)
 			if v != 0:
