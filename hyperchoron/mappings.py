@@ -13,16 +13,16 @@ material_map = [
 	["netherrack", "netherrack+", "red_stained_glass", "red_stained_glass+", "red_sand", "red_sand+"],
 	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "gold_block", "gold_block+"],
 	["bamboo_planks", "black_wool", "hay_block", "hay_block+", "gold_block", "gold_block+"],
+	["pumpkin", "pumpkin+", "black_wool+", "clay", "clay+", "packed_ice+"],
 	["pumpkin", "pumpkin+", "amethyst_block", "clay", "clay+", "packed_ice+"],
-	["pumpkin", "pumpkin+", "amethyst_block", "clay", "clay+", "packed_ice+"],
-	["bamboo_planks", "bamboo_planks+", "emerald_block", "emerald_block+", "clay+", "gold_block+"],
+	["pumpkin", "pumpkin+", "emerald_block", "clay", "clay+", "gold_block+"],
 	["pumpkin", "pumpkin+", "emerald_block", "emerald_block+", "packed_ice", "packed_ice+"],
 	["bamboo_planks", "black_wool", "emerald_block", "emerald_block+", "gold_block", "gold_block+"],
 	None
 ]
 default_instruments = dict(
 	harp="Plucked",						# 0
-	pling="Keyboard",					# 1
+	pling="Piano",						# 1
 	flute="Wind",						# 2
 	bit="Square Synth",					# 3
 	iron_xylophone="Pitched Percussion",# 4
@@ -33,7 +33,7 @@ default_instruments = dict(
 	u2="Voice",							# 9
 	didgeridoo="Brass",					#10
 	u3="Saw Synth",						#11
-	u4="Octaves",						#12
+	u4="Organ",							#12
 	u5="Overdrive Guitar",				#13
 	creeper="Drumset",					#-1
 )
