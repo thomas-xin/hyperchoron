@@ -3,6 +3,7 @@ import datetime
 import fractions
 import itertools
 from math import ceil, isqrt, sqrt, log2, gcd
+from operator import itemgetter
 import os
 from .mappings import note_names
 
@@ -105,9 +106,9 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 			if inclusions < len(timestamp_collection) * req:
 				print("Discarding tempo...")
 				speed = 1
+				use_exact = True
 			else:
 				speed = speed2
-			use_exact = True
 		elif speed > min_value * 1.25:
 			# print("Finding closest speed...", exclusions, len(timestamps))
 			div = round(speed / min_value - 0.25)
@@ -195,7 +196,7 @@ def merge_imports(inputs, ctx):
 			all_events = list(itertools.chain.from_iterable(event_list))
 		else:
 			all_events = event_list[0]
-		all_events.sort(key=lambda e: e[1])
+		all_events.sort(key=itemgetter(1))
 		speed_info = midi.get_step_speed(all_events, ctx=ctx)
 		for midi_events in event_list:
 			notes, nc, is_org, instrument_activities2, speed_info = midi.deconstruct(midi_events, speed_info, ctx=ctx)

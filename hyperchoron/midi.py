@@ -264,17 +264,20 @@ def deconstruct(midi_events, speed_info, ctx=None):
 	channel_stats = ChannelStats()
 	print("Processing quantised notes...")
 	bar_format = "{l_bar}{bar}| {n:.3g}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
-	progress = tqdm.tqdm(total=ceil(last_timestamp * real_ms_per_clock / scale / 1000), bar_format=bar_format) if tqdm else contextlib.nullcontext()
+	timescale = real_ms_per_clock / scale
+	progress = tqdm.tqdm(total=ceil(last_timestamp * timescale / 1000), bar_format=bar_format) if tqdm else contextlib.nullcontext()
 	global_index = 0
 	curr_frac = round(step_ms)
+	leaked_notes = 0
+	allowed_leakage = 1
 	low_precision = len(midi_events) > 262144
 	with progress as bar:
 		while global_index < len(midi_events):
 			event = midi_events[global_index]
 			event_timestamp = event[1]
 			curr_step = step_ms
-			time = event_timestamp * real_ms_per_clock / scale
-			if time - curr_step / 3 < latest_timestamp:
+			time = event_timestamp * timescale
+			if latest_timestamp - time >= (curr_step / 3 * (1 - leaked_notes / allowed_leakage)):
 				if event_timestamp > last_timestamp:
 					break
 				# Process all events at the current timestamp
@@ -313,7 +316,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 									if len(event) > 8:
 										panning = event[8]
 									length_ticks = event[7]
-									length = (length_ticks + 0.25) * real_ms_per_clock / scale
+									length = (length_ticks + 0.25) * timescale
 								priority = event[6]
 							if length == 0:
 								length = 0
@@ -321,7 +324,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 									track = int(event[0])
 									h = (event_timestamp, track, channel, pitch)
 									try:
-										length = (note_lengths[h] + 0.25) * real_ms_per_clock / scale
+										length = (note_lengths[h] + 0.25) * timescale
 									except KeyError:
 										length = 0
 								min_sustain = curr_frac * 2.25 if sustain == 2 else curr_frac * 1.25
@@ -501,6 +504,21 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				if bar:
 					bar.update(curr_step / 1000)
 				loud *= 0.5
+				leaked_notes = 0
+				allowed_leakage = 0
+				for i in range(global_index, len(midi_events)):
+					e = midi_events[i]
+					offs = latest_timestamp - e[1] * timescale
+					if offs >= curr_step / 3:
+						if e[2] != "note_on_c":
+							continue
+						if offs >= curr_step * 2 / 3:
+							allowed_leakage += 2
+						else:
+							allowed_leakage += 1
+					else:
+						break
+				allowed_leakage = max(1, allowed_leakage / 2)
 	while played_notes and not played_notes[-1]:
 		played_notes.pop(-1)
 	return played_notes, note_candidates, is_org, instrument_activities, speed_info

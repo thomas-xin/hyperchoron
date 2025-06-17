@@ -141,6 +141,7 @@ def get_note_mat(note, odd=False):
 
 def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=None):
 	base, pitch = get_note_mat(note, odd=odd)
+	assert isinstance(pitch, int), "Finetune not supported in vanilla!"
 	x, y, z = positioning
 	coords = [(x, y - 1, z), (x, y, z), (x, y + 1, z)]
 	if replace and base in replace:
@@ -701,7 +702,8 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 
 			def add_note(note, tick):
 				nonlocal main, nc
-				pitch = round(note[1])
+				note = (note[0], round(note[1]), *note[2:])
+				pitch = note[1]
 				note_hash = note[0] ^ pitch // 36
 				panning = note[5]
 				volume = note[4]
