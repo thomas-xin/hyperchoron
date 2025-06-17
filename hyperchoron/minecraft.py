@@ -708,11 +708,10 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				panning = note[5]
 				volume = note[4]
 				if note[2] <= 0:
-					volume *= 2 / 3
+					volume *= 0.9
 				if panning == 0:
 					panning = 1 if note_hash & 1 else -1
 				base, pitch = get_note_mat(note, odd=tick & 1)
-				pitch = round(pitch)
 				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
 				x = round(max(0, 1 - log2lin(volume / 100)) * (attenuation_multiplier / 3 - 1)) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
@@ -795,7 +794,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				swapped = False
 				if half:
 					volume = min(volume, 100)
-					volume *= 1.4
+					volume *= 1.2
 				else:
 					volume *= 0.8
 				x = round(max(0, 1 - log2lin(volume / 100)) * (attenuation_multiplier / 3 - 1)) * (3 if panning > 0 else -3)
@@ -1215,7 +1214,7 @@ def save_nbs(transport, output, speed_info, ctx):
 				current_poly[ins] = 1
 			volume = note[4] / 127 * 100
 			if note[2] <= 0:
-				volume *= min(1, (2 / 3) ** (tempo / 20))
+				volume *= min(1, 0.9 ** (tempo / 20))
 			raw_key = round(pitch)
 			kwargs = {}
 			if volume != 100:
