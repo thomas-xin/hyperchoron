@@ -18,7 +18,7 @@ from .mappings import (
 	material_map, sustain_map, instrument_codelist,
 	fs1, c_1,
 )
-from .util import round_min, sync_tempo, transport_note_priority, estimate_filesize, DEFAULT_NAME, DEFAULT_DESCRIPTION
+from .util import round_min, log2lin, lin2log, sync_tempo, transport_note_priority, estimate_filesize, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 if os.name == "nt" and os.path.exists("Midicsv.exe") and os.path.exists("Csvmidi.exe"):
 	use_py_midicsv = False
@@ -451,12 +451,12 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							try:
 								temp = ticked[bucket]
 							except KeyError:
-								temp = ticked[bucket] = [priority, long, volume ** 2, panning]
+								temp = ticked[bucket] = [priority, long, log2lin(volume / 127) ** 2, panning]
 							else:
 								temp[0] = max(temp[0], priority)
 								temp[1] |= long
 								temp[3] = temp[3] if temp[2] > volume ** 2 else panning
-								temp[2] = temp[2] + volume ** 2
+								temp[2] = temp[2] + log2lin(volume / 127) ** 2
 							long_notes += long
 						if timestamp_approx >= end or len(notes) >= 64 and not needs_sustain:
 							notes.pop(i)
@@ -473,9 +473,9 @@ def deconstruct(midi_events, speed_info, ctx=None):
 					instrument, pitch = k
 					priority, long, volume, pan = v
 					# After the per-note formula is applied, the result of multiple notes quantised into one will have a volume equal to the root mean square.
-					volume = sqrt(volume)
-					count = max(1, int(volume // 127))
-					vel = max(1, min(127, round(volume / count)))
+					volume = lin2log(sqrt(volume))
+					count = max(1, int(volume))
+					vel = max(1, min(127, round(volume / count * 127)))
 					block = NoteSegment(instrument, pitch, priority, long, vel, pan)
 					for w in range(count):
 						beat.append(block)
