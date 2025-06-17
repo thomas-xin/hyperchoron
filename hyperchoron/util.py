@@ -169,7 +169,8 @@ def merge_imports(inputs, ctx):
 	note_candidates = 0
 	for data in inputs:
 		if isinstance(data, list):
-			event_list.append(data)
+			midi_events = [(int(e[0]), int(e[1]), e[2].strip().casefold(), *e[3:]) for e in data]
+			event_list.append(midi_events)
 		else:
 			for i, x in enumerate(data.transport):
 				if i >= len(transport):
@@ -184,7 +185,7 @@ def merge_imports(inputs, ctx):
 			all_events = list(itertools.chain.from_iterable(event_list))
 		else:
 			all_events = event_list[0]
-		all_events.sort(key=lambda e: int(e[1]))
+		all_events.sort(key=lambda e: e[1])
 		speed_info = midi.get_step_speed(all_events, ctx=ctx)
 		for midi_events in event_list:
 			notes, nc, is_org, instrument_activities2, speed_info = midi.deconstruct(midi_events, speed_info, ctx=ctx)
