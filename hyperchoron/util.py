@@ -137,6 +137,16 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 	print("Detected speed scale:", milliseconds_per_clock, real_ms_per_clock, speed, step_ms, orig_tempo)
 	return milliseconds_per_clock, real_ms_per_clock, speed, step_ms, orig_tempo
 
+def estimate_filesize(file):
+	if isinstance(file, str):
+		return os.path.getsize(file)
+	orig = file.tell()
+	file.seek(0, 2)
+	try:
+		return file.tell()
+	finally:
+		file.seek(orig)
+
 def create_reader(file):
 	def read(offset, length, decode=True):
 		file.seek(offset)

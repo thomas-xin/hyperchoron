@@ -5,10 +5,6 @@ import fractions
 from math import ceil, sqrt
 import os
 from types import SimpleNamespace
-if os.name == "nt" and os.path.exists("Midicsv.exe") and os.path.exists("Csvmidi.exe"):
-	py_midicsv = None
-else:
-	import py_midicsv
 try:
 	import tqdm
 except ImportError:
@@ -22,11 +18,17 @@ from .mappings import (
 	material_map, sustain_map, instrument_codelist,
 	fs1, c_1,
 )
-from .util import round_min, sync_tempo, transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
+from .util import round_min, sync_tempo, transport_note_priority, estimate_filesize, DEFAULT_NAME, DEFAULT_DESCRIPTION
+
+if os.name == "nt" and os.path.exists("Midicsv.exe") and os.path.exists("Csvmidi.exe"):
+	use_py_midicsv = False
+else:
+	use_py_midicsv = True
 
 
 def midi2csv(file):
-	if py_midicsv:
+	if use_py_midicsv or estimate_filesize(file) <= 65536:
+		import py_midicsv
 		csv_list = py_midicsv.midi_to_csv(file)
 	else:
 		import subprocess
@@ -38,7 +40,8 @@ def midi2csv(file):
 			csv_list = p.communicate(b)[0].decode("utf-8", "replace").splitlines()
 	return csv_list
 def csv2midi(file, output):
-	if py_midicsv:
+	if use_py_midicsv or estimate_filesize(file) <= 65536:
+		import py_midicsv
 		midi = py_midicsv.csv_to_midi(file)
 		with open("example_converted.mid", "wb") as f:
 			writer = py_midicsv.FileWriter(f)
