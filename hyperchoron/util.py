@@ -117,8 +117,9 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 				print("Discarding tempo...")
 				speed = 1
 				use_exact = True
-			else:
+			elif not ctx.mc_legal:
 				speed = speed2
+				use_exact = True
 		elif speed > min_value * 1.25:
 			# print("Finding closest speed...", exclusions, len(timestamps))
 			div = round(speed / min_value - 0.25)
