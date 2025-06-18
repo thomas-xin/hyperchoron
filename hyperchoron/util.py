@@ -1,4 +1,5 @@
-from collections import deque
+from collections import deque, namedtuple
+import csv
 import datetime
 import fractions
 import itertools
@@ -14,6 +15,7 @@ base_path = __file__.replace("\\", "/").rsplit("/", 1)[0] + "/"
 temp_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/temp/"
 if not os.path.exists(temp_dir):
 	os.mkdir(temp_dir)
+csv_reader = type(csv.reader([]))
 
 def round_min(x):
 	try:
@@ -150,6 +152,8 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 	return milliseconds_per_clock, real_ms_per_clock, speed, step_ms, orig_tempo
 
 def estimate_filesize(file):
+	if isinstance(file, (list, tuple, deque)):
+		return len(file)
 	if isinstance(file, str):
 		return os.path.getsize(file)
 	orig = file.tell()
@@ -183,6 +187,136 @@ def merge_activities(a1, a2):
 				a1[k] = v
 	return a1
 
+HEADER = 0xff
+TEMPO = 0x51
+TITLE_T = 0x04
+COPYRIGHT_T = 0x02
+
+NOTE_OFF_C = 0x8
+NOTE_ON_C = 0x9
+POLY_AFTERTOUCH_C = 0xA
+CONTROL_C = 0xB
+PROGRAM_C = 0xC
+CHANNEL_AFTERTOUCH_C = 0xD
+PITCH_BEND_C = 0xE
+
+event_dict = dict(
+	header=HEADER,
+	tempo=TEMPO,
+	title_t=TITLE_T,
+	copyright_t=COPYRIGHT_T,
+
+	note_on_c=NOTE_ON_C,
+	note_off_c=NOTE_OFF_C,
+	poly_aftertouch_c=POLY_AFTERTOUCH_C,
+	control_c=CONTROL_C,
+	program_c=PROGRAM_C,
+	channel_aftertouch_c=CHANNEL_AFTERTOUCH_C,
+	pitch_bend_c=PITCH_BEND_C,
+)
+MIDIEvents = namedtuple("MIDIEvents", tuple(t.upper() for t in event_dict))
+event_types = MIDIEvents(*event_dict.values())
+
+# from libmidi.types.messages import meta  # noqa: E402
+# _orig = meta.BaseMessageMetaText.__dict__['from_bytes'].__func__
+
+# def _mv_friendly_from_bytes(cls, data):
+# 	if not isinstance(data, (bytes, bytearray)):
+# 		data = bytes(data)
+# 	msg, rem = _orig(cls, data)
+# 	return msg, rem
+
+# meta.BaseMessageMetaText.from_bytes = classmethod(_mv_friendly_from_bytes)
+
+# try:
+# 	from libmidi.types.messages.channel import CHANNEL_MESSAGE_TYPES
+# 	from libmidi.types.messages.system import SYSTEM_MESSAGE_TYPES, system_message_from_bytes
+# except ImportError:
+# 	from libmidi.types.messages.channel import ALL_CHANNEL_MESSAGE_TYPES as CHANNEL_MESSAGE_TYPES
+# 	from libmidi.types.messages.system import ALL_SYSTEM_MESSAGE_TYPES as SYSTEM_MESSAGE_TYPES, system_message_from_bytes
+# from libmidi.types.messages.meta import META_MESSAGE_VALUE, meta_message_from_bytes  # noqa: E402
+
+# channel_event_attrs = [
+# 	['note', 'velocity'],
+# 	['note', 'velocity'],
+# 	['note', 'value'],
+# 	['control', 'value'],
+# 	['program'],
+# 	['value'],
+# 	['value_lsb', 'value_msb'],
+# ]
+# class Track:
+
+# 	def __init__(self, file, n):
+# 		from libmidi.types.chunk import Chunk
+# 		from libmidi.utils.variable_length import VariableInt
+# 		chunk = Chunk.from_stream(file).data
+# 		data = memoryview(bytearray(chunk))
+
+# 		def decode(data):
+# 			initial = data
+# 			events = deque()
+# 			last_status_byte = 0
+# 			while data:
+# 				t, data = VariableInt.from_bytes(data)
+# 				message_status = data[0]
+# 				if message_status < 0x80:
+# 					message_status = last_status_byte
+# 					data = initial[len(initial) - len(data) - 1:]
+# 					data[0] = last_status_byte
+# 				last_status_byte = message_status
+# 				message_type = message_status >> 4
+# 				if message_type in CHANNEL_MESSAGE_TYPES:
+# 					m = message_type - 8
+# 					attributes = channel_event_attrs[m]
+# 					a = len(attributes)
+# 					data = data[1:]
+# 					message_data, data = data[:a], data[a:]
+# 					c = message_status & 0xf
+# 					match message_type:
+# 						case event_types.NOTE_OFF_C | event_types.NOTE_ON_C | event_types.POLY_AFTERTOUCH_C | event_types.CONTROL_C:
+# 							e = [n, t, message_type, c, *message_data]
+# 						case event_types.PROGRAM_C | event_types.CHANNEL_AFTERTOUCH_C:
+# 							e = [n, t, message_type, c, *message_data]
+# 						case event_types.PITCH_BEND_C:
+# 							e = [n, t, message_type, c, (message_data[1] << 7) | message_data[0]]
+# 						case _:
+# 							raise NotImplementedError(message_type)
+# 					events.append(e)
+# 				elif message_status in SYSTEM_MESSAGE_TYPES:
+# 					message, data = system_message_from_bytes(data)
+# 					# print(t, message, len(data))
+# 				elif message_status == META_MESSAGE_VALUE:
+# 					message, data = meta_message_from_bytes(data)
+# 					# print(t, message, len(data))
+# 					match message.meta_message_type:
+# 						case 2:
+# 							e = [n, t, COPYRIGHT_T, message.text]
+# 						case 4:
+# 							e = [n, t, TITLE_T, message.text]
+# 						case 81:
+# 							e = [n, t, TEMPO, message.tempo]
+# 						case _:
+# 							continue
+# 					events.append(e)
+# 			return events
+# 		self.events = decode(data)
+
+
+# def parse_midi(file):
+# 	"Minimalist MIDI parser that only reads required events, using lightweight data types"
+# 	if isinstance(file, str):
+# 		file = open(file, "rb")
+# 	from libmidi.types.header import Header
+# 	header = Header.from_stream(file)
+# 	events = [[0, 0, HEADER, header.format, header.ntrks, header.division]]
+# 	for n in range(header.ntrks):
+# 		track = Track(file, n)
+# 		events.extend(track.events)
+# 		print(n, len(track.events))
+# 	return events
+
+
 def merge_imports(inputs, ctx):
 	event_list = []
 	transport = []
@@ -190,8 +324,11 @@ def merge_imports(inputs, ctx):
 	speed_info = None
 	note_candidates = 0
 	for data in inputs:
-		if isinstance(data, list):
-			midi_events = [(int(e[0]), int(e[1]), e[2].strip().casefold(), *e[3:]) for e in data]
+		if isinstance(data, (list, deque, csv_reader)):
+			if not isinstance(data, (list, deque)) or data and isinstance(data[0], str):
+				midi_events = [(int(e[0]), int(e[1]), getattr(event_types, e[2].strip().upper(), 0), *e[3:]) for e in data]
+			else:
+				midi_events = data
 			event_list.append(midi_events)
 		else:
 			for i, x in enumerate(data.transport):

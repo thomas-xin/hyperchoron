@@ -758,19 +758,19 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 						name = "🥁"
 					case "black_concrete_powder":
 						name = "hammer"
-					case "blue_stained_glass":
-						name = "rdclap"
-						mod += 12
 					case "creeper_head":
 						name = "celeste_diamond"
 						mod += 12
 					case "skeleton_skull":
 						name = "celeste_spring"
 						mod += 12
-					case "obsidian":
+					case "obsidian" | "netherrack":
 						name = "🪘"
 					case "dropper":
 						name = "hitmarker"
+						mod += 12
+					case _ if "stained_glass" in mat:
+						name = "rdclap"
 						mod += 12
 					case _ if "fence_gate" in mat or "trapdoor" in mat:
 						name = "skipshot"
