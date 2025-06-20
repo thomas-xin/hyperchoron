@@ -325,7 +325,7 @@ def merge_imports(inputs, ctx):
 	note_candidates = 0
 	for data in inputs:
 		if isinstance(data, (list, deque, csv_reader)):
-			if not isinstance(data, (list, deque)) or data and isinstance(data[0], str):
+			if not isinstance(data, (list, deque)) or data and isinstance(data[0][2], str):
 				midi_events = [(int(e[0]), int(e[1]), getattr(event_types, e[2].strip().upper(), 0), *e[3:]) for e in data]
 			else:
 				midi_events = data

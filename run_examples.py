@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 from hyperchoron import util
+from hyperchoron.mappings import legal_inputs
 
 
 def run_conversion(ctx, fi, *fo):
@@ -43,7 +44,7 @@ def convert_files(ctx):
 	fmts = [fold.rsplit("/", 1)[-1] for fold in ctx.output]
 	# min_timestamp = os.path.getmtime("hyperchoron.py")
 	for fn in sorted(ctx.input, key=lambda fn: (fn.endswith(".zip"), os.path.getsize(fn)), reverse=True):
-		if fn.rsplit(".", 1)[-1] not in ("mid", "midi", "nbs", "zip"):
+		if fn.rsplit(".", 1)[-1] not in legal_inputs:
 			print(f"WARNING: File {repr(fn)} has unrecognised extension, skipping...")
 			continue
 		names = [fn.rsplit(".", 1)[0] + "." + fmt for fmt in fmts]

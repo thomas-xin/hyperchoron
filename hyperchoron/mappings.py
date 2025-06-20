@@ -505,3 +505,4 @@ dawvert_outputs = dict(
 	rrp="reaper",
 	soundation="soundation",
 )
+legal_inputs = "zip nbs csv org xm mid midi wav flac mp3 aac ogg opus m4a wma weba webm 🗿 moai".split() + list(dawvert_inputs)
