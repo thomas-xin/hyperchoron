@@ -182,7 +182,7 @@ midi_instrument_selection = [
 	52,
 	56,
 	81,
-	55,
+	19,
 	30,
 	-1,
 ]
