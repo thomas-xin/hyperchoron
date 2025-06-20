@@ -555,7 +555,7 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 		type=curr[0],
 		notes=[],
 		name=instrument_codelist[curr[0]],
-		channel=curr[0] if curr[0] >= 0 else 9,
+		channel=curr[0] + 1 if curr[0] >= 9 else curr[0] if curr[0] >= 0 else 9,
 		pitchbend_range=0,
 		event_count=0,
 		sustain=sustain_map[curr[0]],
@@ -566,12 +566,14 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 		if ins.type == -1:
 			drums = ins
 	next_active = []
+	next_notes = set()
 	for i, beat in enumerate(notes):
 		tick = i * resolution
 		taken = []
 		active, next_active = next_active, []
+		last_notes, next_notes = next_notes, set()
 		if beat:
-			ordered = sorted(beat, key=lambda note: (transport_note_priority(note, sustained=(note[0], note[1] - c_1) in active), note[0] == -1), reverse=True)
+			ordered = sorted(beat, key=lambda note: (transport_note_priority(note, sustained=(note[0], note[1] - c_1) in last_notes), note[0] == -1), reverse=True)
 		else:
 			ordered = list(beat)
 		for note in ordered:
@@ -607,7 +609,8 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 				new_pitch = 127
 			h = (itype, new_pitch)
 			if priority < 2:
-				create = True
+				closest = float("inf")
+				target = None
 				for j, last_note in enumerate(active):
 					if last_note.instrument_type != itype:
 						continue
@@ -616,45 +619,52 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 					last_vol, last_pan = last_note.volume, last_note.panning
 					if last_vol + 16 <= volume:
 						continue
-					if (last_vol < volume or last_note.length > resolution * 4) and not sustain_map[instrument.type]:
+					if last_vol < volume and not sustain_map[instrument.type]:
+						continue
+					diff = h[1] - h2[1]
+					if abs(diff) > closest:
 						continue
 					if h[1] != h2[1]:
 						if last_pan != panning or last_note.aligned > resolution * 3:
 							continue
-						diff = h[1] - h2[1]
 						if abs(diff) > 2:
 							continue
 						if last_vol + 8 <= volume:
 							continue
 						if abs(diff) > 1 and last_note.aligned > resolution:
 							continue
-						if last_note.aligned <= resolution * 3:
-							if not any(e[1] == "pitch" for e in last_note.events):
-								last_note.events.append((last_note.tick, "pitch", last_note.pitch))
-							last_note.pitch = new_pitch
-							last_note.aligned = 0
+					target = last_note
+					closest = abs(diff)
+				if target:
+					instrument = instruments[target.instrument_id]
+					h2 = (target.instrument_id, target.pitch)
+					if h[1] != h2[1]:
+						if target.aligned <= resolution * 3:
+							if not any(e[1] == "pitch" for e in target.events):
+								target.events.append((target.tick, "pitch", target.pitch))
+							target.pitch = new_pitch
+							target.aligned = 0
 						for j in range(resolution + 2):
 							offset = j / (resolution + 1) * diff
 							timing = tick - resolution // 2 + j - 1
-							last_note.events.append((timing, "pitch", h2[1] + offset))
+							target.events.append((timing, "pitch", h2[1] + offset))
 							instrument.event_count += 1
-						instrument.pitchbend_range = max(instrument.pitchbend_range, ceil(max(abs(e[2] - last_note.pitch) for e in last_note.events if e[1] == "pitch") / 12) * 12)
+						instrument.pitchbend_range = max(instrument.pitchbend_range, ceil(max(abs(e[2] - target.pitch) for e in target.events if e[1] == "pitch") / 12) * 12)
 					if last_vol >= volume and not sustain_map[instrument.type]:
 						pass
 					else:
 						if last_vol != volume:
-							last_note.events.append((tick, "volume", min(127, round(volume / last_vol * 100))))
+							target.events.append((tick, "volume", min(127, round(volume / last_vol * 100))))
 							instrument.event_count += 1
 						if last_pan != panning:
-							last_note.events.append((tick, "panning", panning))
+							target.events.append((tick, "panning", panning))
 							instrument.event_count += 1
-					last_note.length += resolution
-					last_note.aligned += resolution
+					active.remove(target)
+					target.length += resolution
+					target.aligned += resolution
 					taken.append(instrument.index)
-					next_active.append(last_note)
-					create = False
-					break
-				if not create:
+					next_active.append(target)
+					next_notes.add(h)
 					continue
 			choices = sorted(instruments, key=lambda instrument: (instrument.index not in taken, instrument.id == ins), reverse=True)
 			instrument = choices[0]
@@ -672,6 +682,7 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 			instrument.notes.append(midi_note)
 			taken.append(instrument.index)
 			next_active.append(midi_note)
+			next_notes.add(h)
 	print([ins.pitchbend_range for ins in instruments])
 	return instruments, wait, resolution
 
