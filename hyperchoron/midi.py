@@ -643,7 +643,7 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 				if target:
 					instrument = instruments[target.instrument_id]
 					h2 = (target.instrument_id, target.pitch)
-					last_vol, last_pan = last_note.volume, last_note.panning
+					last_vol, last_pan = target.volume, target.panning
 					if h[1] != h2[1]:
 						# if target.aligned - target.tick <= resolution * 3:
 						if not any(e[1] == "pitch" for e in target.events):
@@ -789,7 +789,7 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 				bend = 8192 if fine == 0 or not ins.pitchbend_range else round(8191 * fine / ins.pitchbend_range) + 8192
 				if bent or bend != 8192:
 					instrument.append([i, note.tick, "Pitch_bend_c", channel, bend])
-					if bent != 8192:
+					if bend != 8192:
 						bent = note.tick
 					elif bent < note.tick:
 						bent = False
