@@ -3,6 +3,7 @@ import csv
 from dataclasses import dataclass
 import fractions
 from math import ceil, sqrt
+from operator import itemgetter
 import os
 from types import SimpleNamespace
 try:
@@ -645,6 +646,7 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 					h2 = (target.instrument_id, target.pitch)
 					last_vol, last_pan = target.volume, target.panning
 					if h[1] != h2[1]:
+						diff = h[1] - h2[1]
 						# if target.aligned - target.tick <= resolution * 3:
 						if not any(e[1] == "pitch" for e in target.events):
 							target.events.append((target.tick, "pitch", target.pitch))
@@ -772,7 +774,7 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 				])
 			pan = 64
 			vol = 100
-			bent = 0
+			bent = -1
 			instrument = []
 			end = start
 			while notes:
@@ -787,12 +789,12 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 				pitch = round(note.pitch)
 				fine = note.pitch - pitch
 				bend = 8192 if fine == 0 or not ins.pitchbend_range else round(8191 * fine / ins.pitchbend_range) + 8192
-				if bent or bend != 8192:
+				if bent != -1 or bend != 8192:
 					instrument.append([i, note.tick, "Pitch_bend_c", channel, bend])
 					if bend != 8192:
 						bent = note.tick
 					elif bent < note.tick:
-						bent = False
+						bent = -1
 				instrument.extend((
 					[i, note.tick, "Note_on_c", channel, pitch, note.volume],
 					[i, note.tick + note.length, "Note_off_c", channel, pitch, 0],
@@ -810,16 +812,16 @@ def save_midi(transport, output, instrument_activities, speed_info, ctx):
 								continue
 							vol = value
 						case "pitch":
-							bend = round(8191 * (value - note.pitch) / ins.pitchbend_range) + 8192
+							bend = round(8191 * (value - pitch) / ins.pitchbend_range) + 8192
 							instrument.append([i, tick, "Pitch_bend_c", channel, bend])
-							if bend != 8192:
+							if bend != 8192 and tick > bent:
 								bent = tick
 							continue
 						case _:
 							raise NotImplementedError(mode)
 					instrument.append([i, tick, "Control_c", channel, mode_i, value])
 				end = max(end, note.tick + note.length)
-			instrument.sort(key=lambda t: (t[1], t[2] == "Note_on_c"))
+			instrument.sort(key=itemgetter(1))
 			instrument.append([i, end, "End_track"])
 			writer.writerows(instrument)
 		writer.writerows([[0, 0, "End_of_file"]])
