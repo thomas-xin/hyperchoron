@@ -18,7 +18,7 @@ from .mappings import (
 	instrument_codelist, fixed_instruments, default_instruments,
 	fs1,
 )
-from .util import round_min, log2lin, lin2log, base_path, transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
+from .util import round_min, log2lin, lin2log, base_path, temp_dir, transport_note_priority, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 
 def nbt_from_dict(d):
@@ -1130,6 +1130,14 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 def load_nbs(file):
 	print("Importing NBS...")
 	import pynbs
+	if not isinstance(file, (str, bytes)):
+		path = str(hash(file))
+		tmpl = path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+		fn = f"{temp_dir}{tmpl}.nbs"
+		with open(fn, "wb") as f:
+			f.write(file.read())
+		file.close()
+		file = fn
 	nbs = pynbs.read(file)
 	header = nbs.header
 	events = [
