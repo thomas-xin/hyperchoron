@@ -174,7 +174,7 @@ midi_instrument_selection = [
 	0,
 	73,
 	80,
-	13,
+	11,
 	14,
 	-2,
 	48,

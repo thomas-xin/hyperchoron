@@ -1148,22 +1148,38 @@ def load_nbs(file):
 	for i in range(len(midi_instrument_selection) - 1):
 		events.append([i + 2, 0, "program_c", i + 10, midi_instrument_selection[i]])
 	ticked = {}
+	pannings = {}
 	for tick, chord in nbs:
 		for note in chord:
 			instrument_name = nbs.layers[note.layer].name.rsplit("_", 1)[0]
-			if instrument_name == "Drumset":
-				ins = 6
-				default = 6
-			else:
-				default = instrument_codelist.index(default_instruments[nbs_values.get(note.instrument, "snare")])
-				try:
-					ins = instrument_codelist.index(instrument_name)
-				except ValueError:
-					ins = default
-			pitch = note.key + round_min(note.pitch / 100) - 33 + fs1 + pitches[nbs_values.get(note.instrument, "snare")]
+			note_instrument = nbs_values.get(note.instrument, "snare")
+			if note_instrument in ("basedrum", "snare", "hat"):
+				match note_instrument:
+					case "basedrum":
+						pitch = 35
+					case "snare":
+						pitch = 38
+					case "hat":
+						pitch = 42
+					case _:
+						raise NotImplementedError(pitch)
+				if note.panning not in range(-1, 2) or pannings.get(10):
+					events.append([128, tick, "control_c", 10, 10, note.panning / 100 * 63 + 64])
+					pannings[10] = note.panning
+				volume = round(lin2log(note.velocity * 127 / 100))
+				note_event = [128, tick, "note_on_c", 9, pitch, volume, 1, 1]
+				events.append(note_event)
+				continue
+			default = instrument_codelist.index(default_instruments[note_instrument])
+			try:
+				ins = instrument_codelist.index(instrument_name)
+			except ValueError:
+				ins = default
+			pitch = note.key + round_min(note.pitch / 100) - 33 + fs1 + pitches[note_instrument]
 			bucket = (note.layer, pitch)
-			if note.panning not in range(-1, 2):
+			if note.panning not in range(-1, 2) or pannings.get(ins + 10):
 				events.append([ins + 2, tick, "control_c", ins + 10, 10, note.panning / 100 * 63 + 64])
+				pannings[ins + 10] = note.panning
 			volume = round(lin2log(note.velocity * 127 / 100))
 			if note.panning & 1:
 				if bucket in ticked:
