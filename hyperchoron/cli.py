@@ -28,8 +28,11 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 				from hyperchoron import minecraft
 				nc += minecraft.save_litematic(transport, output, ctx=ctx)
 			case "🗿" | "moai":
-				from hyperchoron import tracker
-				nc += tracker.save_thirtydollar(transport, output, speed_info=speed_info, ctx=ctx)
+				from hyperchoron import text
+				nc += text.save_thirtydollar(transport, output, speed_info=speed_info, ctx=ctx)
+			case "zip":
+				from hyperchoron import text
+				nc += text.save_deltarune(transport, output, instrument_activities=instrument_activities, speed_info=speed_info, ctx=ctx)
 			case _:
 				from hyperchoron import dawvert
 				nc += dawvert.save_arbitrary(transport, output, instrument_activities=instrument_activities, speed_info=speed_info, ctx=ctx)
@@ -94,8 +97,8 @@ def convert_file(args):
 				from hyperchoron import pcm
 				data = pcm.load_wav(file, ctx=ctx)
 			case "🗿" | "moai":
-				from hyperchoron import tracker
-				data = tracker.load_thirtydollar(file)
+				from hyperchoron import text
+				data = text.load_thirtydollar(file)
 			case _:
 				from hyperchoron import dawvert
 				data = dawvert.load_arbitrary(file, ext)

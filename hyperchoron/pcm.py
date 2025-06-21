@@ -97,7 +97,7 @@ def load_wav(file, ctx):
 	bufsize = round(sample_rate / (bpm / 60) / 12)
 
 	def decompose_stem(fn, instrument=0, pitch=None, monophonic=True, pitch_range=("C1", "C7"), tolerance=256, mult=1):
-		ins = hash(fn) if instrument != -1 else 9
+		ins = instrument if instrument != -1 else 9
 		events = [[ins, 0, "program_c", ins, instrument]]
 		song, *_ = librosa.load(temp_dir + fn + ".flac", sr=sample_rate, mono=False, dtype=np.float32)
 		mono = librosa.to_mono(song)
@@ -199,7 +199,7 @@ def load_wav(file, ctx):
 	events.extend(decompose_stem(tmpl + "-V", 52, monophonic=False, pitch_range=("C1", "C8"), tolerance=16, mult=1.5))
 	# events.extend(decompose_stem(tmpl + "-G", 48, monophonic=True, pitch_range=("C2", "C7")))
 	print("Decomposing Others...")
-	events.extend(decompose_stem(tmpl + "-O", 46, monophonic=False, pitch_range=("C2", "C9"), tolerance=12, mult=2))
+	events.extend(decompose_stem(tmpl + "-O", 11, monophonic=False, pitch_range=("C2", "C9"), tolerance=12, mult=2))
 	# events.extend(decompose_stem(tmpl + "-P", 0, monophonic=True, pitch_range=("C1", "C8")))
 	print("Decomposing Drums...")
 	events.extend(decompose_stem(tmpl + "-K", -1, monophonic=True, pitch=35, tolerance=24, mult=4))
