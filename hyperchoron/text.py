@@ -329,6 +329,8 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 			instrument = instruments[note.instrument_id]
 			continue
 		direction = int(not lead_direction if abs(note.pitch - lead_pitch) >= 1 else lead_direction)
+		if lead_pos[direction] > note.tick and lead_pos[not direction] <= note.tick and note.volume >= 127:
+			direction = int(not direction)
 		if lead_pos[direction] > note.tick or (note.instrument_type == 9 or note.volume < 127) and lead_pos[not direction] > note.tick:
 			diff = note.pitch - vocals_pitch
 			if diff >= 5 or diff >= 2 and vocals_direction >= 1:
@@ -347,7 +349,7 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 				round_min(round(note.tick / seconds_per_tick, 3)),
 				direction,
 				round_min(round(note.aligned / seconds_per_tick, 3)),
-				note.length >= resolution * 16 and note.volume >= 127,
+				int(note.length >= resolution * 16 and note.volume >= 127),
 			]
 			vocals.append(rhythm_note)
 			vocals_pitch = note.pitch
@@ -369,37 +371,34 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 		]
 		lead.append(rhythm_note)
 		lead_pitch = note.pitch
-		lead_pos[direction] = note.tick + (note.length if instrument.sustain else max(resolution * 4, min(note.length, resolution * 24)))
+		lead_pos[direction] = note.tick + (note.length if instrument.sustain else max(resolution * 2, min(note.length, resolution * 24)))
 		instrument.notes.remove(note)
-	import json
-	lead_json = json.dumps(lead)
-	vocals_json = json.dumps(vocals)
-	drums_json = json.dumps(drums)
+	# import json
+	# lead_json = json.dumps(lead)
+	# vocals_json = json.dumps(vocals)
+	# drums_json = json.dumps(drums)
+	lead_fn = "\n".join(f"\ta({n[0]},{n[1]},{n[2]},{n[3]});" for n in lead)
+	vocals_fn = "\n".join(f"\ta({n[0]},{n[1]},{n[2]},{n[3]});" for n in vocals)
+	drums_fn = "\n".join(f"\ta({n[0]},{n[1]},{n[2]},{n[3]});" for n in drums)
 	code = [
 		"""function scr_rhythmgame_notechart(arg0 = "lead", arg1 = 0) {
 	script_execute("scr_rhythmgame_notechart_" + arg0, arg1);
 }""",
 		"function scr_rhythmgame_notechart_lead(arg0 = 0) {",
-		f"\tvar note_array = {lead_json};",
-		"\tfor (var i = 0; i < array_length(note_array); i++) {",
-		"\t\tscr_rhythmgame_addnote(note_array[i][0], note_array[i][1], note_array[i][2], note_array[i][3]);",
-		"\t}",
+		"\tvar a = scr_rhythmgame_addnote;",
+		lead_fn,
 		"}",
 		"function scr_rhythmgame_notechart_vocals(arg0 = 0) {",
-		f"\tvar note_array = {vocals_json};",
-		"\tfor (var i = 0; i < array_length(note_array); i++) {",
-		"\t\tscr_rhythmgame_addnote(note_array[i][0], note_array[i][1], note_array[i][2], note_array[i][3]);",
-		"\t}",
+		"\tvar a = scr_rhythmgame_addnote;",
+		vocals_fn,
 		"}",
 		"function scr_rhythmgame_notechart_drums(arg0 = 0) {",
-		f"\tvar note_array = {drums_json};",
-		"\tfor (var i = 0; i < array_length(note_array); i++) {",
-		"\t\tscr_rhythmgame_addnote(note_array[i][0], note_array[i][1], note_array[i][2], note_array[i][3]);",
-		"\t}",
+		"\tvar a = scr_rhythmgame_addnote;",
+		drums_fn,
 		"}",
 		"function scr_rhythmgame_notechart_lyrics(arg0 = 0) {}",
 		"function scr_rhythmgame_notechart_lead_solo(arg0) {}",
-		"function scr_rhythmgame_notechart_lead_finale(arg0 = 0) {}",
+		"function scr_rhythmgame_notechart_lead_finale() {}",
 		"""function scr_rhythmgame_notechart_clear() {
 	notetime = [];
 	notetype = [];
@@ -417,6 +416,8 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 	code = [
 		"""function scr_rhythmgame_load_song(arg0 = 0, arg1 = true, arg2 = true, arg3 = false) {
 	if (song_loaded && !arg3) scr_rhythmgame_song_reset();
+	arg0 = 5;
+	obj_rhythmgame.song_id = arg0;
 	song_id = arg0;
 	notetime[0] = 0;
 	notespeed = 150;
