@@ -10,5 +10,6 @@ examples/mid
 examples/csv
 examples/🗿
 examples/moai
+examples/zip
 .idea
 *.egg-info

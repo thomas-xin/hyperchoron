@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from .mappings import (
 	org_instrument_selection, org_instrument_mapping,
 	instrument_names, midi_instrument_selection,
-	c4, c1
+	c4, c1, percussion_mats
 )
 from .util import create_reader, transport_note_priority, temp_dir, sample_rate
 
