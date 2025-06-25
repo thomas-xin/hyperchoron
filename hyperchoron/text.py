@@ -281,7 +281,7 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 	return nc
 
 
-lead_instruments = [-1, 9, 13, 3, 11, 8, 0]
+lead_instruments = [-1, 9, 13, 3, 11, 8]
 def rhythm_priority(ins):
 	try:
 		return lead_instruments.index(ins)
@@ -369,8 +369,11 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 			continue
 		rms = rmss[note.tick]
 		direction = int(not lead_direction if abs(note.pitch - lead_pitch) >= 1 else lead_direction)
-		if lead_pos[direction] > note.tick and lead_pos[not direction] <= note.tick and note.volume >= 120 and rms >= hard_percentile:
-			direction = int(not direction)
+		if lead_pos[direction] > note.tick and lead_pos[not direction] <= note.tick and note.instrument_type != 9 and note.volume >= 120 and rms >= hard_percentile:
+			if note.pitch == lead_pitch and (note.length < resolution * 4 or not instruments[note.instrument_id].sustain):
+				lead_pos[direction] = note.tick
+			else:
+				direction = int(not direction)
 		if lead_pos[direction] > note.tick or (note.instrument_type == 9 or note.volume < 120 or rms < hard_percentile) and lead_pos[not direction] > note.tick:
 			diff = note.pitch - vocals_pitch
 			if diff > 6 or diff >= 2 and vocals_direction >= 1:
