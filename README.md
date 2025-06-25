@@ -1,3 +1,5 @@
+# Hyperchoron - Making Music Multidimensional
+
 ![thumbnail](https://raw.githubusercontent.com/thomas-xin/hyperchoron/refs/heads/main/thumb.jpg)
 # Instructions for use
 ## Installation

@@ -1,5 +1,7 @@
+import bisect
 import functools
 from math import cbrt, erf
+import numpy as np
 from .mappings import (
 	instrument_names, midi_instrument_selection,
 	fixed_instruments, instrument_codelist,
@@ -279,16 +281,36 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 	return nc
 
 
+lead_instruments = [-1, 9, 13, 3, 11, 8, 0]
+def rhythm_priority(ins):
+	try:
+		return lead_instruments.index(ins)
+	except ValueError:
+		return np.inf
+
+def join_gml(lines):
+	out = []
+	for i, line in enumerate(lines):
+		if not i:
+			out.append(line)
+		elif i & 7 == 0:
+			out.append("\n")
+			out.append(line)
+		else:
+			out.append(" ")
+			out.append(line)
+	return "".join(out)
+
 def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 	tmpl = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	full_midi = f"{temp_dir}{tmpl}-full.mid"
+	# full_midi = f"{temp_dir}{tmpl}-full.mid"
 	from hyperchoron import midi
 	instruments, wait, resolution = list(midi.build_midi(transport, instrument_activities, speed_info, ctx=ctx))
-	nc = midi.proceed_save_midi(full_midi, f"{tmpl}-full", False, instruments, wait, resolution)
+	# nc = midi.proceed_save_midi(full_midi, f"{tmpl}-full", False, instruments, wait, resolution)
 	all_notes = []
 	for ins in instruments:
 		all_notes.extend(ins.notes)
-	all_notes.sort(key=lambda note: (note.tick, note.instrument_type in (29, 30, 31, 9, -1), -cbrt(note.pitch) * (min(16, note.length / resolution) * erf((100 - note.volume) / 40) + note.volume)))
+	all_notes.sort(key=lambda note: (note.tick, rhythm_priority(note.instrument_type), -cbrt(note.pitch) * (min(16, note.length / resolution) * erf((100 - note.volume) / 40) + note.volume)))
 	max_duration = all_notes[-1].aligned
 	seconds_per_tick = 1000000 / wait * resolution
 	special = False
@@ -296,13 +318,30 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 	lead_pos = [0, 0]
 	lead_pitch = -1
 	last_pos = -1
+	ralsei_cuss = [0, 0]
 	vocals_pos = 0
 	vocals_pitch = -1
 	lead_direction = 0
 	vocals_direction = 1
+	max_score = 0
 	lead = []
+	# lead_solo = []
 	vocals = []
 	drums = []
+	rmss = []
+	removed_notes = []
+	melodic_ticks = set()
+	for note in all_notes:
+		if note.instrument_type in (9, -1):
+			continue
+		end = note.tick + note.length
+		while end >= len(rmss) - 1:
+			rmss.append(0)
+		for tick in range(note.tick, end):
+			rmss[tick] += log2lin(note.volume / 127) ** 2
+			melodic_ticks.add(tick)
+	rmss = np.array([n ** 0.5 for n in rmss], dtype=np.float32)
+	hard_percentile = min(np.percentile(rmss[np.fromiter(melodic_ticks, dtype=np.uint32)], 90), 8) # Allow no more than 10% of song to contain double-notes, unless there is a crazy amount of notes adding up to rms of 800%+ (e.g. black midi)
 	for note in all_notes:
 		if note.instrument_type == -1:
 			special = 0
@@ -317,25 +356,26 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 				special = 1
 			if drum_pos[direction] > note.tick:
 				continue
-			duration = (round_min(round(note.aligned / seconds_per_tick, 3)) if note.pitch in (49, 57, 58, 84) else 0)
+			end = (round_min(round(note.aligned / seconds_per_tick, 3)) if note.pitch in (49, 57, 58, 84) else 0)
 			rhythm_note = [
 				round_min(round(note.tick / seconds_per_tick, 3)),
 				direction,
-				duration,
+				end,
 				special,
 			]
-			drum_pos[direction] = note.tick + max(duration, resolution) / resolution
+			drum_pos[direction] = note.tick + max(note.length, resolution) / resolution
 			drums.append(rhythm_note)
 			instrument = instruments[note.instrument_id]
 			continue
+		rms = rmss[note.tick]
 		direction = int(not lead_direction if abs(note.pitch - lead_pitch) >= 1 else lead_direction)
-		if lead_pos[direction] > note.tick and lead_pos[not direction] <= note.tick and note.volume >= 127:
+		if lead_pos[direction] > note.tick and lead_pos[not direction] <= note.tick and note.volume >= 120 and rms >= hard_percentile:
 			direction = int(not direction)
-		if lead_pos[direction] > note.tick or (note.instrument_type == 9 or note.volume < 127) and lead_pos[not direction] > note.tick:
+		if lead_pos[direction] > note.tick or (note.instrument_type == 9 or note.volume < 120 or rms < hard_percentile) and lead_pos[not direction] > note.tick:
 			diff = note.pitch - vocals_pitch
-			if diff >= 5 or diff >= 2 and vocals_direction >= 1:
+			if diff > 6 or diff >= 2 and vocals_direction >= 1:
 				direction = 2
-			elif diff <= -5 or diff <= -2 and vocals_direction <= 1:
+			elif diff < -6 or diff <= -2 and vocals_direction <= 1:
 				direction = 0
 			elif diff:
 				direction = 1
@@ -345,59 +385,90 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 				continue
 			vocals_direction = direction
 			instrument = instruments[note.instrument_id]
+			pos = round_min(round(note.tick / seconds_per_tick, 3))
+			end = round_min(round(note.aligned / seconds_per_tick, 3))
 			rhythm_note = [
-				round_min(round(note.tick / seconds_per_tick, 3)),
+				pos,
 				direction,
-				round_min(round(note.aligned / seconds_per_tick, 3)),
+				end,
 				int(note.length >= resolution * 16 and note.volume >= 127),
 			]
 			vocals.append(rhythm_note)
 			vocals_pitch = note.pitch
 			vocals_pos = note.tick + note.length
+			if ralsei_cuss[1] < end:
+				ralsei_cuss = [pos, end]
+			elif ralsei_cuss[1] == end and ralsei_cuss[0] > pos:
+				ralsei_cuss[0] = pos
 			continue
 		lead_direction = direction
 		instrument = instruments[note.instrument_id]
-		special = int(not special and (note.length >= resolution * 16 or note.volume >= 127))
+		special = int(not special and (note.length >= resolution * 16 and note.volume >= 120))
 		pos = round_min(round(note.tick / seconds_per_tick, 3))
 		if last_pos == pos:
 			lead[-1][2] = round_min(round((note.tick - resolution) / seconds_per_tick, 3))
-		duration = (round_min(round(note.aligned / seconds_per_tick, 3)) if note.length >= resolution * 4 and instrument.sustain else 0)
-		last_pos = pos + duration if duration > 0 else 0
+		end = (round_min(round(note.aligned / seconds_per_tick, 3)) if note.length >= resolution * 4 and instrument.sustain else 0)
 		rhythm_note = [
 			pos,
 			direction,
-			duration,
+			end,
 			special,
 		]
+		max_score += 100 + max(0, (end - pos) * 30)
+		# if lead_pos[not direction] > note.tick:
+		# 	if lead and lead[-1][0] + lead[-1][2] > pos:
+		# 		lead_solo.append(lead.pop(-1))
+		# 	lead_solo.append(rhythm_note)
+		# 	last_pos = 0
+		# else:
 		lead.append(rhythm_note)
+		last_pos = end if end > 0 else 0
 		lead_pitch = note.pitch
 		lead_pos[direction] = note.tick + (note.length if instrument.sustain else max(resolution * 2, min(note.length, resolution * 24)))
-		instrument.notes.remove(note)
+		i = bisect.bisect_left(instrument.notes, note.tick, key=lambda n: n.tick)
+		while i < len(instrument.notes) and instrument.notes[i] != note:
+			i += 1
+		if i < len(instrument.notes) and instrument.notes[i] == note:
+			instrument.notes.pop(i)
+			removed_notes.append(note)
+	max_duration = max(max_duration, ralsei_cuss[1] + 4)
 	# import json
 	# lead_json = json.dumps(lead)
 	# vocals_json = json.dumps(vocals)
 	# drums_json = json.dumps(drums)
-	lead_fn = "\n".join(f"\ta({n[0]},{n[1]},{n[2]},{n[3]});" for n in lead)
-	vocals_fn = "\n".join(f"\ta({n[0]},{n[1]},{n[2]},{n[3]});" for n in vocals)
-	drums_fn = "\n".join(f"\ta({n[0]},{n[1]},{n[2]},{n[3]});" for n in drums)
+	lead_fn = join_gml(f"a({n[0]},{n[1]},{n[2]},{n[3]});" for n in lead)
+	vocals_fn = join_gml(f"a({n[0]},{n[1]},{n[2]},{n[3]});" for n in vocals)
+	drums_fn = join_gml(f"a({n[0]},{n[1]},{n[2]},{n[3]});" for n in drums)
+	# lead_solo_fn = join_gml(f"a({n[0]},{n[1]},{n[2]},{n[3]});" for n in lead_solo)
+	scores = ",".join(str(round(max_score * r)) for r in (0.3, 0.5, 2 / 3, 0.8, 0.85))
 	code = [
 		"""function scr_rhythmgame_notechart(arg0 = "lead", arg1 = 0) {
 	script_execute("scr_rhythmgame_notechart_" + arg0, arg1);
 }""",
 		"function scr_rhythmgame_notechart_lead(arg0 = 0) {",
+		"\tif (arg0 < 0) return;",
+		"\tif (i_ex(obj_rhythmgame)) track_length = obj_rhythmgame.track_length;",
 		"\tvar a = scr_rhythmgame_addnote;",
 		lead_fn,
 		"}",
 		"function scr_rhythmgame_notechart_vocals(arg0 = 0) {",
+		"\tif (arg0 < 0) return;",
+		"\tif (i_ex(obj_rhythmgame)) track_length = obj_rhythmgame.track_length;",
 		"\tvar a = scr_rhythmgame_addnote;",
 		vocals_fn,
 		"}",
 		"function scr_rhythmgame_notechart_drums(arg0 = 0) {",
+		"\tif (arg0 < 0) return;",
+		"\tif (i_ex(obj_rhythmgame)) track_length = obj_rhythmgame.track_length;",
 		"\tvar a = scr_rhythmgame_addnote;",
 		drums_fn,
 		"}",
 		"function scr_rhythmgame_notechart_lyrics(arg0 = 0) {}",
-		"function scr_rhythmgame_notechart_lead_solo(arg0) {}",
+		"function scr_rhythmgame_notechart_lead_solo(arg0) {",
+		# "\tif (arg0 < 0) return;",
+		# "\tvar a = src_rhythmgame_addnote;",
+		# lead_solo_fn,
+		"}",
 		"function scr_rhythmgame_notechart_lead_finale() {}",
 		"""function scr_rhythmgame_notechart_clear() {
 	notetime = [];
@@ -416,30 +487,29 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 	code = [
 		"""function scr_rhythmgame_load_song(arg0 = 0, arg1 = true, arg2 = true, arg3 = false) {
 	if (song_loaded && !arg3) scr_rhythmgame_song_reset();
+	if (arg0 < 0) return;
 	arg0 = 5;
 	obj_rhythmgame.song_id = arg0;
 	song_id = arg0;
 	notetime[0] = 0;
-	notespeed = 150;
+	notespeed = 144;
 	loop = false;
-	scr_debug_print("trying to load");
 """ + f"""
 	track1_id = "{tmpl}-base.ogg";
-	track2_id = "{tmpl}-full.ogg";
+	track2_id = "{tmpl}-solo.ogg";
 	bpm = {60000000 / wait / resolution / 4};
 	notespacing = 60 / bpm;
 	meter = notespacing * 4;
-	trackstart = scr_round_to_beat(-1 * (240 / bpm), bpm);
+	trackstart = -1;
+	startoffset = 0;
 	oneAtATime = false;
+	dynamic_solo = false;
 	track_length = {max_duration / seconds_per_tick};
-	notespeed = 144;
 """ + """
 	if (arg3) {
 	} else if (arg0 >= 0) {
-		scr_debug_print("loading da other stuff");
 		scr_rhythmgame_notechart_lead(arg0);
-		if (tutorial > 0)
-			scr_rhythmgame_toggle_notes(false);
+		if (tutorial > 0) scr_rhythmgame_toggle_notes(false);
 		musicm.bpm = bpm;
 		musicm.beat_offset += bpm / 2;
 		if (arg1) {
@@ -457,12 +527,83 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 				notespacing = other.notespacing;
 				meter = other.meter;
 				loop = other.loop;
-				if (i_ex(obj_rhythmgame)) {
-					if (maxnote == 0 || chart_start > notetime[0] || (chart_start + (meter * 2)) < notetime[0]) performer.sprite_index = spr_ralsei_sing_clap;
-				}
+				performer.sprite_index = spr_ralsei_sing_clap;
 			}
 		}
 		scr_rhythmgame_load_events(arg0);
+	}
+}
+function scr_rhythmgame_song_reset() {
+	timestamp = [];
+	timestamp[0] = 0;
+	dynamic_solo = false;
+	track1_id = 0;
+	track2_id = 0;
+	song_id = -1;
+	oneAtATime = false;
+	bpm = 230;
+	notespacing = 60 / bpm;
+	meter = notespacing * 4;
+}
+function scr_rhythmgame_song_select(arg0) {
+	song_id = 5;
+	vinyl_id = 0;""" + f"""
+	preview = "{tmpl}-base.ogg";
+	alt_preview = "{tmpl}-full.ogg";
+	local_preview = 0;
+	chapter = 99;
+	bpm = {60000000 / wait / resolution / 4};""" + """
+}
+function scr_rhythmgame_song_select_id(arg0) {
+	return 5;
+}
+function scr_rhythmgame_rank_scores(arg0, arg1 = 0) {""" + f"""
+	return [{scores}];""" + """
+}
+function scr_rhythmgame_get_rank(arg0, arg1) {
+	var _rank_scores = scr_rhythmgame_rank_scores(arg0);
+	if (arg1 >= _rank_scores[4]) return 5;
+	for (i = 0; i < 5; i++) {
+		if (arg1 < _rank_scores[i]) {
+			return i;
+		}
+	}
+	return 0;
+}
+function scr_rhythmgame_load_events(arg0) {
+	drums.auto_play = 1;
+	scr_music_event_add_instance(drums.performer, trackstart + (meter * 0.5), "sprite_index", 30, true);
+	scr_music_event_add_instance(other.performer, trackstart + (meter * 1.5), "sprite_index", 4345, true);
+	scr_music_event_add_instance(vocals.performer, trackstart + (meter * 1), "sprite_index", 1814, true, 1);
+	with (vocals.performer) {""" + (f"""
+		scr_music_event_add({max(0, ralsei_cuss[0] - 1)}, "animspeed", 2, true);
+		scr_music_event_add({ralsei_cuss[0]}, "mid", 5310, true);
+		scr_music_event_add({ralsei_cuss[0]}, "idle", 5271, true);
+		scr_music_event_add({ralsei_cuss[0]}, "sprite_index", 5310, true);
+		scr_music_event_add({ralsei_cuss[1] - 0.5}, "sprite_index", 5271, true);
+		scr_music_event_add({ralsei_cuss[1] - 0.5}, "shakeamt", 10, true);
+		scr_music_event_add({ralsei_cuss[1] - 0.5}, "animspeed", 1, true);
+		scr_music_event_add({ralsei_cuss[1] + 1}, "mid", 956, true);
+		scr_music_event_add({ralsei_cuss[1] + 1}, "idle", 739, true);
+		scr_music_event_add({ralsei_cuss[1] + 1}, "sprite_index", 1814, true);""" if ralsei_cuss[1] - ralsei_cuss[0] > 0.5 else "") + """
+	}
+}
+function scr_rhythmgame_toggle_notes(arg0, arg1 = true) {
+	if (arg0) {
+		var _startpoint = scr_ceil_to_beat(trackpos + (meter * 1.5), bpm, 0.25);
+		if (_startpoint > track_length) loop_start = _startpoint - track_length;
+		for (i = 0; i < maxnote; i++) {
+			if (notetime[i] < _startpoint) continue;
+			else {
+				notescore[i] = 0;
+				notealive[i] = 1;
+			}
+		}
+	} else {
+		for (i = 0; i < maxnote; i++) {
+			notescore[i] = arg1 ? 40 : 0;
+			notealive[i] = 0;
+		}
 	}
 }""",
 	]
@@ -470,26 +611,36 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 	with open(rhythmgame_load, "w") as f:
 		f.write("\n".join(code))
 	base_midi = f"{temp_dir}{tmpl}-base.mid"
-	midi.proceed_save_midi(base_midi, f"{tmpl}-base", False, instruments, wait, resolution)
+	nc = midi.proceed_save_midi(base_midi, f"{tmpl}-base", False, instruments, wait, resolution)
+	for instrument in instruments:
+		instrument.notes.clear()
+	for note in removed_notes:
+		instrument = instruments[note.instrument_id]
+		instrument.notes.append(note)
+	solo_midi = f"{temp_dir}{tmpl}-solo.mid"
+	nc += midi.proceed_save_midi(solo_midi, f"{tmpl}-solo", False, instruments, wait, resolution)
 	import os
 	import subprocess
 	base_flac = f"{temp_dir}{tmpl}-base.flac"
-	args = [os.path.abspath(base_path + "/fluidsynth/fluidsynth"), "-g", "1", "-F", base_flac, "-c", "64", "-r", "48000", "-n", os.path.abspath(base_path + "/fluidsynth/gm64.sf2"), base_midi]
+	args = [os.path.abspath(base_path + "/fluidsynth/fluidsynth"), "-g", "1", "-F", base_flac, "-c", "64", "-o", "synth.polyphony=32767", "-r", "48000", "-n", os.path.abspath(base_path + "/fluidsynth/gm64.sf2"), base_midi]
 	subprocess.run(args)
 	base_ogg = f"{temp_dir}{tmpl}-base.ogg"
 	args = ["ffmpeg", "-y", "-i", base_flac, "-c:a", "libvorbis", "-b:a", "128k", base_ogg]
 	proc = subprocess.Popen(args)
-	full_flac = f"{temp_dir}{tmpl}-full.flac"
-	args = [os.path.abspath(base_path + "/fluidsynth/fluidsynth"), "-g", "1", "-F", full_flac, "-c", "64", "-r", "48000", "-n", os.path.abspath(base_path + "/fluidsynth/gm64.sf2"), full_midi]
+	solo_flac = f"{temp_dir}{tmpl}-solo.flac"
+	args = [os.path.abspath(base_path + "/fluidsynth/fluidsynth"), "-g", "1", "-F", solo_flac, "-c", "64", "-o", "synth.polyphony=512", "-r", "48000", "-n", os.path.abspath(base_path + "/fluidsynth/gm64.sf2"), solo_midi]
 	subprocess.run(args)
 	proc.wait()
-	full_ogg = f"{temp_dir}{tmpl}-full.ogg"
-	args = ["ffmpeg", "-y", "-i", full_flac, "-c:a", "libvorbis", "-b:a", "128k", full_ogg]
+	solo_ogg = f"{temp_dir}{tmpl}-solo.ogg"
+	args = ["ffmpeg", "-y", "-i", solo_flac, "-c:a", "libvorbis", "-b:a", "128k", solo_ogg]
 	subprocess.run(args)
+	full_ogg = f"{temp_dir}{tmpl}-full.ogg"
+	args = ["ffmpeg", "-y", "-i", base_flac, "-i", solo_flac, "-filter_complex", "[0][1]amerge=inputs=2,pan=stereo|FL<c0+c1|FR<c2+c3[a]", "-map", "[a]", full_ogg]
 	import zipfile
 	with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as z:
 		z.write(rhythmgame_notes, arcname="rhythmgame_notechart.gml")
 		z.write(rhythmgame_load, arcname="rhythmgame_song_load.gml")
 		z.write(base_ogg, arcname=f"{tmpl}-base.ogg")
+		z.write(solo_ogg, arcname=f"{tmpl}-solo.ogg")
 		z.write(full_ogg, arcname=f"{tmpl}-full.ogg")
 	return nc

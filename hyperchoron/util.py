@@ -3,8 +3,7 @@ import csv
 import datetime
 import fractions
 import itertools
-from math import ceil, isqrt, sqrt, log2, log10, gcd
-from operator import itemgetter
+from math import ceil, isqrt, sqrt, log2, log10, gcd, lcm
 import os
 from .mappings import note_names
 
@@ -340,24 +339,63 @@ def merge_imports(inputs, ctx):
 			speed_info = speed_info or data.speed_info
 	if event_list:
 		from . import midi
-		if len(event_list) > 1:
-			all_events = list(itertools.chain.from_iterable(event_list))
-		else:
-			all_events = event_list[0]
-		all_events.sort(key=itemgetter(1))
-		speed_info = midi.get_step_speed(all_events, ctx=ctx)
+		# if len(event_list) > 1:
+		# 	all_events = list(itertools.chain.from_iterable(event_list))
+		# else:
+		# 	all_events = event_list[0]
+		# all_events.sort(key=itemgetter(1))
+		# speed_info = midi.get_step_speed(all_events, ctx=ctx)
+		main_speed_info = None
+		main_tempo = 0
 		for midi_events in event_list:
+			speed_info = midi.get_step_speed(midi_events, ctx=ctx)
 			notes, nc, is_org, instrument_activities2, speed_info = midi.deconstruct(midi_events, speed_info, ctx=ctx)
 			merge_activities(instrument_activities, instrument_activities2)
 			note_candidates += nc
 			if len(inputs) == 1:
 				transport = notes
 				break
+			orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
+			speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
+			wait = round(orig_step_ms / speed_ratio / 50) * 50 if ctx.mc_legal else orig_step_ms / speed_ratio
+			tempo = 1000 / wait
+			if main_speed_info is None:
+				main_speed_info = speed_info
+				main_tempo = tempo
+				ratio = 1
+			else:
+				ratio = fractions.Fraction(main_tempo / tempo).limit_denominator(12)
+				if ratio.is_integer():
+					ratio = int(ratio)
+			if type(ratio) is not int:
+				mult = lcm(ratio.numerator, ratio.denominator)
+				r = mult // ratio.numerator
+				last = []
+				temp = []
+				for i in range(r * len(transport)):
+					if i % r == 0:
+						last = transport[i // r]
+						temp.append(last)
+						last = last.copy()
+						for j, note in enumerate(last):
+							if note[0] == -1:
+								continue
+							last[j] = (*note[:2], 0, *note[3:])
+					else:
+						temp.append(last)
+				transport = temp
+				ratio = mult // ratio.denominator
+			speed_info = (orig_ms_per_clock / ratio, real_ms_per_clock, scale, orig_step_ms, _orig_tempo)
+			if ratio < 1:
+				ratio = 1 / ratio
+				notes, transport = transport, notes
+			print(ratio)
+			ratio = round(ratio)
 			for i, beat in enumerate(notes):
-				if len(transport) <= i:
-					transport.append(beat)
-				else:
-					transport[i].extend(beat)
+				i2 = i * ratio
+				while len(transport) <= i2:
+					transport.append([])
+				transport[i2].extend(beat)
 		if is_org:
 			ctx.transpose += 12
 	if not speed_info:

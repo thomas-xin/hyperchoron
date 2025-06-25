@@ -2,7 +2,7 @@ from collections import deque, namedtuple
 import csv
 from dataclasses import dataclass
 import fractions
-from math import ceil, sqrt
+from math import ceil, sqrt, log2
 import os
 from types import SimpleNamespace
 try:
@@ -251,12 +251,12 @@ class ChannelStats:
 			pass
 		while len(self.c) <= i:
 			self.c.append(self.StatTypes(1, 0, 0, 2))
-		print(i, len(self.c))
 		return self.c[i]
 
 def deconstruct(midi_events, speed_info, ctx=None):
 	played_notes = []
 	max_pitch = 101 if not ctx.mc_legal else 84
+	allow_stacks = ctx.mc_legal
 	active_notes = {i: [] for i in range(len(material_map))}
 	active_notes[-1] = []
 	active_nc = 0
@@ -456,16 +456,38 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								offset = note.offset = long_notes % period if long else 0
 							elif round((timestamp_approx - note.start) / sms) % note.period != note.offset:
 								priority = -1
-							bucket = (instrument, pitch)
+							if not allow_stacks:
+								if ticked and len(next(iter(ticked))) == 2:
+									bucket = (instrument, pitch)
+								elif len(ticked) >= 36:
+									ticked2 = {}
+									for k, v in ticked.items():
+										k2 = k[:2]
+										try:
+											temp = ticked2[k2]
+										except KeyError:
+											temp = ticked2[k2] = v
+										else:
+											temp[0] = max(temp[0], v[0])
+											temp[1] |= v[1]
+											temp[3] = temp[3] if temp[2] > v[2] else v[3]
+											temp[2] = temp[2] + v[2]
+									ticked = ticked2
+									bucket = (instrument, pitch)
+								else:
+									bucket = (instrument, pitch, len(ticked))
+							else:
+								bucket = (instrument, pitch)
 							try:
 								temp = ticked[bucket]
 							except KeyError:
-								temp = ticked[bucket] = [priority, long, log2lin(volume / 127) ** 2, panning]
+								temp = ticked[bucket] = [priority, long, log2lin(volume / 127), panning]
 							else:
+								v = log2lin(volume / 127)
 								temp[0] = max(temp[0], priority)
 								temp[1] |= long
-								temp[3] = temp[3] if temp[2] > volume ** 2 else panning
-								temp[2] = temp[2] + log2lin(volume / 127) ** 2
+								temp[3] = temp[3] if temp[2] > v else panning
+								temp[2] = temp[2] + v
 							long_notes += long
 						if timestamp_approx >= end or len(notes) >= 64 and not needs_sustain:
 							notes.pop(i)
@@ -479,10 +501,8 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				beat = []
 				poly = {}
 				for k, v in ticked.items():
-					instrument, pitch = k
+					instrument, pitch, *_ = k
 					priority, long, volume, pan = v
-					# After the per-note formula is applied, the result of multiple notes quantised into one will have a volume equal to the root mean square.
-					volume = sqrt(volume)
 					count = max(1, int(volume))
 					vel = max(1, min(127, round(lin2log(volume / count) * 127)))
 					block = NoteSegment(instrument, pitch, priority, long, vel, pan)
@@ -500,6 +520,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						instrument_activities[instrument][1] = max(instrument_activities[instrument][1], poly[instrument])
 					except KeyError:
 						instrument_activities[instrument] = [volume, poly[instrument]]
+				ticked = None
 				played_notes.append(beat)
 				timestamp += curr_step
 				if isinstance(timestamp, int) or timestamp.is_integer():
@@ -574,6 +595,8 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 	for i, beat in enumerate(notes):
 		tick = i * resolution
 		taken = []
+		if len(next_active) >= 36:
+			next_active.clear()
 		active, next_active = [n for n in active if n.aligned >= tick - resolution * 2] + next_active, []
 		last_notes, next_notes = next_notes, set()
 		last_drums, next_drums = next_drums, []
@@ -719,121 +742,145 @@ def load_midi(file):
 
 
 def proceed_save_midi(output, out_name, is_csv, instruments, wait, resolution):
+	instruments = instruments.copy()
+	remaining = set(range(16))
+	for ins in instruments:
+		ins.ccount = log2(ins.event_count) if ins.event_count > 0 else -1
+		remaining.remove(ins.channel)
+		ins.channels = [ins.channel]
+		ins.taken = [0]
+		ins.poly = [0]
+		ins.eff = [0]
+	remaining.discard(9)
+	for r in remaining:
+		temp = sorted((ins for ins in instruments if ins.type >= 0), key=lambda ins: ins.ccount, reverse=True)
+		ins = temp[0]
+		ins.channels.append(r)
+		ins.taken.append(0)
+		ins.poly.append(0)
+		ins.eff.append(0)
+		ins.ccount -= 2
+	instruments.sort(key=lambda ins: ins.id)
+	pans = [64] * 16
+	vols = [127] * 16
+	bends = [0] * 16
+	highest_track = len(instruments)
+	rows = []
+	nc = 0
+	for idx, ins in enumerate(instruments, 1):
+		notes = deque(ins.notes)
+		nc += len(notes)
+		start = 0
+		instrument = []
+		for c in ins.channels:
+			i = c + 1
+			instrument.extend([
+				[i, start, "Title_t", ins.name],
+				[i, start, "Program_c", c, ins.id if ins.id >= 0 else 0],
+				[i, start, "Control_c", c, 10, 64],
+				[i, start, "Control_c", c, 7, 127],
+			])
+			if ins.pitchbend_range:
+				instrument.extend([
+					[i, start, "Control_c", c, 101, 0],
+					[i, start, "Control_c", c, 100, 0],
+					[i, start, "Control_c", c, 6, ins.pitchbend_range],
+					[i, start, "Control_c", c, 100, 127],
+					[i, start, "Control_c", c, 101, 127],
+				])
+		highest_track = max(highest_track, max(ins.channels) + 1)
+		end = start
+		while notes:
+			note = notes.popleft()
+			pitch = round(note.pitch)
+			fine = note.pitch - pitch
+			nend = note.tick + note.length
+			if note.events or fine != 0:
+				n = 0 if len(ins.channels) <= 1 else min((t, i) for i, t in enumerate(ins.taken[1:], 1))[1]
+				if nend > ins.eff[n]:
+					ins.eff[n] = nend
+				if nend > ins.taken[n]:
+					ins.poly[n] = 1
+					ins.taken[n] = nend
+				else:
+					ins.poly[n] += 1
+				c = ins.channels[n]
+				i = c + 1
+				if note.panning != pans[c]:
+					pans[c] = note.panning
+					instrument.append([i, note.tick, "Control_c", c, 10, pans[c]])
+				target_vol = round(note.volume / note.max_volume * 127) if note.volume != note.max_volume else 127
+				if vols[c] != 127 or vols[c] != target_vol:
+					vols[c] = target_vol
+					instrument.append([i, note.tick, "Control_c", c, 7, vols[c]])
+				bend = 8192 if fine == 0 or not ins.pitchbend_range else round(8191 * fine / ins.pitchbend_range) + 8192
+				if bends[c] != -1 or bend != 8192:
+					instrument.append([i, note.tick, "Pitch_bend_c", c, bend])
+					if bend != 8192:
+						bends[c] = note.tick
+					elif bends[c] < note.tick:
+						bends[c] = -1
+			else:
+				try:
+					n = next(i for i, t in enumerate(ins.taken) if t <= note.tick and ins.eff[i] <= note.tick)
+				except StopIteration:
+					n = min((t, i) for i, t in enumerate(ins.poly))[1]
+				if ins.eff[n] > note.tick:
+					n = 0
+				if nend > ins.taken[n]:
+					ins.poly[n] = 1
+					ins.taken[n] = nend
+				else:
+					ins.poly[n] += 1
+				c = ins.channels[n]
+				i = c + 1
+				target_vol = 127
+			instrument.extend((
+				[i, note.tick, "Note_on_c", c, pitch, 127 if target_vol != 127 else round(note.max_volume)],
+				[i, note.tick + note.length, "Note_off_c", c, pitch, 0],
+			))
+			for tick, mode, value in note.events:
+				match mode:
+					case "panning":
+						mode_i = 10
+						if pans[c] == value:
+							continue
+						pans[c] = value
+					case "volume":
+						mode_i = 7
+						if vols[c] == value:
+							continue
+						vols[c] = value = round(value / note.max_volume * 127)
+					case "pitch":
+						bend = round(8191 * (value - pitch) / ins.pitchbend_range) + 8192
+						instrument.append([i, tick, "Pitch_bend_c", c, bend])
+						if bend != 8192 and tick > bends[c]:
+							bends[c] = tick
+						continue
+					case _:
+						raise NotImplementedError(mode)
+				instrument.append([i, tick, "Control_c", c, mode_i, value])
+			end = max(end, note.tick + note.length)
+		rows.extend(instrument)
+	max_event = max(e[1] for e in rows)
+	for i in range(1, highest_track):
+		rows.insert(0, [i + 1, 0, "Start_track"])
+	for i in range(highest_track):
+		rows.append([i + 1, max_event, "End_track"])
+	rows.sort(key=lambda e: (e[0], e[1]))
 	import io
 	b = open(output, "w", newline="", encoding="utf-8") if is_csv else io.StringIO()
-	nc = 0
 	with b:
-		instruments = sorted(instruments, key=lambda ins: ins.event_count, reverse=True)
 		writer = csv.writer(b)
 		writer.writerows([
-			[0, 0, "Header", 1, len(instruments) * 2 + 1, resolution * 24],
+			[0, 0, "Header", 1, highest_track, resolution * 24],
 			[1, 0, "Start_track"],
 			[1, 0, "Title_t", out_name],
 			[1, 0, "Copyright_t", DEFAULT_NAME],
 			[1, 0, "Text_t", DEFAULT_DESCRIPTION],
 			[1, 0, "Time_signature", 4, 4, 8, 8],
 			[1, 0, "Tempo", wait * 24],
-			[1, 0, "End_track"],
 		])
-		highest_channel = max(ins.channel for ins in instruments if ins.channel != 9)
-		rows = []
-		for idx, ins in enumerate(instruments, 2):
-			notes = deque(ins.notes)
-			nc += len(notes)
-			start = 0
-			if ins.pitchbend_range and highest_channel < 15:
-				alt_channel = highest_channel + 1
-				if alt_channel == 9:
-					alt_channel += 1
-				highest_channel = alt_channel
-			else:
-				alt_channel = ins.channel
-			alt_idx = idx + len(instruments)
-			pan = 64
-			vol = 127
-			bent = -1
-			instrument = []
-			instrument.extend([
-				[idx, start, "Start_track"],
-				[idx, start, "Title_t", ins.name],
-				[idx, start, "Program_c", ins.channel, ins.id if ins.id >= 0 else 0],
-				[idx, start, "Control_c", ins.channel, 10, 64],
-				[idx, start, "Control_c", ins.channel, 7, 127],
-				[idx, start, "Control_c", ins.channel, 101, 0],
-				[idx, start, "Control_c", ins.channel, 100, 0],
-				[idx, start, "Control_c", ins.channel, 6, ins.pitchbend_range or 12],
-				[idx, start, "Control_c", ins.channel, 100, 127],
-				[idx, start, "Control_c", ins.channel, 101, 127],
-			])
-			instrument.extend([
-				[alt_idx, start, "Start_track"],
-				[alt_idx, start, "Title_t", ins.name],
-				[alt_idx, start, "Program_c", alt_channel, ins.id if ins.id >= 0 else 0],
-				[alt_idx, start, "Control_c", alt_channel, 10, 64],
-				[alt_idx, start, "Control_c", alt_channel, 7, 127],
-				[alt_idx, start, "Control_c", alt_channel, 101, 0],
-				[alt_idx, start, "Control_c", alt_channel, 100, 0],
-				[alt_idx, start, "Control_c", alt_channel, 6, ins.pitchbend_range or 12],
-				[alt_idx, start, "Control_c", alt_channel, 100, 127],
-				[alt_idx, start, "Control_c", alt_channel, 101, 127],
-			])
-			end = start
-			while notes:
-				note = notes.popleft()
-				pitch = round(note.pitch)
-				fine = note.pitch - pitch
-				channel = alt_channel 
-				if note.events or fine != 0:
-					channel = alt_channel
-					i = alt_idx
-					if note.panning != pan:
-						pan = note.panning
-						instrument.append([i, note.tick, "Control_c", channel, 10, pan])
-					target_vol = note.volume / note.max_volume * 127 if note.volume != note.max_volume else 127
-					if vol != 127 or vol != target_vol:
-						vol = target_vol
-						instrument.append([i, note.tick, "Control_c", channel, 7, vol])
-					bend = 8192 if fine == 0 or not ins.pitchbend_range else round(8191 * fine / ins.pitchbend_range) + 8192
-					if bent != -1 or bend != 8192:
-						instrument.append([i, note.tick, "Pitch_bend_c", channel, bend])
-						if bend != 8192:
-							bent = note.tick
-						elif bent < note.tick:
-							bent = -1
-				else:
-					channel = ins.channel
-					i = idx
-					target_vol = 127
-				instrument.extend((
-					[i, note.tick, "Note_on_c", channel, pitch, 127 if target_vol != 127 else note.max_volume],
-					[i, note.tick + note.length, "Note_off_c", channel, pitch, 0],
-				))
-				for tick, mode, value in note.events:
-					match mode:
-						case "panning":
-							mode_i = 10
-							if pan == value:
-								continue
-							pan = value
-						case "volume":
-							mode_i = 7
-							if vol == value:
-								continue
-							vol = value = value / note.max_volume * 127
-						case "pitch":
-							bend = round(8191 * (value - pitch) / ins.pitchbend_range) + 8192
-							instrument.append([i, tick, "Pitch_bend_c", channel, bend])
-							if bend != 8192 and tick > bent:
-								bent = tick
-							continue
-						case _:
-							raise NotImplementedError(mode)
-					instrument.append([i, tick, "Control_c", channel, mode_i, value])
-				end = max(end, note.tick + note.length)
-			instrument.append([idx, end, "End_track"])
-			instrument.append([alt_idx, end, "End_track"])
-			rows.extend(instrument)
-		rows.sort(key=lambda e: (e[0], e[1]))
 		writer.writerows(rows)
 		writer.writerows([[0, 0, "End_of_file"]])
 		if not is_csv:
