@@ -67,7 +67,8 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 		if beat:
 			if len(beat) >= 12:
 				beat = [note if note[2] >= 0 else (*note[:2], 0, *note[3:]) for note in beat]
-			ordered = sorted(beat, key=lambda note: transport_note_priority(note, sustained=(note[0], note[1] - c1) in active), reverse=True)
+			highest_pitch = max(note[1] for note in beat)
+			ordered = sorted(beat, key=lambda note: transport_note_priority(note, sustained=(note[1] == highest_pitch) + ((note[0], note[1] - c1) in active)), reverse=True)
 			lowest = min((note[0] == -1, note[1], note) for note in beat)[-1]
 			if sum(note[0] != -1 for note in ordered) >= 8 and org_instrument_selection[lowest[0]] >= 0:
 				lowest_to_remove = True
@@ -87,7 +88,6 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 				if lowest[0] != 10 and lowest[1] < c4 - 12:
 					pitch = round(lowest[1])
 					lowest = (12, pitch, lowest[2], lowest[3], min(max_vol, lowest[4] * 3 / 2), lowest[5])
-				ordered.sort(key=lambda note: (note[2] + round(note[4] * 8 / max_vol), note[1]), reverse=True)
 				ordered.insert(0, lowest)
 			elif len(ordered) > 1:
 				ordered.remove(lowest)

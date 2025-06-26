@@ -216,6 +216,8 @@ event_dict = dict(
 MIDIEvents = namedtuple("MIDIEvents", tuple(t.upper() for t in event_dict))
 event_types = MIDIEvents(*event_dict.values())
 
+# The commented code below was a work-in-progress MIDI parser that was ultimately scrapped due to having worse performance than Midicsv.exe; eventually a rewrite in Rust or similar language may be due.
+
 # from libmidi.types.messages import meta  # noqa: E402
 # _orig = meta.BaseMessageMetaText.__dict__['from_bytes'].__func__
 
