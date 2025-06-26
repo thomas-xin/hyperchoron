@@ -509,8 +509,7 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 	dynamic_solo = false;
 	track_length = {max_duration / seconds_per_tick};
 """ + """
-	if (arg3) {
-	} else if (arg0 >= 0) {
+	if (!arg3) {
 		scr_rhythmgame_notechart_lead(arg0);
 		if (tutorial > 0) scr_rhythmgame_toggle_notes(false);
 		musicm.bpm = bpm;
