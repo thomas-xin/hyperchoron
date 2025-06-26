@@ -2,7 +2,7 @@ from collections import deque, namedtuple
 import csv
 from dataclasses import dataclass
 import fractions
-from math import ceil, sqrt, log2
+from math import ceil, sqrt, log2, hypot
 import os
 from types import SimpleNamespace
 try:
@@ -487,7 +487,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								temp[0] = max(temp[0], priority)
 								temp[1] |= long
 								temp[3] = temp[3] if temp[2] > v else panning
-								temp[2] = temp[2] + v
+								temp[2] = temp[2] + v if abs(timestamp_approx - time) < 1 / 24000 else hypot(temp[2], v)
 							long_notes += long
 						if timestamp_approx >= end or len(notes) >= 64 and not needs_sustain:
 							notes.pop(i)
