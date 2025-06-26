@@ -1123,7 +1123,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 		)
 	)
 	extremities = get_bounding(master)
-	print(extremities)
+	# print(extremities)
 	return schem, extremities, nc
 
 
@@ -1144,7 +1144,7 @@ def load_nbs(file):
 		[0, 0, "header", 1, 9 + 1, 1],
 		[1, 0, "tempo", 1000 * 1000 / header.tempo],
 	]
-	print(header.tempo)
+	# print(header.tempo)
 	for i in range(len(midi_instrument_selection) - 1):
 		events.append([i + 2, 0, "program_c", i + 10, midi_instrument_selection[i]])
 	ticked = {}

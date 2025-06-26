@@ -637,7 +637,8 @@ function scr_rhythmgame_toggle_notes(arg0, arg1 = true) {
 	args = ["ffmpeg", "-y", "-i", solo_flac, "-c:a", "libvorbis", "-b:a", "128k", solo_ogg]
 	subprocess.run(args)
 	full_ogg = f"{temp_dir}{tmpl}-full.ogg"
-	args = ["ffmpeg", "-y", "-i", base_flac, "-i", solo_flac, "-filter_complex", "[0][1]amerge=inputs=2,pan=stereo|FL<c0+c1|FR<c2+c3[a]", "-map", "[a]", full_ogg]
+	args = ["ffmpeg", "-y", "-i", base_flac, "-i", solo_flac, "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest", full_ogg]
+	subprocess.run(args)
 	import zipfile
 	with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as z:
 		z.write(rhythmgame_notes, arcname="rhythmgame_notechart.gml")

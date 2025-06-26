@@ -54,7 +54,7 @@ def csv2midi(file, output):
 		import subprocess
 		p = subprocess.Popen(["Csvmidi.exe", "-", output], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 		b = file.read().encode("utf-8")
-		print(p.communicate(b))
+		p.communicate(b)
 	return output
 
 
@@ -369,9 +369,10 @@ def deconstruct(midi_events, speed_info, ctx=None):
 								instrument = instrument_map[channel]
 								for note in active_notes[instrument]:
 									if note.channel == channel:
-										note.priority = max(note.priority, 1)
 										note.length = max(note.length, float(timestamp_approx + curr_frac - note.start))
-										note.sustain = True
+										if not note.sustain:
+											note.priority = max(note.priority, 1)
+											note.sustain = True
 					case event_types.CONTROL_C if int(event[4]) == 6:
 						channel = int(event[3])
 						channel_stats[channel].bend_range = int(event[5])
@@ -657,7 +658,7 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 					if abs(diff) > closest:
 						continue
 					if diff != 0:
-						if last_pan != panning or last_note.aligned - last_note.tick > resolution * 3:
+						if abs(last_pan - panning) > 1 / 8 and priority >= 1:
 							continue
 						if abs(diff) > 2:
 							continue
@@ -665,7 +666,7 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 							continue
 						if last_vol + 8 <= volume:
 							continue
-						if abs(diff) > 1 and last_note.aligned - last_note.tick > resolution:
+						if abs(diff) > 1 and priority >= 1 and last_note.aligned - last_note.tick > resolution * 3 and not last_note.events:
 							continue
 					target = last_note
 					closest = abs(diff)

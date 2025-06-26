@@ -134,7 +134,7 @@ Converting a raw audio file into a MIDI project file, transcribing all notes up 
   - .nbt: A Minecraft NBT structure file, normally intended for use with structure blocks. However, in practice the outputs are usually too large, and will need a third-party mod (litematica included) to paste properly.
   - .org
   - .🗿/.moai
-  - .zip (currently placeholder): An archive containing files that enable playing the song in the Deltarune rhythm game. Included will be two .ogg files which must be placed in the `mus` folder, as well as `rhythmgame_notechart.gml` and `rhythmgame_song_load.gml` files, which must be imported into the `data.win` code using a tool such as UndertaleModTool. See https://youtu.be/rSE3DecbFsM as a guide for this! Requires FFmpeg installed in PATH, as Deltarune requires vorbis-encoded audio.
+  - .zip (currently placeholder): An archive containing files that enable playing the song in the Deltarune rhythm game. Included will be three .ogg files which must be placed in the `mus` folder, as well as `rhythmgame_notechart.gml` and `rhythmgame_song_load.gml` files, which must be imported into the `data.win` code using a tool such as UndertaleModTool. See https://youtu.be/rSE3DecbFsM as a guide for this! Requires FFmpeg installed in PATH, as Deltarune requires vorbis-encoded audio.
 - WIP:
   - .xm
   - .wav (+ FFmpeg outputs)
