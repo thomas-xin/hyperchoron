@@ -15,6 +15,8 @@ def run_conversion(ctx, fi, *fo):
 		args.append("-ik")
 	if ctx.minecart_improvements:
 		args.append("-mi")
+	if ctx.command_blocks:
+		args.append("-cb")
 	print(args)
 	return subprocess.Popen(args)
 def wait_procs(procs, max_workers=12):

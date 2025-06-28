@@ -1,7 +1,7 @@
 from collections import abc, deque, namedtuple
 import copy
 import functools
-from math import ceil, sqrt
+from math import ceil, sqrt, log2
 import litemapy
 from nbtlib.tag import Int, Double, String, List, Compound, Byte
 import numpy as np
@@ -141,7 +141,6 @@ def get_note_mat(note, odd=False):
 
 def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=None):
 	base, pitch = get_note_mat(note, odd=odd)
-	assert isinstance(pitch, int), "Finetune not supported in vanilla!"
 	x, y, z = positioning
 	coords = [(x, y - 1, z), (x, y, z), (x, y + 1, z)]
 	if replace and base in replace:
@@ -157,15 +156,26 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=Non
 		return
 	if base.endswith("_head") or base.endswith("_skull"):
 		yield from (
-			(coords[1], "note_block", dict(note=pitch, instrument=instrument_names[base])),
+			(coords[1], "note_block", dict(note=round(pitch), instrument=instrument_names[base])),
 			(coords[2], base),
+		)
+		return
+	# assert isinstance(pitch, int), "Finetune not supported in vanilla!"
+	use_command_block = not isinstance(pitch, int) and not pitch.is_integer() and ctx and (ctx.command_blocks or ctx.command_blocks is None and not ctx.mc_legal)
+	if use_command_block:
+		p = 2 ** max(-1, min(1, (pitch / 12 - 1)))
+		command = f"playsound minecraft:block.note_block.{instrument_names[base]} record @a[distance=..48] ~ ~ ~ 3 {p}"
+		compound = Compound({'id': String('minecraft:command_block'), 'Command': String(command)})
+		yield from (
+			(coords[1], "note_block", dict(note=round(pitch), instrument="custom_head")),
+			(coords[2], "command_block", dict(conditional="false", facing="up"), compound),
 		)
 		return
 	if base in falling_blocks:
 		yield ((x, y - 2, z), "tripwire")
 	yield from (
 		(coords[0], base),
-		(coords[1], "note_block", dict(note=pitch, instrument=instrument_names[base])),
+		(coords[1], "note_block", dict(note=round(pitch), instrument=instrument_names[base])),
 		(coords[2], "air"),
 	)
 
@@ -340,10 +350,15 @@ def duplicate_region(reg):
 	new_region._Region__palette = reg._Region__palette.copy()
 	return new_region
 
-def setblock(dst, coords, block, no_replace=()):
+def setblock(dst, coords, block, no_replace=(), tile_entity=None):
 	"""
 	Sets a block in a region at the specified coordinates. Unlike the original method in litemapy, this one accepts out-of-bounds coordinates and will reallocate the region if necessary. Returns the (possibly reallocated) region, alongside a dictionary of the (possible reallocated) palette. Use a custom dictionary-based palette to avoid the O(n^2) overhead in litemapy from calling `.index()` and `__contains__()` on the palette for every single entry.
+	Optionally includes a tile entity to assign alongside the block.
 	"""
+	if tile_entity:
+		tile_entity["x"], tile_entity["y"], tile_entity["z"] = map(Int, coords)
+		dst.tile_entities.append(litemapy.TileEntity(tile_entity))
+
 	palette = map_palette(dst)
 	try:
 		if not no_replace:
@@ -551,12 +566,17 @@ def flip_region(region, axes=2):
 		axes = [axes]
 	for axis in axes:
 		flip_palette(region._Region__palette, axis)
-		# if axis == 0:
-		# 	region._Region__x -= region.max_x() - region.min_x()
-		# elif axis == 1:
-		# 	region._Region__y -= region.max_y() - region.min_y()
-		# elif axis == 2:
-		# 	region._Region__z -= region.max_z() - region.min_z()
+	if axes and region.tile_entities:
+		mx, my, mz, Mx, My, Mz = get_bounding(region)
+		for e in region.tile_entities:
+			x, y, z = e.position
+			if 0 in axes:
+				x = Mx - x + mx
+			if 1 in axes:
+				y = My - y + my
+			if 2 in axes:
+				z = Mz - z + mz
+			e.position = (x, y, z)
 	return region
 
 flips = [
@@ -600,6 +620,13 @@ def _optimize_palette(self) -> None:
 		# Update blocks to reflect the new palette
 		self._Region__replace_palette_index(old_index, new_index)
 	self._Region__palette = new_palette
+	# Additionally fix list of tile entities to only contain one per block (assertion is for tests)
+	# for te in self.tile_entities:
+	# 	tid, pos = te.data["id"].split(":", 1)[-1], te.position
+	# 	assert tid in self[pos].id, (self[pos], te.data["id"], pos)
+	tile_entity_map = {te.position: te for te in self.tile_entities}
+	if len(self.tile_entities) != len(tile_entity_map):
+		self.tile_entities = list(tile_entity_map.values())
 litemapy.schematic.Region._optimize_palette = _optimize_palette
 
 Region = namedtuple("Region", ("mx", "my", "mz", "Mx", "My", "Mz"))
@@ -702,9 +729,9 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 
 			def add_note(note, tick):
 				nonlocal main, nc
-				note = (note[0], round(note[1]), *note[2:])
+				# note = (note[0], round(note[1]), *note[2:])
 				pitch = note[1]
-				note_hash = note[0] ^ pitch // 36
+				note_hash = note[0] ^ round(pitch) // 36
 				panning = note[5]
 				volume = note[4]
 				if note[2] <= 0:
@@ -762,11 +789,14 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					ctx=ctx,
 				)
 				for coords, block, *kwargs in blocks:
+					tile_entity = None
 					if kwargs:
+						if len(kwargs) > 1:
+							tile_entity =  kwargs[1]
 						target = litemapy.BlockState(f"minecraft:{block}", **{k: str(v) for k, v in kwargs[0].items()})
 					else:
 						target = static_blocks.get(block) or static_blocks.setdefault(block, litemapy.BlockState(f"minecraft:{block}"))
-					if target.id == "minecraft:note_block":
+					if target.id in ("minecraft:note_block", "minecraft:command_block"):
 						nc += 1
 						if xi != 1:
 							if tick & 8:
@@ -779,12 +809,12 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 								main = setblock(main, before, litemapy.BlockState("minecraft:wall_torch", facing="east"))
 					coords = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z - main.z)
 					no_replace = ("minecraft:observer", "minecraft:repeater", "minecraft:wall_torch") if block == "tripwire" else ()
-					main = setblock(main, coords, target, no_replace=no_replace)
+					main = setblock(main, coords, target, tile_entity=tile_entity, no_replace=no_replace)
 
 			def add_recurring(half, ins, pitch, volume, panning):
 				nonlocal main, nc
-				pitch = round(pitch)
-				note_hash = ins ^ pitch // 36
+				# pitch = round(pitch)
+				note_hash = ins ^ round(pitch) // 36
 				if panning == 0:
 					panning = 1 if note_hash & 1 else -1
 				note = (ins, pitch, 2, 1, volume, panning)
@@ -847,13 +877,16 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					ctx=ctx,
 				)
 				for coords, block, *kwargs in blocks:
+					tile_entity = None
 					if kwargs:
+						if len(kwargs) > 1:
+							tile_entity = kwargs[1]
 						target = litemapy.BlockState(f"minecraft:{block}", **{k: str(v) for k, v in kwargs[0].items()})
 					else:
 						target = static_blocks.get(block) or static_blocks.setdefault(block, litemapy.BlockState(f"minecraft:{block}"))
 					for z2 in range(2):
 						coords2 = (coords[0] + x - main.x, coords[1] - main.y + 1, coords[2] + z - main.z + 2 + z2 * 2)
-						main = setblock(main, coords2, target)
+						main = setblock(main, coords2, target, tile_entity=tile_entity)
 
 			held_notes = [{}, {}]
 			if not edge and len(notes) >= ticks_per_segment:
@@ -1008,7 +1041,6 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 		if backwards:
 			secondary_width = main.max_x() + main.x
 			tile_width = primary_width + secondary_width
-			# print(primary_width, secondary_width, tile_width)
 			main = flip_region(main)
 			main._Region__x -= tile_width
 		else:
@@ -1144,7 +1176,6 @@ def load_nbs(file):
 		[0, 0, "header", 1, 9 + 1, 1],
 		[1, 0, "tempo", 1000 * 1000 / header.tempo],
 	]
-	# print(header.tempo)
 	for i in range(len(midi_instrument_selection) - 1):
 		events.append([i + 2, 0, "program_c", i + 10, midi_instrument_selection[i]])
 	ticked = {}
@@ -1239,6 +1270,10 @@ def save_nbs(transport, output, speed_info, ctx):
 			volume = note[4] / 127 * 100
 			if note[2] <= 0:
 				volume *= min(1, 0.9 ** (tempo / 20))
+			if ctx.command_blocks or ctx.command_blocks is None and not ctx.mc_legal:
+				pass
+			else:
+				pitch = round(pitch)
 			raw_key = round(pitch)
 			kwargs = {}
 			if volume != 100:
