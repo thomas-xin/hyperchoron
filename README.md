@@ -20,39 +20,57 @@ usage: hyperchoron [-h] [-V] -i INPUT [INPUT ...] -o [OUTPUT ...] [-r [RESOLUTIO
 MIDI-Tracker-DAW converter and Minecraft Note Block exporter
 
 options:
+usage: hyperchoron [-h] [-V] -i INPUT [INPUT ...] -o [OUTPUT ...] [-r [RESOLUTION]] [-s [SPEED]] [-v [VOLUME]]
+                   [-t [TRANSPOSE]] [-ik | --invert-key | --no-invert-key] [-sa [STRUM_AFFINITY]]
+                   [-d | --drums | --no-drums] [-ml | --mc-legal | --no-mc-legal] [-md [MAX_DISTANCE]]
+                   [-cb | --command-blocks | --no-command-blocks]
+                   [-mi | --minecart-improvements | --no-minecart-improvements]
+
+MIDI-Tracker-DAW converter and Minecraft Note Block exporter
+
+options:
   -h, --help            show this help message and exit
-  -V, --version         show program's version number and exit
+  -V, --version         show program's version and exit
   -i, --input INPUT [INPUT ...]
                         Input file (.zip | .mid | .csv | .nbs | .org | *)
   -o, --output [OUTPUT ...]
                         Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | *)
   -r, --resolution [RESOLUTION]
-                        Target resolution of represented data in intermediate formats. Defaults to 20 for
-                        Minecraft outputs, 50 otherwise
+                        Target time resolution of data, in hertz (per-second). Defaults to 20 for Minecraft outputs,
+                        40 otherwise
   -s, --speed [SPEED]   Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster.
                         Defaults to 1
   -v, --volume [VOLUME]
-                        Scales volume of all notes up/down as a multiplier, applied before note quantisation.
-                        Defaults to 1
+                        Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults
+                        to 1
   -t, --transpose [TRANSPOSE]
-                        Transposes song up/down a certain amount of semitones, applied before instrument
-                        material mapping; higher = higher pitched. Defaults to 0
+                        Transposes song up/down a certain amount of semitones, applied before instrument material
+                        mapping; higher = higher pitched. Defaults to 0
   -ik, --invert-key, --no-invert-key
-                        Experimental: During transpose step, autodetects song key signature, then inverts it
-                        (e.g. C Major <=> C Minor). Defaults to FALSE
+                        Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C
+                        Major <=> C Minor). Defaults to FALSE
   -sa, --strum-affinity [STRUM_AFFINITY]
-                        Increases or decreases threshold for sustained notes to be cut into discrete segments;
-                        higher = more notes. Defaults to 1
+                        Increases or decreases threshold for sustained notes to be cut into discrete segments; higher
+                        = more notes. Defaults to 1
   -d, --drums, --no-drums
                         Allows percussion channel. If disabled, percussion channels will be treated as regular
                         instrument channels. Defaults to TRUE
-  -md, --max-distance [MAX_DISTANCE]
-                        For Minecraft outputs: Restricts the maximum block distance the notes may be placed
-                        from the centre line of the structure, in increments of 3 (one module). Controls the
-                        ratio of compactness vs note volume accuracy. Defaults to 42
   -ml, --mc-legal, --no-mc-legal
-                        Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic,
-                        .mcfunction and .nbt outputs, FALSE otherwise
+                        Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic, .mcfunction
+                        and .nbt outputs, FALSE otherwise
+  -md, --max-distance [MAX_DISTANCE]
+                        For Minecraft outputs only: Restricts the maximum block distance the notes may be placed from
+                        the centre line of the structure, in increments of 3 (one module). Decreasing this value makes
+                        the output more compact, at the cost of note volume accuracy. Defaults to 42
+  -cb, --command-blocks, --no-command-blocks
+                        For Minecraft outputs only: Enables the use of command blocks in place of notes that require
+                        finetune/pitchbend to non-integer semitones. Not survival-legal. Defaults to FALSE if --mc-
+                        legal is set, TRUE otherwise
+  -mi, --minecart-improvements, --no-minecart-improvements
+                        For Minecraft outputs only: Assumes the server is running the [Minecart
+                        Improvements](https://minecraft.wiki/w/Minecart_Improvements) version(s). Less powered rails
+                        will be applied on the main track, to account for the increased deceleration. Currently only
+                        semi-functional; the rail section connecting the midway point may be too slow.
 ```
 ### Examples
 Converting a MIDI file into a Minecraft Litematica schematic:
@@ -161,7 +179,7 @@ Odds are, most people finding their way to this repository will be mainly intere
   - Note Sustain: Automatically cut excessively long notes into segments to be replayed several times, preventing notes that are supposed to be sustained from fading out quickly. This adapts based on the volume of the current and adjacent notes, and will automatically offset chords into a strum to avoid excessive sudden loudness.
   - Instrument Mapping: Rather than map all MIDI instruments to a list of blocks and call it a day, this program has the full 6-octave range for all instruments, automatically swapping the materials if a note exceeds the current range. This is very important for most songs as the default range of 2 octaves in vanilla Minecraft means notes will frequently fall out of range. Clipping, dropping or wrapping notes at the boundary are valid methods of handling this, but they do not permit an accurate recreation of the full song.
   - Adding to the previous point, all drums are implemented separately, rather than using only the three drum instruments in vanilla (which end up drowning each other out), some percussion instruments are mapped to other instruments or mob heads, which allows for a greater variety of sound effects.
-  - Pitch Bends: Interpret pitch bends from MIDI files, and automatically convert them into grace notes. This is very important for any MIDI file that includes this mechanic, as the pitch of notes involved will often be very wrong without it.
+  - Pitch Bends: Interpret pitch bends from MIDI files, and automatically convert them into grace notes. This is very important for any MIDI file that includes this mechanic, as the pitch of notes involved will often be very wrong without it. As of 2025/06, pitchbends and finetunes can now be ported over if the `--command-blocks` parameter is set, although this will make the structure illegal for survival mode.
   - Polyphonic Budget: If there are too many notes being played at any given moment, the quietest notes and intermediate notes used for sustain will be discarded first. Depending on the `--max-distance` parameter, the schematic allows for up to 87 notes at any point in time, which decreases if a more compact structure is desired.
   - Full Tick Rate: Using the piston-and-leaves circuit, a 5-gametick delay can be achieved, which allows offsetting from the (usual) even-numbered ticks redstone components are capable of operating at. This means the full 20Hz tick speed of vanilla Minecraft can be accessed, allowing much greater timing precision.
   - Tempo Alignment: The tempo of songs is automatically synced to Minecraft's default tick rate not using the song's time signature, but rather the greatest common denominator of the notes' timestamps, pruning outliers as necessary. This allows keeping in sync with songs with triplets, quintuplets, or any other measurement not divisible by a power of 2. The algorithm falls back to unsynced playback if a good timing candidate cannot be found, which allows songs with tempo changes or that do not follow their defined time signature at all to still function.
