@@ -33,6 +33,7 @@ setup(
         "litemapy>=0.11.0b0",
         "nbtlib>=2.0.4",
         "py_midicsv>=4.1.2",
+        "py7zr>=1.0.0",
         "pynbs>=1.1.0",
         "tqdm>=4.67.1"
     ],
