@@ -209,3 +209,8 @@ def load_wav(file, ctx):
 	events.extend(decompose_stem(tmpl + "-R", -1, monophonic=True, pitch=46, tolerance=24, mult=4))
 	events.extend(decompose_stem(tmpl + "-C", -1, monophonic=True, pitch=49, tolerance=24, mult=4))
 	return events
+
+
+def save_wav(transport, output, ctx):
+	print(ctx)
+	raise

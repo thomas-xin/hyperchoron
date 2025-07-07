@@ -33,6 +33,10 @@ def export(transport, instrument_activities, speed_info, ctx=None):
 			case "zip":
 				from hyperchoron import text
 				nc += text.save_deltarune(transport, output, instrument_activities=instrument_activities, speed_info=speed_info, ctx=ctx)
+			case "wav" | "flac" | "mp3" | "aac" | "ogg" | "opus" | "m4a" | "wma" | "weba" | "webm":
+				from hyperchoron import pcm
+				nc = 0
+				pcm.save_wav(transport, output, ctx=ctx)
 			case _:
 				from hyperchoron import dawvert
 				nc += dawvert.save_arbitrary(transport, output, instrument_activities=instrument_activities, speed_info=speed_info, ctx=ctx)
@@ -93,12 +97,12 @@ def convert_file(args):
 			case "mid" | "midi":
 				from hyperchoron import midi
 				data = midi.load_midi(file)
-			case "wav" | "flac" | "mp3" | "aac" | "ogg" | "opus" | "m4a" | "wma" | "weba" | "webm":
-				from hyperchoron import pcm
-				data = pcm.load_wav(file, ctx=ctx)
 			case "🗿" | "moai":
 				from hyperchoron import text
 				data = text.load_thirtydollar(file)
+			case "wav" | "flac" | "mp3" | "aac" | "ogg" | "opus" | "m4a" | "wma" | "weba" | "webm":
+				from hyperchoron import pcm
+				data = pcm.load_wav(file, ctx=ctx)
 			case _:
 				from hyperchoron import dawvert
 				data = dawvert.load_arbitrary(file, ext)

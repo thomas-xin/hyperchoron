@@ -1,7 +1,7 @@
 from collections import abc, deque, namedtuple
 import copy
 import functools
-from math import ceil, sqrt, log2
+from math import ceil, sqrt
 import litemapy
 from nbtlib.tag import Int, Double, String, List, Compound, Byte
 import numpy as np
@@ -78,6 +78,8 @@ def get_note_mat(note, odd=False):
 	mat = material[ins]
 	if note[3] == 2:
 		replace = dict(
+			shroomlight="amethyst_block",
+			sculk="amethyst_block",
 			hay_block="amethyst_block",
 			emerald_block="amethyst_block",
 			amethyst_block="amethyst_block",
@@ -85,6 +87,8 @@ def get_note_mat(note, odd=False):
 			# glowstone="amethyst_block",
 		)
 		replace.update({
+			"shroomlight+": "amethyst_block+",
+			"sculk+": "amethyst_block+",
 			"hay_block+": "amethyst_block+",
 			"emerald_block+": "amethyst_block+",
 			"amethyst_block+": "amethyst_block+",
@@ -98,12 +102,16 @@ def get_note_mat(note, odd=False):
 			return "PLACEHOLDER", 0
 	elif note[3] and not odd:
 		replace = dict(
+			shroomlight="hay_block",
+			sculk="emerald_block",
 			bamboo_planks="pumpkin",
 			bone_block="gold_block",
 			iron_block="amethyst_block",
 			# glowstone="amethyst_block",
 		)
 		replace.update({
+			"shroomlight+": "hay_block+",
+			"sculk+": "emerald_block+",
 			"bamboo_planks+": "pumpkin+",
 			"gold_block+": "packed_ice+",
 			"bone_block+": "gold_block+",
