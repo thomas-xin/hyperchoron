@@ -16,6 +16,21 @@ if not os.path.exists(temp_dir):
 	os.mkdir(temp_dir)
 csv_reader = type(csv.reader([]))
 
+fluidsynth = os.path.abspath(base_path + "/fluidsynth/fluidsynth")
+
+def get_sf2():
+	sf2convert = os.path.abspath(base_path + "/fluidsynth/sf2convert")
+	s7z = os.path.abspath(base_path + "/fluidsynth/soundfont.7z")
+	sf3 = os.path.abspath(temp_dir + "soundfont.sf3")
+	sf2 = temp_dir + "soundfont.sf2"
+	if not os.path.exists(sf2) or not os.path.getsize(sf2):
+		import py7zr
+		with py7zr.SevenZipFile(s7z, mode='r') as z:
+			z.extractall(temp_dir)
+		import subprocess
+		subprocess.run([sf2convert, "-x", sf3, sf2])
+	return sf2
+
 def round_min(x):
 	try:
 		y = int(x)

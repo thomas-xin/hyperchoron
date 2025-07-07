@@ -95,7 +95,7 @@ Converting a raw audio file into a MIDI project file, transcribing all notes up 
   - .🗿/.moai: Discrete sound effect representation functionally similar to .nbs, supports most Minecraft note block instruments, used for https://thirtydollar.website.
 - WIP (Currently in the works, not yet supported/functional):
   - .xm: Extended Module tracker; a popular project format used in video games, supporting 16-bit instruments, with up to 32 channels, sustain, volume, panning and pitchbends.
-  - .wav: Raw pulse-code modulation representation of audio, including all rendered songs and audio recordings. This means all compressed variants will also gain support, although they will require [FFmpeg](https://www.ffmpeg.org) installed to provide coverage;
+  - .wav: Raw pulse-code modulation representation of audio, including all rendered songs and audio recordings. This means all compressed variants will also gain support:
     - .mp3
     - .flac
     - .wmv

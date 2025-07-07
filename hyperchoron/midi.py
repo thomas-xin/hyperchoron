@@ -230,7 +230,7 @@ class TransportNote:
 	period: int
 	offset: int
 
-NoteSegment = namedtuple("NoteSegment", ("instrument", "pitch", "priority", "long", "velocity", "panning"))
+NoteSegment = namedtuple("NS", ("instrument", "pitch", "priority", "long", "velocity", "panning"))
 
 class ChannelStats:
 	__slots__ = ("c")
@@ -279,17 +279,22 @@ def deconstruct(midi_events, speed_info, ctx=None):
 	leaked_notes = 0
 	allowed_leakage = 0
 	low_precision = len(midi_events) > 262144
+	early_triggers = (event_types.PITCH_BEND_C, event_types.CONTROL_C)
 	with progress as bar:
 		while global_index < len(midi_events):
 			event = midi_events[global_index]
 			event_timestamp = event[1]
 			curr_step = step_ms
 			time = event_timestamp * timescale
-			if latest_timestamp - time >= curr_step / 3 * (leaked_notes >= allowed_leakage) - curr_step / 3:
+			mode = event[2]
+			if mode in early_triggers:
+				condition = latest_timestamp - time >= -curr_step / 2
+			else:
+				condition = latest_timestamp - time >= curr_step / 3 * (leaked_notes >= allowed_leakage) - curr_step / 3
+			if condition:
 				if event_timestamp > last_timestamp:
 					break
 				# Process all events at the current timestamp
-				mode = event[2]
 				match mode:
 					case event_types.PROGRAM_C:
 						channel = int(event[3])
@@ -367,15 +372,41 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							channel_stats[channel].bend = offset
 							if round(offset) != round(prev) and channel in instrument_map:
 								instrument = instrument_map[channel]
+								found = []
 								for note in active_notes[instrument]:
 									if note.channel == channel:
-										note.length = max(note.length, float(timestamp_approx + curr_frac - note.start))
+										new_length = float(timestamp_approx + curr_frac * 1.5 - note.start)
+										if new_length <= note.length:
+											found.append(note)
 										if not note.sustain:
 											note.priority = max(note.priority, 1)
 											note.sustain = True
+								if not found and active_notes[instrument]:
+									for note in active_notes[instrument]:
+										if note.channel == channel:
+											note.length = max(note.length, float(timestamp_approx + curr_frac - note.start))
 					case event_types.CONTROL_C if int(event[4]) == 6:
 						channel = int(event[3])
-						channel_stats[channel].bend_range = int(event[5])
+						bend_range = int(event[5])
+						prev = channel_stats[channel].bend_range
+						if bend_range != prev:
+							note_candidates += 1
+							channel_stats[channel].bend_range = bend_range
+							if round(bend_range) != round(prev) and channel in instrument_map:
+								instrument = instrument_map[channel]
+								found = []
+								for note in active_notes[instrument]:
+									if note.channel == channel:
+										new_length = float(timestamp_approx + curr_frac * 1.5 - note.start)
+										if new_length <= note.length:
+											found.append(note)
+										if not note.sustain:
+											note.priority = max(note.priority, 1)
+											note.sustain = True
+								if not found and active_notes[instrument]:
+									for note in active_notes[instrument]:
+										if note.channel == channel:
+											note.length = max(note.length, float(timestamp_approx + curr_frac - note.start))
 					case event_types.CONTROL_C if int(event[4]) == 7:
 						channel = int(event[3])
 						value = int(event[5])

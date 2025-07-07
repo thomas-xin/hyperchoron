@@ -26,10 +26,11 @@ setup(
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
     install_requires=[
-        "audio-separator>=0.33.0",
+        "audio-separator>=0.34.1",
+        "imageio-ffmpeg>=0.6.0",
         "json5>=0.12.0",
         "librosa>=0.11.0",
-        "litemapy>=0.10.0b0",
+        "litemapy>=0.11.0b0",
         "nbtlib>=2.0.4",
         "py_midicsv>=4.1.2",
         "pynbs>=1.1.0",

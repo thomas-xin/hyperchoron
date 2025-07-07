@@ -10,7 +10,7 @@ from .mappings import (
 	percussion_mats, material_map, pitches, default_instruments,
 	fs1, fs4,
 )
-from .util import round_min, log2lin, lin2log, temp_dir, base_path
+from .util import round_min, log2lin, lin2log, temp_dir, fluidsynth, get_sf2
 
 
 @functools.lru_cache(maxsize=256)
@@ -306,7 +306,7 @@ def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
 	# full_midi = f"{temp_dir}{tmpl}-full.mid"
 	from hyperchoron import midi
 	instruments, wait, resolution = list(midi.build_midi(transport, instrument_activities, speed_info, ctx=ctx))
-	# nc = midi.proceed_save_midi(full_midi, f"{tmpl}-full", False, instruments, wait, resolution)
+	# midi.proceed_save_midi(full_midi, f"{tmpl}-full", False, instruments, wait, resolution)
 	all_notes = []
 	for ins in instruments:
 		all_notes.extend(ins.notes)
@@ -621,23 +621,26 @@ function scr_rhythmgame_toggle_notes(arg0, arg1 = true) {
 		instrument.notes.append(note)
 	solo_midi = f"{temp_dir}{tmpl}-solo.mid"
 	nc += midi.proceed_save_midi(solo_midi, f"{tmpl}-solo", False, instruments, wait, resolution)
-	import os
 	import subprocess
+	import imageio_ffmpeg as ii
+	ffmpeg = ii.get_ffmpeg_exe()
+	sf2 = get_sf2()
+
 	base_flac = f"{temp_dir}{tmpl}-base.flac"
-	args = [os.path.abspath(base_path + "/fluidsynth/fluidsynth"), "-g", "1", "-F", base_flac, "-c", "64", "-o", "synth.polyphony=32767", "-r", "48000", "-n", os.path.abspath(base_path + "/fluidsynth/gm64.sf2"), base_midi]
+	args = [fluidsynth, "-g", "0.5", "-F", base_flac, "-c", "64", "-o", "synth.polyphony=32767", "-r", "48000", "-n", sf2, base_midi]
 	subprocess.run(args)
 	base_ogg = f"{temp_dir}{tmpl}-base.ogg"
-	args = ["ffmpeg", "-y", "-i", base_flac, "-c:a", "libvorbis", "-b:a", "128k", base_ogg]
+	args = [ffmpeg, "-y", "-i", base_flac, "-af", "volume=2", "-c:a", "libvorbis", "-b:a", "128k", base_ogg]
 	proc = subprocess.Popen(args)
 	solo_flac = f"{temp_dir}{tmpl}-solo.flac"
-	args = [os.path.abspath(base_path + "/fluidsynth/fluidsynth"), "-g", "1", "-F", solo_flac, "-c", "64", "-o", "synth.polyphony=512", "-r", "48000", "-n", os.path.abspath(base_path + "/fluidsynth/gm64.sf2"), solo_midi]
+	args = [fluidsynth, "-g", "0.5", "-F", solo_flac, "-c", "64", "-o", "synth.polyphony=512", "-r", "48000", "-n", sf2, solo_midi]
 	subprocess.run(args)
 	proc.wait()
 	solo_ogg = f"{temp_dir}{tmpl}-solo.ogg"
-	args = ["ffmpeg", "-y", "-i", solo_flac, "-c:a", "libvorbis", "-b:a", "128k", solo_ogg]
+	args = [ffmpeg, "-y", "-i", solo_flac, "-af", "volume=2", "-c:a", "libvorbis", "-b:a", "128k", solo_ogg]
 	subprocess.run(args)
 	full_ogg = f"{temp_dir}{tmpl}-full.ogg"
-	args = ["ffmpeg", "-y", "-i", base_flac, "-i", solo_flac, "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest", full_ogg]
+	args = [ffmpeg, "-y", "-i", base_flac, "-i", solo_flac, "-filter_complex", "[0:a]volume=2[a1];[1:a]volume=2[a2];[a1][a2]amix=inputs=2:duration=longest", full_ogg]
 	subprocess.run(args)
 	import zipfile
 	with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as z:
