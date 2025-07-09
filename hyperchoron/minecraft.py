@@ -763,22 +763,25 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					pass
 				looping = move_region(looping, x, y, z)
 				main = paste_region(main, looping, ignore_src_air=True, ignore_dst_non_air=True)
+				coords = (x - main.x + 1, y - main.y + 4, z - main.z)
+				if main[coords].id != "minecraft:observer":
+					main = setblock(main, coords, litemapy.BlockState("minecraft:observer", facing="up"))
 				taken = loops[x, y] = set()
 				return taken
 
 			def optimise_skeleton(x, y):
+				"Non-essential optimisations to note modules that reduce excess use of materials"
 				nonlocal main, skeleton3
 				taken = skeletons[x, y]
-				if None in taken:
-					return
-				all_y = set(p[1] for p in taken)
+				all_y = set(p[1] for p in taken if p)
 
 				def set_across(xi, yi, zi, block=air):
 					nonlocal main
 					coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
 					main = setblock(main, coords, block)
 
-				if len(set(v[0] for v in taken.values())) == 1:
+				if None not in taken and len(set(v[0] for v in taken.values())) == 1:
+					# If the module is only playing one note/chord, wipe it and replace with a single-note module with regular repeater delays
 					skeleton3 = move_region(skeleton3, x, y, z)
 					main = paste_region(main, skeleton3)
 					set_across(1, 0, 0, litemapy.BlockState("minecraft:observer", facing="down"))
@@ -788,7 +791,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					zi = 1
 					while tickdel > 0:
 						set_across(1, 2, zi, litemapy.BlockState("minecraft:repeater", facing="north", delay=str(min(4, tickdel))))
-						set_across(1, 1, zi, slab)
+						set_across(1, 1, zi, litemapy.BlockState("minecraft:prismarine_slab", type="top"))
 						tickdel -= 4
 						zi += 1
 					set_across(1, 4, zi, litemapy.BlockState("minecraft:shroomlight"))
@@ -816,7 +819,8 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 							main = setblock(main, coords, target, tile_entity=tile_entity, no_replace=no_replace)
 					return
 
-				if 7 not in all_y:
+				# Opportunistic optimisations; cut off all empty top layers, replace empty bottom layers with mostly activator rails, drop spawnproofing end rods onto topmost remaining observers
+				if None not in taken and 7 not in all_y:
 					xi = 1
 					for zi in range(skeleton.max_z() + 1):
 						for yi in range(7, 9):
@@ -883,7 +887,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 							set_across(xi, yi, zi)
 						else:
 							break
-				max_y = max(all_y)
+				max_y = max(all_y, default=8)
 				for cur_y in range(1, max_y, 2):
 					if cur_y in all_y:
 						break
@@ -936,6 +940,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 							break
 
 			if backwards and segment == 1:
+				# Necessary central module to fire off minecart after track reverse
 				taken = get_skeleton(0, yc - 8)
 				taken[None] = None
 
@@ -1040,7 +1045,6 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					volume *= 1.12
 				else:
 					volume *= 0.92
-				# print(volume)
 				x = round(max(0, 1 - log2lin(volume / 100)) * (attenuation_multiplier / 3 - 1)) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
 				if not backwards and segment >= half_segments - 2 and primary_width >= 12:
@@ -1098,9 +1102,9 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 						target = litemapy.BlockState(f"minecraft:{block}", **{k: str(v) for k, v in kwargs[0].items()})
 					else:
 						target = static_blocks.get(block) or static_blocks.setdefault(block, litemapy.BlockState(f"minecraft:{block}"))
-					for z2 in range(2):
-						coords2 = (coords[0] + x - main.x, coords[1] - main.y + 1, coords[2] + z - main.z + 2 + z2 * 2)
-						main = setblock(main, coords2, target, tile_entity=tile_entity)
+					# for z2 in range(2):
+					coords2 = (coords[0] + x - main.x, coords[1] - main.y + 1, coords[2] + z - main.z + 4)
+					main = setblock(main, coords2, target, tile_entity=tile_entity)
 
 			held_notes = [{}, {}]
 			if not edge and len(notes) >= ticks_per_segment:
