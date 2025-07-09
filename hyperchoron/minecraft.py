@@ -161,11 +161,17 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=Non
 	if base == "PLACEHOLDER":
 		return
 	if base in non_note_blocks:
-		yield from (
-			(coords[0], base),
-			(coords[1], "sculk"),
-			(coords[2], "air"),
-		)
+		if x == 1:
+			yield from (
+				(coords[0], base),
+				(coords[1], "sculk"),
+				(coords[2], "air"),
+			)
+		else:
+			yield from (
+				(coords[1], base),
+				(coords[2], "air"),
+			)
 		return
 	if base.endswith("_head") or base.endswith("_skull"):
 		yield from (
@@ -179,10 +185,16 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=Non
 		p = 2 ** max(-1, min(1, (pitch / 12 - 1)))
 		command = f"playsound minecraft:block.note_block.{instrument_names[base]} record @a[distance=..48] ~ ~ ~ 3 {p}"
 		compound = Compound({'id': String('minecraft:command_block'), 'Command': String(command)})
-		yield from (
-			(coords[1], "note_block", dict(note=round(pitch), instrument="custom_head")),
-			(coords[2], "command_block", dict(conditional="false", facing="up"), compound),
-		)
+		if x == 1:
+			yield from (
+				(coords[1], "note_block", dict(note=round(pitch), instrument="custom_head")),
+				(coords[2], "command_block", dict(conditional="false", facing="up"), compound),
+			)
+		else:
+			yield from (
+				(coords[1], "command_block", dict(conditional="false", facing="up"), compound),
+				(coords[2], "air"),
+			)
 		return
 	if base in falling_blocks:
 		yield ((x, y - 2, z), "tripwire")
