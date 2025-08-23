@@ -8,7 +8,7 @@ from .mappings import (
 	instrument_names, midi_instrument_selection,
 	c4, c1, percussion_mats
 )
-from .util import create_reader, transport_note_priority, temp_dir, sample_rate
+from .util import create_reader, priority_ordering, temp_dir, sample_rate
 
 
 @dataclass(slots=True)
@@ -46,7 +46,7 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 			type=typeid,
 			notes=[],
 		))
-	for i, drum in enumerate([0, 2, 5, 6, 4, 0, 0, 0]):
+	for i, drum in enumerate([0, 2, 5, 6, 4, 8, 0, 0]):
 		instruments.append(SimpleNamespace(
 			id=drum,
 			index=len(instruments),
@@ -58,47 +58,56 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 	if note_count > 4096 * 8 * 4:
 		print(f"High note count {note_count} detected, using conservative note sustains...")
 		conservative = True
-	min_vol = 16
-	max_vol = 127 + min_vol
+	min_vol = 0.125
+	max_vol = 1 + min_vol
 	active = {}
 	for i, beat in enumerate(notes):
 		taken = []
 		next_active = {}
-		if beat:
-			if len(beat) >= 12:
-				beat = [note if note[2] >= 0 else (*note[:2], 0, *note[3:]) for note in beat]
-			highest_pitch = max(note[1] for note in beat)
-			ordered = sorted(beat, key=lambda note: transport_note_priority(note, sustained=(note[1] == highest_pitch) + ((note[0], note[1] - c1) in active)), reverse=True)
-			lowest = min((note[0] == -1, note[1], note) for note in beat)[-1]
-			if sum(note[0] != -1 for note in ordered) >= 8 and org_instrument_selection[lowest[0]] >= 0:
+		if beat and len(beat) > 1:
+			for note in beat:
+				if note.priority < 0:
+					note.priority = 0
+			# ordered = [note for note in beat if note.instrument_class == -1] + priority_ordering([note for note in beat if note.instrument_class != -1], n_largest=12, active=active)
+			ordered = priority_ordering(beat, n_largest=12, active=active)
+			lowest = min((note.instrument_class == -1, note) for note in beat)[-1]
+			if sum(note.instrument_class != -1 for note in ordered) > 8 and org_instrument_selection[lowest.instrument_class] >= 0:
 				lowest_to_remove = True
 				for j, note in enumerate(ordered):
-					if note[0] == -1:
+					if note.instrument_class == -1:
 						continue
 					if note == lowest and lowest_to_remove:
 						ordered.pop(j)
 						lowest_to_remove = False
-					elif note[1] == lowest[1] + 12:
-						vel = hypot(note[4], lowest[4]) * 3 / 2
+					elif note.pitch == lowest.pitch + 12:
+						vel = hypot(note.velocity, lowest.velocity) * 3 / 2
 						tvel = min(max_vol, vel)
-						keep = lowest[4] - tvel * 2 / 3
-						lowest = (12, lowest[1], max(note[2], lowest[2]), True, tvel, (note[5] + lowest[5]) / 2)
-						ordered[j - 1 + lowest_to_remove] = (note[0], note[1], min(1, note[2]), note[3], max(1, keep), note[5])
+						keep = lowest.velocity - tvel * 2 / 3
+						note.pitch = lowest.pitch
+						note.velocity = keep
+						lowest.priority = max(note.priority, lowest.priority)
+						lowest.velocity = tvel
+						lowest.instrument_class = 12
+						lowest.panning = (note.panning + lowest.panning) / 2
 						break
-				if lowest[0] != 10 and lowest[1] < c4 - 12:
-					pitch = round(lowest[1])
-					lowest = (12, pitch, lowest[2], lowest[3], min(max_vol, lowest[4] * 3 / 2), lowest[5])
+				if lowest.instrument_class != 12 and lowest.pitch < c4 - 12:
+					lowest.instrument_class = 12
+					lowest.velocity = min(max_vol, lowest.velocity * 3 / 2)
 				ordered.insert(0, lowest)
 			elif len(ordered) > 1:
-				ordered.remove(lowest)
-				ordered.insert(0, lowest)
+				try:
+					ordered.remove(lowest)
+				except ValueError:
+					pass
+				else:
+					ordered.insert(0, lowest)
 		else:
-			ordered = []
+			ordered = list(beat)
 		for note in ordered:
-			itype, pitch, priority, _long, vel, pan = note
+			itype, pitch, priority, vel, pan = note.instrument_class, note.pitch, note.priority, note.velocity, note.panning
 			pitch = round(pitch)
 			vel -= min_vol
-			volume = max(0, min(254, round(vel * 2 / 64) * 64 if conservative else round(vel * 2 / 8) * 8))
+			volume = max(0, min(254, round(vel * 4) * 64 if conservative else round(vel * 32) * 8))
 			panning = round(pan * 6 + 6)
 			ins = org_instrument_selection[itype]
 			if ins < 0:
@@ -118,12 +127,18 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 						else:
 							iid = 12
 							pitch = rpitch - 18
+					case "snare" if rpitch >= 18:
+						iid = 11
+						pitch = rpitch - 12
 					case "snare":
 						iid = 9
 					case "hat":
 						iid = 10
 					case "creeper":
 						iid = 11
+					case "xylophone" if itype == -1:
+						iid = 13
+						pitch = rpitch
 					case _:
 						iid = 12
 						pitch = rpitch
@@ -143,10 +158,7 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 			new_pitch = pitch - c1
 			if new_pitch < 0:
 				new_pitch += 12
-			if new_pitch < 0:
-				new_pitch = 0
-			if new_pitch > 95:
-				new_pitch = 95
+			new_pitch = max(0, min(95, new_pitch))
 			h = (itype, new_pitch)
 			if (priority < 2 or conservative) and h in active:
 				try:
@@ -169,18 +181,15 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 								))
 							last_note.length += 1
 							taken.append(iid)
-							try:
-								next_active[h].append(instrument.index)
-							except KeyError:
-								next_active[h] = [instrument.index]
+							next_active.setdefault(h, []).append(instrument.index)
 							raise StopIteration
 				except StopIteration:
 					continue
 			choices = sorted(instruments[:8], key=lambda instrument: (instrument.index not in taken, len(instrument.notes) < 3072, instrument.id == ins, instrument.id != 60, -(len(instrument.notes) // 1024)), reverse=True)
 			instrument = choices[0]
 			if instrument.index in taken:
-				if len(taken) >= len(instruments):
-					break
+				# if len(taken) >= len(instruments):
+				# 	break
 				continue
 			if instrument.id == 60 and ins != 60 and pitch >= 12:
 				pitch -= 12
@@ -556,7 +565,7 @@ def load_xm(file):
 	return events
 
 
-def save_org(transport, output, instrument_activities, speed_info, ctx):
+def save_org(transport, output, instrument_activities, speed_info, ctx, **void):
 	print("Exporting ORG...")
 	import struct
 	instruments, wait = list(build_org(transport, instrument_activities, speed_info, ctx=ctx))

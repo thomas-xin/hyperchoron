@@ -36,18 +36,15 @@ def separate_audio(model, file, outputs):
 		return separator.separate(file, outputs)
 
 
-def load_wav(file, ctx):
+def load_raw(file):
 	print(f"Importing {file.rsplit('.', 1)[-1].upper()}...")
 	path = os.path.abspath(file)
 	tmpl = path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 
-	if ctx.mc_legal:
-		bpm = 20 * 5
-	else:
-		song, *_ = librosa.load(path, sr=sample_rate, mono=True, dtype=np.float32)
-		bpm_, *_ = librosa.beat.beat_track(y=song.astype(np.float16), sr=sample_rate)
-		bpm = bpm_[0]
-		print("Detected BPM:", bpm)
+	song, *_ = librosa.load(path, sr=sample_rate, mono=True, dtype=np.float32)
+	bpm_, *_ = librosa.beat.beat_track(y=song.astype(np.float16), sr=sample_rate)
+	bpm = bpm_[0]
+	print("Detected BPM:", bpm)
 
 	output_names = {k: tmpl + "-" + v for k, v in {
 		"No Reverb": "N",
@@ -147,7 +144,7 @@ def load_wav(file, ctx):
 				else:
 					priority = 0
 				v = min(1, v * mult)
-				events.append([ins, tick, "note_on_c", ins, note, v * 127, priority, 1, pannings[tick]])
+				events.append([ins, tick, "note_on_c", ins, note, v, priority, 1, pannings[tick]])
 			return events
 		c = librosa.hybrid_cqt(
 			mono,
@@ -211,6 +208,6 @@ def load_wav(file, ctx):
 	return events
 
 
-def save_wav(transport, output, ctx):
+def save_raw(transport, output, ctx, **void):
 	print(ctx)
-	raise
+	raise NotImplementedError

@@ -11,7 +11,8 @@ from .mappings import dawvert_inputs, dawvert_outputs
 from . import midi
 
 
-def load_arbitrary(file, ext):
+def load_arbitrary(file, **void):
+	ext = file.rsplit(".", 1)[-1].casefold()
 	assert ext in dawvert_inputs, f"Input format {ext} currently unsupported."
 	if isinstance(file, str):
 		file = open(file, "rb")
@@ -31,8 +32,8 @@ def load_arbitrary(file, ext):
 			os.remove(fo)
 
 
-def save_arbitrary(transport, output, instrument_activities, speed_info, ctx):
-	ext = output.rsplit(".", 1)[-1]
+def save_arbitrary(transport, output, instrument_activities, speed_info, ctx, **void):
+	ext = output.rsplit(".", 1)[-1].casefold()
 	assert ext in dawvert_outputs, f"Output format {ext} currently unsupported."
 	mid = os.path.abspath(output.rsplit(".", 1)[0] + ".mid")
 	nc = midi.save_midi(transport, mid, instrument_activities, speed_info, ctx)

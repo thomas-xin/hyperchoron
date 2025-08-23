@@ -218,6 +218,24 @@ org_instrument_selection = [
 	-1,
 ]
 org_octave = 60
+specy_map = [
+	["Contrabass", "Contrabass+", "Harp", "Harp+", "WinterPiano", "WinterPiano+"],
+	["Contrabass", "Contrabass+", "ToyUkulele", "GrandPiano", "GrandPiano+", "WinterPiano+"],
+	["Contrabass", "Horn", "Horn+", "Flute", "Flute+", "Xylophone+"],
+	["Contrabass", "Horn", "LightGuitar", "LightGuitar+", "WinterPiano", "WinterPiano+"],
+	["Contrabass", "Contrabass+", "Harp", "Kalimba", "Xylophone", "Xylophone+"],
+	["Contrabass", "Contrabass+", "Harp", "Kalimba", "Xylophone", "Xylophone+"],
+	["Contrabass", "Contrabass+", "Harp", "Kalimba", "Xylophone", "Xylophone+"],
+	# ["Contrabass", "Cello", "Cello+", "TriumphViolin", "TriumphViolin+", "Xylophone+"],
+	["Contrabass", "Horn", "Horn+", "Panflute", "Panflute+", "Xylophone+"],
+	["Contrabass", "Contrabass+", "Pipa", "Pipa+", "Xylophone", "Xylophone+"],
+	["Contrabass", "Horn", "Horn+", "Aurora", "Aurora+", "Xylophone+"],
+	["Contrabass", "Horn", "Horn+", "Panflute", "Panflute+", "Xylophone+"],
+	["Contrabass", "Horn", "LightGuitar", "LightGuitar+", "WinterPiano", "WinterPiano+"],
+	["Contrabass", "Horn", "Horn+", "Panflute", "Panflute+", "Xylophone+"],
+	["Contrabass", "Horn", "LightGuitar", "LightGuitar+", "WinterPiano", "WinterPiano+"],
+	None
+]
 nbs2thirtydollar = dict(
 	u1="noteblock_banjo",
 	u2="fnf_up",
@@ -418,6 +436,70 @@ percussion_mats = {int((data := line.split("#", 1)[0].strip().split("\t"))[0]): 
 86	obsidian	8	# Mute Surdo
 87	obsidian	0	# Open Surdo
 """.strip().splitlines()}
+specy_percussion_mats = {int((data := line.split("#", 1)[0].strip().split("\t"))[0]): (data[1], int(data[2])) for line in """
+0	PLACEHOLDER	0
+27	Drum	2	# High Q
+28	Drum	3	# Slap
+29	Drum	9	# Scratch Push
+30	Drum	9	# Scratch Pull
+31	Drum	7	# Sticks
+32	Drum	7	# Square Click
+33	Drum	7	# Metronome Click
+34	Drum	11	# Metronome Bell
+35	Drum	2	# Acoustic Bass Drum
+36	Drum	2	# Bass Drum 1
+37	Drum	4	# Side Stick
+38	Drum	12	# Acoustic Snare
+39	Drum	4	# Hand Clap
+40	Drum	12	# Electric Snare
+41	DunDun	0	# Low Floor Tom
+42	Drum	5	# Closed Hi-Hat
+43	Drum	2	# High Floor Tom
+44	Drum	5	# Pedal Hi-Hat
+45	Drum	4	# Low Tom
+46	Drum	11	# Open Hi-Hat
+47	Drum	0	# Low-Mid Tom
+48	DunDun	7	# Hi-Mid Tom
+49	Drum	11	# Crash Cymbal 1
+50	DunDun	12	# High Tom
+51	Drum	11	# Ride Cymbal 1
+52	DunDun	11	# Chinese Cymbal
+53	Drum	11	# Ride Bell
+54	DunDun	9	# Tambourine
+55	DunDun	11	# Splash Cymbal
+56	DunDun	7	# Cowbell
+57	DunDun	11	# Crash Cymbal 2
+58	DunDun	9	# Vibraslap
+59	Drum	9	# Ride Cymbal 2
+60	DunDun	4	# Hi Bongo
+61	Drum	2	# Low Bongo
+62	DunDun	4	# Mute Hi Conga
+63	DunDun	7	# Open Hi Conga
+64	Drum	0	# Low Conga
+65	DunDun	5	# High Timbale
+66	DunDun	12	# Low Timbale
+67	DunDun	12	# High Agogo
+68	DunDun	7	# Low Agogo
+69	Drum	9	# Cabasa
+70	DunDun	9	# Maracas
+71	Drum	7	# Short Whistle
+72	Drum	11	# Long Whistle
+73	DunDun	7	# Short Guiro
+74	Drum	0	# Long Guiro
+75	DunDun	12	# Claves
+76	Drum	7	# Hi Wood Block
+77	Drum	4	# Low Wood Block
+78	DunDun	7	# Mute Cuica
+79	Drum	0	# Open Cuica
+80	Drum	11	# Mute Triangle
+81	DunDun	11	# Open Triangle
+82	DunDun	9	# Shaker
+83	DunDun	11	# Jingle Bell
+84	DunDun	9	# Bell Tree
+85	Drum	4	# Castanets
+86	Drum	2	# Mute Surdo
+87	DunDun	2	# Open Surdo
+""".strip().splitlines()}
 non_note_blocks = {
 	"warped_trapdoor",
 	"bamboo_trapdoor",
@@ -428,6 +510,7 @@ non_note_blocks = {
 
 # Remapping of midi note range to note block note range
 c4 = 60
+c3 = c4 - 12
 fs4 = c4 + 6
 fs1 = fs4 - 36
 c1 = c4 - 36
@@ -448,6 +531,24 @@ note_names = [
 	"A#",
 	"B",
 ]
+note_names_ex = [
+	"C",
+	"Db",
+	"D",
+	"Eb",
+	"E",
+	"F",
+	"Gb",
+	"G",
+	"Ab",
+	"A",
+	"Bb",
+	"B",
+]
+white_keys = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6, 7]
+white_keys += [i + 7 for i in white_keys[1:]]
+white_keys += [i + 7 for i in white_keys[1:]]
+genshin_mapping = [14, 15, 16, 17, 18, 19, 20, 7, 8, 9, 10, 11, 12, 13, 0, 1, 2, 3, 4, 5, 6]
 
 harmonics = dict(
 	default=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17)][1:],

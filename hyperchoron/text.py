@@ -1,22 +1,23 @@
 import bisect
 import functools
-from math import cbrt, erf
+from math import cbrt, erf, log2
 import numpy as np
 from .mappings import (
 	instrument_names, midi_instrument_selection,
-	fixed_instruments, instrument_codelist,
+	instrument_codelist,
 	thirtydollar_names, thirtydollar_volumes,
 	nbs2thirtydollar, thirtydollar_unmap, thirtydollar_drums,
 	percussion_mats, material_map, pitches, default_instruments,
-	fs1, fs4,
+	specy_map, specy_percussion_mats, genshin_mapping, white_keys, note_names_ex,
+	c1, c3, fs1, fs4,
 )
-from .util import round_min, log2lin, lin2log, temp_dir, fluidsynth, get_sf2
+from .util import ts_us, round_min, log2lin, lin2log, temp_dir, fluidsynth, get_sf2, DEFAULT_DESCRIPTION
 
 
 @functools.lru_cache(maxsize=256)
 def get_note_mat_ex(note, odd=False):
-	material = material_map[note[0]]
-	pitch = note[1]
+	material = material_map[note.instrument_class]
+	pitch = note.pitch
 	if not material:
 		try:
 			return percussion_mats[round(pitch)]
@@ -46,33 +47,98 @@ def get_note_mat_ex(note, odd=False):
 			mod -= 12
 			ins += 1
 	mat = material[ins]
-	if note[3] == 2:
+	replace = {}
+	if not odd:
 		replace = dict(
-			hay_block="amethyst_block",
-			emerald_block="amethyst_block",
-			amethyst_block="amethyst_block",
-			iron_block="amethyst_block",
-			# glowstone="amethyst_block",
+			shroomlight="hay_block",
+			sculk="emerald_block",
 		)
 		replace.update({
-			"hay_block+": "amethyst_block+",
-			"emerald_block+": "amethyst_block+",
-			"amethyst_block+": "amethyst_block+",
-			"black_wool+": "amethyst_block",
-			"iron_block+": "amethyst_block+",
-			# "glowstone+": "amethyst_block+",
+			"shroomlight+": "hay_block+",
+			"sculk+": "emerald_block+",
 		})
+	elif note.priority <= 0:
+		replace = dict(
+			bamboo_planks="pumpkin",
+			bone_block="gold_block",
+			iron_block="amethyst_block",
+		)
+		replace.update({
+			"bamboo_planks+": "pumpkin+",
+			"gold_block+": "packed_ice+",
+			"bone_block+": "gold_block+",
+			"iron_block+": "amethyst_block+",
+		})
+	if replace:
 		try:
 			mat = replace[mat]
 		except KeyError:
+			match mat:
+				case "black_wool":
+					if mod <= 12:
+						mat = "pumpkin"
+						mod += 12
+					else:
+						mat = "amethyst_block"
+						mod -= 12
+				case "black_wool+":
+					if mod >= 0:
+						mat = "amethyst_block"
+				case "soul_sand":
+					if mod <= 12:
+						mat = "amethyst_block"
+						mod += 12
+					else:
+						mat = "gold_block"
+						mod -= 12
+				case "soul_sand+":
+					if mod >= 0:
+						mat = "gold_block"
+	if mat.endswith("+"):
+		mat = mat[:-1]
+		mod += 12
+	return mat, mod
+
+@functools.lru_cache(maxsize=256)
+def get_note_ins(note, odd=False, key=0):
+	material = specy_map[note.instrument_class]
+	pitch = note.pitch
+	if not material:
+		try:
+			return specy_percussion_mats[round(pitch)]
+		except KeyError:
+			print("WARNING: Note", pitch, "not yet supported for drums, discarding...")
 			return "PLACEHOLDER", 0
+	normalised = pitch - c1 - key
+	if normalised < 0:
+		normalised %= 12
+	elif normalised > 72:
+		normalised = 60 + normalised % 12
+	assert 0 <= normalised <= 72, normalised
+	ins, mod = divmod(normalised, 12)
+	ins = int(ins)
+	if mod == 0 and (ins > 5 or ins > 0 and odd):
+		mod += 12
+		ins -= 1
+	elif odd:
+		leeway = 1
+		if ins > 0 and mod <= leeway and not material[ins - 1].endswith("+"):
+			mod += 12
+			ins -= 1
+		elif ins < 5 and mod >= 24 - leeway and material[ins + 1].endswith("+"):
+			mod -= 12
+			ins += 1
+		elif ins < 5 and mod >= 12 - leeway and material[ins].endswith("+") and material[ins + 1].endswith("+"):
+			mod -= 12
+			ins += 1
+	mat = material[ins]
 	if mat.endswith("+"):
 		mat = mat[:-1]
 		mod += 12
 	return mat, mod
 
 
-def load_thirtydollar(file):
+def load_moai(file):
 	print("Importing 🗿...")
 	with open(file, "r", encoding="utf-8") as f:
 		actions = f.read().replace("\n", "|").split("|")
@@ -149,28 +215,26 @@ def load_thirtydollar(file):
 						tick += int(rep)
 						continue
 					for i in range(int(rep)):
-						note_event = [int(ins) + 2, tick, "note_on_c", int(ins) + 10, pitch_override, lin2log(float(vm) / 100 * float(velocity) / 100) / float(vol) * 127, 1, 1]
+						note_event = [int(ins) + 2, tick, "note_on_c", int(ins) + 10, pitch_override, lin2log(float(vm) / 100 * float(velocity) / 100) / float(vol), 1, 1]
 						events.append(note_event)
 						tick += 1
 	events.sort(key=lambda e: e[1])
 	return events
 
-def save_thirtydollar(transport, output, speed_info, ctx):
+def save_moai(transport, output, ctx, **void):
 	print("Exporting 🗿...")
-	orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
-	speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
-	wait = max(1, round(orig_step_ms / speed_ratio))
+	wait = max(1, round(transport.tick_delay * 1000))
 	bpm = 60 * 1000 / wait
 	nc = 0
 	events = [f"!speed@{round_min(round(bpm, 2))}"]
 	div = 0
 	for i, beat in enumerate(transport):
 		temp = []
-		for note in sorted(beat, key=lambda note: note[0]):
-			itype, pitch, priority, _long, vel, pan = note
-			if priority < 0:
+		for note in sorted(beat, key=lambda note: note.instrument_class):
+			if note.priority < 0:
 				continue
-			name = thirtydollar_names[itype]
+			pitch = note.pitch
+			name = thirtydollar_names[note.instrument_class]
 			if name.startswith("noteblock_"):
 				mat, mod = get_note_mat_ex(note, odd=i & 1)
 				match mat:
@@ -199,17 +263,17 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 						mod += 12
 					case _:
 						instrument = instrument_names[mat]
-						if itype != -1:
-							if not ctx.mc_legal:
-								instrument2 = fixed_instruments[instrument_codelist[itype]]
-								pitch2 = note[1] - pitches[instrument2] - fs1
-								if pitch2 in range(-12, 48):
-									mod = pitch2
-									instrument = instrument2
-								else:
-									pitch2 = note[1] - pitches[instrument] - fs1
-									if pitch2 in range(-33, 55):
-										mod = pitch2
+						# if note.instrument_class != -1:
+						# 	if not ctx.mc_legal:
+						# 		instrument2 = fixed_instruments[instrument_codelist[note.instrument_class]]
+						# 		pitch2 = note.pitch - pitches[instrument2] - fs1
+						# 		if pitch2 in range(-12, 48):
+						# 			mod = pitch2
+						# 			instrument = instrument2
+						# 		else:
+						# 			pitch2 = note.pitch - pitches[instrument] - fs1
+						# 			if pitch2 in range(-33, 55):
+						# 				mod = pitch2
 						if instrument in nbs2thirtydollar:
 							name = nbs2thirtydollar[instrument]
 						else:
@@ -255,9 +319,9 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 			text = name
 			if p != 0:
 				text += f"@{round_min(round(p, 2))}"
-			v = log2lin(vel / 127) * 100
-			if priority == 0:
-				v *= min(1, 0.9 ** (50 / wait))
+			v = log2lin(note.velocity) * 100
+			if note.priority == 0:
+				v *= min(1, 0.8 ** (50 / wait))
 			v *= thirtydollar_volumes.get(name, 1)
 			v = round(v)
 			if v != 0:
@@ -281,6 +345,226 @@ def save_thirtydollar(transport, output, speed_info, ctx):
 	return nc
 
 
+def save_skysheet(transport, output, key_info, ctx, **void):
+	print("Exporting skysheet...")
+	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+	wait = max(1, round(transport.tick_delay * 1000))
+	bpm = 60 * 1000 / wait
+	nc = 0
+	instruments = []
+	columns = []
+	song = dict(
+		name=out_name,
+		description=DEFAULT_DESCRIPTION,
+		type="composed",
+		bpm=round_min(round(bpm, 2)),
+		pitch=key_info["natural_name"],
+		version=3,
+		folderId=None,
+		reverb=False,
+		id=str(ts_us()),
+		pitchLevel=0,
+		isComposed=True,
+		bitsPerPage=16,
+		isEncrypted=False,
+		data=dict(
+			isComposed=True,
+			isComposedVersion=True,
+			appName="Sky",
+		),
+		songNotes=[],
+		breakpoints=[0],
+		instruments=instruments,
+		columns=columns,
+	)
+	key = key_info["natural_key"]
+	inv = key + 1 if key < 6 else key - 1
+	recur = 2 ** round(log2(max(1, (1000 / wait) / 8)))
+	instrument_map = {}
+
+	@functools.lru_cache(maxsize=256)
+	def get_volume(vel):
+		vol = vel * 100
+		snap_volumes = (0, 5, 25, 100) if is_inv else (0, 1, 5, 13, 25, 50, 100)
+		return min((abs(vol - snap), snap) for snap in snap_volumes)[-1]
+
+	for i, beat in enumerate(transport):
+		notes = []
+		column = [0, notes]
+		for note in beat:
+			if note.priority < 0:
+				continue
+			note.pitch = round(note.pitch)
+			mat, mod = get_note_ins(note, odd=i & 1, key=key)
+			if mat == "PLACEHOLDER":
+				continue
+			is_inv = False
+			if note_names_ex[mod % 12].endswith("b"):
+				mat, mod = get_note_ins(note, odd=i & 1, key=inv)
+				is_inv = True
+			nkey = white_keys[mod]
+			vel = note.velocity
+			if note.priority == 0:
+				if note.timing % recur != 0:
+					continue
+				vel /= 4
+			vol = get_volume(vel)
+			if not vol:
+				continue
+			tup = (mat, vol, is_inv)
+			try:
+				v = instrument_map[tup]
+			except KeyError:
+				if len(instrument_map) >= 48:
+					new_tups = sorted((tup for tup in instrument_map if tup[0] == mat and tup[2] == is_inv), key=lambda t: abs(t[1] - vol))
+					if new_tups:
+						v = instrument_map[new_tups[0]]
+				else:
+					v = instrument_map[tup] = 2 ** len(instrument_map)
+					instruments.append(dict(
+						name=mat,
+						volume=vol,
+						pitch=note_names_ex[inv] if is_inv else "",
+						visible=True,
+						icon="circle" if mat in ("Drum", "DunDun") else "line" if vol <= 50 else "border",
+						alias="",
+						muted=False,
+						reverbOverride=None,
+					))
+			for t in notes:
+				if t[0] == nkey:
+					w = int(t[1], 16)
+					if not w & v:
+						t[1] = hex(w | v)[2:].upper()
+						break
+			else:
+				notes.append([nkey, hex(v)[2:].upper()])
+		columns.append(column)
+		nc += len(notes)
+	import orjson
+	b = orjson.dumps(song)
+	with open(output, "wb") as f:
+		f.write(b)
+	return nc
+
+def save_genshinsheet(transport, output, key_info, ctx, **void):
+	print("Exporting genshinsheet...")
+	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+	wait = max(1, round(transport.tick_delay * 1000))
+	bpm = 60 * 1000 / wait
+	nc = 0
+	instruments = []
+	columns = []
+	song = dict(
+		name=out_name,
+		description=DEFAULT_DESCRIPTION,
+		type="composed",
+		bpm=round_min(round(bpm, 2)),
+		pitch=key_info["natural_name"],
+		version=3,
+		folderId=None,
+		reverb=False,
+		id=str(ts_us()),
+		pitchLevel=0,
+		isComposed=True,
+		bitsPerPage=16,
+		isEncrypted=False,
+		data=dict(
+			isComposed=True,
+			isComposedVersion=True,
+			appName="Genshin",
+		),
+		songNotes=[],
+		breakpoints=[0],
+		instruments=instruments,
+		columns=columns,
+	)
+	key = 0
+	inv = 1
+	sec = 10
+	top = 11
+	recur = 2 ** round(log2(max(1, (1000 / wait) / 8)))
+	instrument_map = {}
+
+	@functools.lru_cache(maxsize=256)
+	def get_volume(vel):
+		vol = vel * 100
+		snap_volumes = (0, 1, 5, 13, 25, 50, 100)
+		return min((abs(vol - snap), snap) for snap in snap_volumes)[-1]
+
+	for i, beat in enumerate(transport):
+		notes = []
+		column = [0, notes]
+		for note in beat:
+			if note.priority < 0:
+				continue
+			if note.instrument_class < 0:
+				continue
+			note.pitch = round(note.pitch)
+			mat = "Lyre"
+			if note.pitch - c3 >= 36:
+				offs = top
+				mod = note.pitch - c3 - offs
+				if note_names_ex[mod % 12].endswith("b"):
+					offs = sec
+					mod = note.pitch - c3 - offs
+			else:
+				offs = key
+				mod = note.pitch - c3 - offs
+				if note_names_ex[mod % 12].endswith("b"):
+					offs = inv
+					mod = note.pitch - c3 - offs
+			mod = max(-24, min(60, mod))
+			if mod < 0:
+				mod %= 12
+			elif mod >= 36:
+				mod = 24 + mod % 12
+			nkey = genshin_mapping[white_keys[mod]]
+			vel = note.velocity
+			if note.priority == 0:
+				if note.timing % recur != 0:
+					continue
+				vel /= 4
+			vol = get_volume(vel)
+			if not vol:
+				continue
+			tup = (mat, vol, offs)
+			try:
+				v = instrument_map[tup]
+			except KeyError:
+				if len(instrument_map) >= 48:
+					new_tups = sorted((tup for tup in instrument_map if tup[0] == mat and tup[2] == offs), key=lambda t: abs(t[1] - vol))
+					if new_tups:
+						v = instrument_map[new_tups[0]]
+				else:
+					v = instrument_map[tup] = 2 ** len(instrument_map)
+					instruments.append(dict(
+						name=mat,
+						volume=vol,
+						pitch=note_names_ex[offs],
+						visible=True,
+						icon="circle" if mat in ("Drum", "DunDun") else "line" if vol <= 50 else "border",
+						alias="",
+						muted=False,
+						reverbOverride=None,
+					))
+			for t in notes:
+				if t[0] == nkey:
+					w = int(t[1], 16)
+					if not w & v:
+						t[1] = hex(w | v)[2:].upper()
+						break
+			else:
+				notes.append([nkey, hex(v)[2:].upper()])
+		columns.append(column)
+		nc += len(notes)
+	import orjson
+	b = orjson.dumps(song)
+	with open(output, "wb") as f:
+		f.write(b)
+	return nc
+
+
 lead_instruments = [-1, 9, 13, 3, 11, 8]
 def rhythm_priority(ins):
 	try:
@@ -301,11 +585,11 @@ def join_gml(lines):
 			out.append(line)
 	return "".join(out)
 
-def save_deltarune(transport, output, instrument_activities, speed_info, ctx):
+def save_deltarune(transport, output, instrument_activities, ctx, **void):
 	tmpl = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 	# full_midi = f"{temp_dir}{tmpl}-full.mid"
 	from hyperchoron import midi
-	instruments, wait, resolution = list(midi.build_midi(transport, instrument_activities, speed_info, ctx=ctx))
+	instruments, wait, resolution = list(midi.build_midi(transport, instrument_activities, ctx=ctx))
 	# midi.proceed_save_midi(full_midi, f"{tmpl}-full", False, instruments, wait, resolution)
 	all_notes = []
 	for ins in instruments:

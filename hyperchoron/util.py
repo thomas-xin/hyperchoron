@@ -1,11 +1,17 @@
+import collections
 from collections import deque, namedtuple
 import csv
+from dataclasses import dataclass
 import datetime
 import fractions
-import itertools
-from math import ceil, isqrt, sqrt, log2, log10, gcd, lcm
+import lzma
+from math import isqrt, sqrt, log10
 import os
-from .mappings import note_names
+import struct
+import time
+import numpy as np
+from .mappings import note_names, note_names_ex, midi_instrument_selection, c1
+
 
 sample_rate = 44100
 DEFAULT_NAME = "Hyperchoron"
@@ -15,6 +21,16 @@ temp_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstri
 if not os.path.exists(temp_dir):
 	os.mkdir(temp_dir)
 csv_reader = type(csv.reader([]))
+
+if not hasattr(time, "time_ns"):
+	time.time_ns = lambda: int(time.time() * 1e9)
+
+UNIQUE_TS = 0
+def ts_us():
+	global UNIQUE_TS
+	ts = max(UNIQUE_TS + 1, time.time_ns())
+	UNIQUE_TS = ts
+	return ts
 
 fluidsynth = os.path.abspath(base_path + "/fluidsynth/fluidsynth")
 
@@ -31,6 +47,55 @@ def get_sf2():
 		subprocess.run([sf2convert, "-x", sf3, sf2])
 	return sf2
 
+def extract_archive(archive_path, format=None):
+	path = temp_dir + str(ts_us())
+	os.mkdir(path)
+	if format == "7z" or archive_path.endswith(".7z"):
+		import py7zr
+		with py7zr.SevenZipFile(archive_path, mode="r") as z:
+			z.extractall(path=path)
+	else:
+		import shutil
+		shutil.unpack_archive(archive_path, extract_dir=path, format=format)
+	return [f"{path}/{fn}" for fn in os.listdir(path)]
+
+def get_children(path) -> list:
+	assert isinstance(path, str), "Only filename strings are currently supported."
+	if path.startswith("https://") or path.startswith("http://"):
+		import urllib.request
+		req = urllib.request.Request(path, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"})
+		name = path.split("?", 1)[0].rsplit("/", 1)[-1].replace("__", "_")
+		path = temp_dir + name
+		with open(path, "wb") as f:
+			f.write(urllib.request.urlopen(req).read())
+	assert os.path.exists(path), f"File {path} does not exist or is not accessible."
+	if os.path.isdir(path):
+		return [f"{path}/{fn}" for fn in os.listdir(path)]
+	if path.rsplit(".", 1)[-1].casefold() in ("7z", "zip", "tar", "gz", "bz", "xz"):
+		return extract_archive(path)
+	return [path]
+
+def to_numpy(events, sort=True):
+	if not isinstance(events, np.ndarray):
+		max_len = max(map(len, events))
+		padded = [row + [0] * (max_len - len(row)) for row in events]
+		data = np.array(padded, dtype=object)
+		assert len(data.shape) == 2, (data, data.shape)
+		data[:, 0] = np.int32(data[:, 0])
+		data[:, 1] = arround_min(data[:, 1])
+		if len(data) and isinstance(data[0][2], str):
+			data[:, 2] = [getattr(event_types, e.strip().upper(), 0) for e in data[:, 2]]
+		data[:, 3] = np.int32(data[:, 3])
+		data[:, 4] = np.float32(data[:, 4])
+		events = data
+	if sort:
+		timestamps = events[:, 1]
+		highest = np.max(timestamps)
+		if highest < 65535:
+			timestamps = np.uint16(timestamps)
+		events = events[np.argsort(timestamps, kind="stable")]
+	return events
+
 def round_min(x):
 	try:
 		y = int(x)
@@ -39,6 +104,45 @@ def round_min(x):
 	if x == y:
 		return y
 	return x
+
+def arround_min(x, atol=1 / 4096):
+	if x.dtype == object:
+		x = np.float64(x)
+	elif x.dtype not in (np.float16, np.float32, np.float64):
+		return x
+	try:
+		if np.allclose(x, np.round(x), atol=atol):
+			if x.dtype == np.float64:
+				return x.astype(np.int64)
+			return x.astype(np.int32)
+		return x
+	except TypeError:
+		print(x.dtype)
+		raise
+
+def as_int(x):
+	try:
+		return x.item()
+	except AttributeError:
+		return int(x)
+
+def as_float(x):
+	try:
+		return x.item()
+	except AttributeError:
+		return float(x)
+
+def resolve(path, scope=None):
+	scope = scope or globals()
+	root, *rest = path.split(".")
+	try:
+		obj = scope[root]
+	except KeyError:
+		obj = scope[root] = getattr(__import__(__name__.split(".", 1)[0] + "." + root), root)
+	if rest:
+		from operator import attrgetter
+		return attrgetter(".".join(rest))(obj)
+	return obj
 
 def log2lin(x, min_db=-40):
 	if x <= 0:
@@ -50,26 +154,50 @@ def lin2log(y, min_db=-40):
 		return 0
 	return 1 + 20 * log10(y) / (-min_db)
 
-# Thank you deepseek-r1 for optimisation
+def leb128(n):
+	"Encodes an integer using LEB128."
+	data = bytearray()
+	while n:
+		data.append(n & 127)
+		n >>= 7
+		if n:
+			data[-1] |= 128
+	return data or b"\x00"
+def decode_leb128(data, mode="cut"): # mode: cut | index
+	"Decodes an integer from LEB128 encoded data; optionally returns the remaining data."
+	i = n = 0
+	shift = 0
+	for i, byte in enumerate(data):
+		n |= (byte & 0x7F) << shift
+		if byte & 0x80 == 0:
+			break
+		else:
+			shift += 7
+	if mode == "cut":
+		return n, data[i + 1:]
+	return n, i + 1
+
 def approximate_gcd(arr, min_value=8):
-	if not arr:
+	if not len(arr):
 		return 0, 0
 
 	# Check if any element is >= min_value
-	has_element_above_min = any(x >= min_value for x in arr)
+	has_element_above_min = np.any(arr >= min_value)
 	if not has_element_above_min:
-		return gcd(*arr), len(arr)
+		return np.gcd.reduce(arr), len(arr)
 
 	# Collect non-zero elements
-	non_zero = [x for x in arr if x != 0]
-	if not non_zero:
+	non_zero = np.nonzero(arr)[0]
+	if not len(non_zero):
 		return 0, 0  # All elements are zero
 
 	# Generate all possible divisors >= min_value from non-zero elements
 	divisors = set()
-	for x in set(map(abs, non_zero)):
+	for x in np.unique(np.abs(non_zero)):
 		# Find all divisors of x
 		for i in range(1, int(isqrt(x)) + 1):
+			if x in divisors:
+				continue
 			if x % i == 0:
 				if i >= min_value:
 					divisors.add(i)
@@ -79,7 +207,7 @@ def approximate_gcd(arr, min_value=8):
 
 	# If there are no divisors >= min_value, return the GCD of all elements
 	if not divisors:
-		return gcd(*arr), len(arr)
+		return np.gcd.reduce(arr), len(arr)
 
 	# Sort divisors in descending order
 	sorted_divisors = sorted(divisors, reverse=True)
@@ -89,7 +217,7 @@ def approximate_gcd(arr, min_value=8):
 
 	# Find the divisor(s) with the maximum count of divisible elements
 	for d in sorted_divisors:
-		count = sum(x % d == 0 for x in arr)
+		count = np.sum(arr % d == 0)
 		if count > max_count:
 			max_count = count
 			candidates = [d]
@@ -99,23 +227,20 @@ def approximate_gcd(arr, min_value=8):
 	# Now find the maximum GCD among the candidates
 	max_gcd = 0
 	for d in candidates:
-		elements = [x for x in arr if x % d == 0]
-		current_gcd = gcd(*elements)
+		elements = arr[arr % d == 0]
+		current_gcd = np.gcd.reduce(elements)
 		if current_gcd > max_gcd:
 			max_gcd = current_gcd
 
-	return (max_gcd, len(arr) - max_count) if max_gcd >= min_value else (gcd(*arr), len(arr))
+	return (max_gcd, len(arr) - max_count) if max_gcd >= min_value else (np.gcd.reduce(arr), len(arr))
 
 def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, orig_tempo, fine=False, ctx=None):
 	step_ms = round(1000 / tps)
-	rev = deque(sorted(timestamps, key=lambda k: timestamps[k]))
-	mode = timestamps[rev[-1]]
-	while len(timestamps) > 1024 or timestamps[rev[0]] < mode / 64:
-		timestamps.pop(rev.popleft())
-	timestamp_collection = list(itertools.chain.from_iterable([k] * ceil(max(1, log2(v / 2))) for k, v in timestamps.items()))
+	timestamp_collection = timestamps.astype(np.int64)
 	min_value = step_ms / milliseconds_per_clock
 	# print("Estimating true resolution...", len(timestamp_collection), clocks_per_crotchet, milliseconds_per_clock, step_ms, min_value)
 	speed, exclusions = approximate_gcd(timestamp_collection, min_value=min_value * 3 / 4)
+	assert speed > 0, speed
 	use_exact = False
 	req = 1 / 8
 	# print("Confidence:", 1 - exclusions / len(timestamp_collection), req, speed)
@@ -127,20 +252,20 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 			# print("Rejecting first estimate:", speed, speed2, min_value, exclusions)
 			step = 1 / speed2
 			inclusions = sum((res := x % step) < step / 12 or res > step - step / 12 or (res := x % (step * 4)) < (step * 4) / 12 or res > (step * 4) - (step * 4) / 12 for x in timestamp_collection)
-			req = 0 if not ctx.mc_legal else (max(speed2, 1 / speed2) - 1) * sqrt(2)
+			req = 0 if not ctx.strict_tempo else (max(speed2, 1 / speed2) - 1) * sqrt(2)
 			# print("Confidence:", inclusions / len(timestamp_collection), req)
 			if inclusions < len(timestamp_collection) * req:
 				print("Discarding tempo...")
 				speed = 1
 				use_exact = True
-			elif not ctx.mc_legal:
+			elif not ctx.strict_tempo:
 				speed = speed2
 				use_exact = True
 		elif speed > min_value * 1.25:
 			# print("Finding closest speed...", exclusions, len(timestamps))
 			div = round(speed / min_value - 0.25)
 			if div <= 1:
-				if ctx.mc_legal:
+				if ctx.strict_tempo:
 					if speed % 3 == 0:
 						# print("Speed too close for rounding, autoscaling by 2/3...")
 						speed *= 2
@@ -150,14 +275,15 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 						speed *= 0.75
 				elif speed > 1:
 					speed //= 2
-			elif fine or ctx.mc_legal:
+			elif fine or ctx.strict_tempo:
 				speed /= div
 			elif div > 2:
 				speed /= div / 2
-	if not use_exact and ctx.mc_legal and (speed < min_value * 0.85 or speed > min_value * 1.15):
+	if not use_exact and ctx.strict_tempo and (speed < min_value * 0.85 or speed > min_value * 1.15):
 		frac = fractions.Fraction(min_value / speed).limit_denominator(5)
-		print("For MC compliance: rescaling speed by:", frac)
-		speed = float(speed * frac)
+		if frac > 0:
+			print("For MC compliance: rescaling speed by:", frac)
+			speed = float(speed * frac)
 	if use_exact:
 		real_ms_per_clock = milliseconds_per_clock
 	else:
@@ -187,7 +313,44 @@ def create_reader(file):
 	return read
 
 def transport_note_priority(n, sustained=False, multiplier=8):
-	return n[2] + round((n[1] / 127) + n[4] * multiplier / 127) + sustained
+	return n.priority + round(n.velocity * 8) + round(n.pitch / 127) + sustained * multiplier / 8
+
+def priority_ordering(beat, n_largest=100, active=(), lenient=False):
+	ins = list(beat)
+	if len(ins) == 1:
+		return ins
+
+	def weak_priority(n):
+		return n.priority + round(n.velocity * 8) + round(n.pitch / 127) + ((n.instrument_class, n.pitch - c1) in active)
+
+	if lenient and n_largest >= len(ins):
+		ins.sort(key=weak_priority)
+		return ins
+	out = []
+	seen = set()
+	keys = np.array([True] * 12, dtype=np.float32)
+	octaves = np.array([True] * 16, dtype=np.float32) * 2.5
+	pitches = [round(n.pitch) for n in ins]
+	noticeable = np.float32(pitches) / 64 + [n.velocity for n in ins]
+	i = np.argmax(noticeable)
+	pitches.pop(i)
+	out.append(ins.pop(i))
+	if ins:
+		keylist = [p % 12 for p in pitches]
+		octavelist = [p % 12 for p in pitches]
+		precomputes = [np.float32(weak_priority(n)) for n in ins]
+		while ins and len(out) < n_largest:
+			ordering = np.float32(precomputes) + np.float32(keys[keylist]) + np.float32(octaves[octavelist]) - [(p in seen) * 2 for p in pitches]
+			selected = np.argmax(ordering)
+			precomputes.pop(selected)
+			keylist.pop(selected)
+			octavelist.pop(selected)
+			note = ins.pop(selected)
+			keys[round(note.pitch) % 12] = False
+			octaves[round(note.pitch) // 12] = False
+			seen.add(pitches.pop(selected))
+			out.append(note)
+	return out
 
 def merge_activities(a1, a2):
 	if not a1:
@@ -201,18 +364,18 @@ def merge_activities(a1, a2):
 				a1[k] = v
 	return a1
 
-HEADER = 0xff
+HEADER = 0xFF
 TEMPO = 0x51
 TITLE_T = 0x04
 COPYRIGHT_T = 0x02
 
-NOTE_OFF_C = 0x8
-NOTE_ON_C = 0x9
-POLY_AFTERTOUCH_C = 0xA
-CONTROL_C = 0xB
-PROGRAM_C = 0xC
-CHANNEL_AFTERTOUCH_C = 0xD
-PITCH_BEND_C = 0xE
+NOTE_OFF_C = 0x80
+NOTE_ON_C = 0x90
+POLY_AFTERTOUCH_C = 0xA0
+CONTROL_C = 0xB0
+PROGRAM_C = 0xC0
+CHANNEL_AFTERTOUCH_C = 0xD0
+PITCH_BEND_C = 0xE0
 
 event_dict = dict(
 	header=HEADER,
@@ -231,227 +394,343 @@ event_dict = dict(
 MIDIEvents = namedtuple("MIDIEvents", tuple(t.upper() for t in event_dict))
 event_types = MIDIEvents(*event_dict.values())
 
-# The commented code below was a work-in-progress MIDI parser that was ultimately scrapped due to having worse performance than Midicsv.exe; eventually a rewrite in Rust or similar language may be due.
+@dataclass(slots=True)
+class NoteSegment:
+	priority: int
+	modality: int
+	instrument_id: int
+	instrument_class: int
+	pitch: float
+	velocity: float
+	panning: float
+	timing: int
 
-# from libmidi.types.messages import meta  # noqa: E402
-# _orig = meta.BaseMessageMetaText.__dict__['from_bytes'].__func__
+	def __hash__(self):
+		return sum(round(getattr(self, k) * 7 ** i) for i, k in enumerate(self.__slots__))
 
-# def _mv_friendly_from_bytes(cls, data):
-# 	if not isinstance(data, (bytes, bytearray)):
-# 		data = bytes(data)
-# 	msg, rem = _orig(cls, data)
-# 	return msg, rem
+	def __lt__(self, other):
+		return (self.pitch, self.velocity, abs(self.panning)) < (other.pitch, other.velocity, abs(other.panning))
 
-# meta.BaseMessageMetaText.from_bytes = classmethod(_mv_friendly_from_bytes)
+	def __gt__(self, other):
+		return (self.pitch, self.velocity, abs(self.panning)) > (other.pitch, other.velocity, abs(other.panning))
 
-# try:
-# 	from libmidi.types.messages.channel import CHANNEL_MESSAGE_TYPES
-# 	from libmidi.types.messages.system import SYSTEM_MESSAGE_TYPES, system_message_from_bytes
-# except ImportError:
-# 	from libmidi.types.messages.channel import ALL_CHANNEL_MESSAGE_TYPES as CHANNEL_MESSAGE_TYPES
-# 	from libmidi.types.messages.system import ALL_SYSTEM_MESSAGE_TYPES as SYSTEM_MESSAGE_TYPES, system_message_from_bytes
-# from libmidi.types.messages.meta import META_MESSAGE_VALUE, meta_message_from_bytes  # noqa: E402
+	def copy(self):
+		return self.__class__(*(getattr(self, k) for k in self.__slots__))
 
-# channel_event_attrs = [
-# 	['note', 'velocity'],
-# 	['note', 'velocity'],
-# 	['note', 'value'],
-# 	['control', 'value'],
-# 	['program'],
-# 	['value'],
-# 	['value_lsb', 'value_msb'],
-# ]
-# class Track:
+filters = {"id": lzma.FILTER_LZMA2, "preset": 7 | lzma.PRESET_DEFAULT}
+compress_threshold = 172800
 
-# 	def __init__(self, file, n):
-# 		from libmidi.types.chunk import Chunk
-# 		from libmidi.utils.variable_length import VariableInt
-# 		chunk = Chunk.from_stream(file).data
-# 		data = memoryview(bytearray(chunk))
+class TransportSection(collections.abc.MutableSequence):
 
-# 		def decode(data):
-# 			initial = data
-# 			events = deque()
-# 			last_status_byte = 0
-# 			while data:
-# 				t, data = VariableInt.from_bytes(data)
-# 				message_status = data[0]
-# 				if message_status < 0x80:
-# 					message_status = last_status_byte
-# 					data = initial[len(initial) - len(data) - 1:]
-# 					data[0] = last_status_byte
-# 				last_status_byte = message_status
-# 				message_type = message_status >> 4
-# 				if message_type in CHANNEL_MESSAGE_TYPES:
-# 					m = message_type - 8
-# 					attributes = channel_event_attrs[m]
-# 					a = len(attributes)
-# 					data = data[1:]
-# 					message_data, data = data[:a], data[a:]
-# 					c = message_status & 0xf
-# 					match message_type:
-# 						case event_types.NOTE_OFF_C | event_types.NOTE_ON_C | event_types.POLY_AFTERTOUCH_C | event_types.CONTROL_C:
-# 							e = [n, t, message_type, c, *message_data]
-# 						case event_types.PROGRAM_C | event_types.CHANNEL_AFTERTOUCH_C:
-# 							e = [n, t, message_type, c, *message_data]
-# 						case event_types.PITCH_BEND_C:
-# 							e = [n, t, message_type, c, (message_data[1] << 7) | message_data[0]]
-# 						case _:
-# 							raise NotImplementedError(message_type)
-# 					events.append(e)
-# 				elif message_status in SYSTEM_MESSAGE_TYPES:
-# 					message, data = system_message_from_bytes(data)
-# 					# print(t, message, len(data))
-# 				elif message_status == META_MESSAGE_VALUE:
-# 					message, data = meta_message_from_bytes(data)
-# 					# print(t, message, len(data))
-# 					match message.meta_message_type:
-# 						case 2:
-# 							e = [n, t, COPYRIGHT_T, message.text]
-# 						case 4:
-# 							e = [n, t, TITLE_T, message.text]
-# 						case 81:
-# 							e = [n, t, TEMPO, message.tempo]
-# 						case _:
-# 							continue
-# 					events.append(e)
-# 			return events
-# 		self.events = decode(data)
+	codec = "<BBbeebB"
+	codec_size = struct.calcsize(codec)
+
+	def __init__(self, beats=None, tick_delay=0):
+		self.data = beats or []
+		self.tick_delay = fractions.Fraction(tick_delay).limit_denominator(48000)
+
+	def serialise(self):
+		return struct.pack("<LLL", len(self), self.tick_delay.numerator, self.tick_delay.denominator) + self.compress()
+
+	@classmethod
+	def deserialise(cls, data):
+		data = memoryview(data)
+		_len, num, denom = struct.unpack("<LLL", data[:12])
+		data = data[12:]
+		self = cls(beats=data, tick_delay=fractions.Fraction(num, denom))
+		self._len = _len
+		return self
+
+	def compress(self):
+		if not isinstance(self.data, (bytes, memoryview)):
+			self._len = len(self.data)
+			data = deque()
+			for beat in self.data:
+				block = [leb128(len(beat))]
+				for note in beat:
+					meta = ((note.priority & 15) << 4) | note.modality
+					block.append(struct.pack(self.codec, meta, note.instrument_id, note.instrument_class, note.pitch, note.velocity, round(note.panning * 127), note.timing & 255))
+				data.extend(block)
+			data = b"".join(data)
+			self.data = lzma.compress(data, format=lzma.FORMAT_RAW, filters=[filters], check=lzma.CHECK_NONE)
+		return self.data
+
+	def decompress(self):
+		if isinstance(self.data, (bytes, memoryview)):
+			data = memoryview(lzma.decompress(self.data, format=lzma.FORMAT_RAW, filters=[filters]))
+			blocks = []
+			while data:
+				beat = []
+				n, data = decode_leb128(data)
+				size = n * self.codec_size
+				block, data = data[:size], data[size:]
+				while block:
+					meta, instrument_id, instrument_class, pitch, velocity, panning, timing = struct.unpack(self.codec, block[:self.codec_size])
+					block = block[self.codec_size:]
+					note = NoteSegment(p if (p := meta >> 4) != 15 else -1, meta & 15, instrument_id, instrument_class, pitch, velocity, panning / 127, timing)
+					beat.append(note)
+				blocks.append(beat)
+			self.data = blocks
+		self._len = len(self.data)
+		return self.data
+
+	def __len__(self):
+		try:
+			return self._len
+		except AttributeError:
+			return len(self.decompress())
+
+	def __iter__(self):
+		return iter(self.decompress())
+
+	def __reversed__(self):
+		return reversed(self.decompress())
+
+	def __getitem__(self, k):
+		if type(k) is int and k >= len(self):
+			raise IndexError
+		return self.decompress()[k]
+
+	def __setitem__(self, k, v):
+		if type(k) is int and k >= len(self):
+			raise IndexError
+		self.decompress()[k] = v
+
+	def append(self, v):
+		self.decompress().append(v)
+		self._len += 1
+
+	def insert(self, k, v):
+		self.decompress().insert(k, v)
+		self._len += 1
+
+	def extend(self, v):
+		self.decompress().extend(v)
+		self._len += len(v)
+
+	def __delitem__(self, k, **kwargs):
+		if type(k) is int and k >= len(self):
+			raise IndexError
+		try:
+			return self.decompress().pop(k, **kwargs)
+		finally:
+			self._len = len(self.data)
 
 
-# def parse_midi(file):
-# 	"Minimalist MIDI parser that only reads required events, using lightweight data types"
-# 	if isinstance(file, str):
-# 		file = open(file, "rb")
-# 	from libmidi.types.header import Header
-# 	header = Header.from_stream(file)
-# 	events = [[0, 0, HEADER, header.format, header.ntrks, header.division]]
-# 	for n in range(header.ntrks):
-# 		track = Track(file, n)
-# 		events.extend(track.events)
-# 		print(n, len(track.events))
-# 	return events
+class Transport(collections.abc.MutableSequence):
 
+	def __init__(self, notes=None, tick_delay=0):
+		self._tick_delay = tick_delay
+		self.sections = []
 
-def merge_imports(inputs, ctx):
-	event_list = []
-	transport = []
-	instrument_activities = {}
-	speed_info = None
-	note_candidates = 0
-	for data in inputs:
-		if isinstance(data, (list, deque, csv_reader)):
-			if not isinstance(data, (list, deque)) or data and isinstance(data[0][2], str):
-				midi_events = [(int(e[0]), int(e[1]), getattr(event_types, e[2].strip().upper(), 0), *e[3:]) for e in data]
+	def serialise(self):
+		if self.tick_delay:
+			for s in self.sections:
+				if not s.tick_delay:
+					s.tick_delay = self.tick_delay
+		data = b"".join([leb128(len(b := s.serialise())) + b for s in self.sections])
+		version = 0
+		title = "Untitled".encode("utf-8")
+		header = b"~HPC" + struct.pack("<L", version)
+		header += leb128(len(title)) + title
+		return header + data
+
+	@classmethod
+	def deserialise(cls, data):
+		data = memoryview(data)
+		assert data[:4] == b"~HPC"
+		version, = struct.unpack("<L", data[4:8])
+		assert version == 0, version
+		data = data[8:]
+		n, data = decode_leb128(data)
+		data = data[n:]
+		self = cls()
+		while data:
+			n, data = decode_leb128(data)
+			assert len(data) >= n, (n, len(data))
+			self.sections.append(TransportSection.deserialise(data[:n]))
+			data = data[n:]
+		return self
+
+	@property
+	def tick_delay(self):
+		return self._tick_delay or (self.sections[0].tick_delay if self.sections else 1)
+
+	@tick_delay.setter
+	def set_tick_delay(self, tick_delay):
+		self._tick_delay = tick_delay
+
+	def append(self, beat):
+		if not self.sections or len(self.sections[-1]) >= compress_threshold:
+			if self.sections:
+				self.sections[-1].compress()
+			self.sections.append(TransportSection(tick_delay=self.tick_delay))
+		self.sections[-1].append(beat)
+
+	def extend(self, notes):
+		while notes:
+			if not self.sections or len(self.sections[-1]) >= compress_threshold:
+				if self.sections:
+					self.sections[-1].compress()
+				self.sections.append(TransportSection(tick_delay=self.tick_delay))
+			take = max(0, compress_threshold - len(self.sections[-1]))
+			self.sections[-1].extend(notes[:take])
+			notes = notes[take:]
+
+	def __len__(self):
+		return sum(map(len, self.sections))
+
+	def __iter__(self):
+		for s in self.sections:
+			yield from s.decompress()
+
+	def __reversed__(self):
+		for s in reversed(self.sections):
+			yield from reversed(s.decompress())
+
+	def __getitem__(self, k):
+		if type(k) is slice:
+			out = []
+			start, stop, step = k.start, k.stop, k.step
+			if start is None:
+				start = 0
+			if stop is None:
+				stop = len(self)
+			if step is None:
+				step = 1
+			assert step > 0
+			if start < 0:
+				start += len(self)
+			if stop < 0:
+				stop += len(self)
+			idx = 0
+			for s in self.sections:
+				if idx + len(s) <= start:
+					continue
+				if idx >= stop:
+					break
+				out.extend(s[start - idx:stop - idx])
+				idx += len(s)
+			return out[::step] if step != 1 else out
+		if k < 0:
+			k += len(self)
+		ok = k
+		for s in self.sections:
+			try:
+				return s[k]
+			except IndexError:
+				s.compress()
+				k -= len(s)
+		raise IndexError(ok)
+
+	def __setitem__(self, k, v):
+		if k < 0:
+			k += len(self)
+		ok = k
+		for s in self.sections:
+			try:
+				s[k] = v
+			except IndexError:
+				s.compress()
+				k -= len(s)
+		raise IndexError(ok)
+
+	def __delitem__(self, k, **kwargs):
+		if k < 0:
+			k += len(self)
+		ok = k
+		for s in self.sections:
+			try:
+				return s.pop(k)
+			except IndexError:
+				s.compress()
+				k -= len(s)
+			finally:
+				if not s:
+					self.sections.remove(s)
+		raise IndexError(ok)
+
+	def insert(self, k, v):
+		if k < 0:
+			k += len(self)
+		ok = k
+		for s in self.sections:
+			if k <= len(s):
+				return s.insert(k, v)
 			else:
-				midi_events = data
-			event_list.append(midi_events)
-		else:
-			for i, x in enumerate(data.transport):
-				if i >= len(transport):
-					transport.append(x)
-				else:
-					transport[i].extend(x)
-			merge_activities(instrument_activities, data.instrument_activities)
-			speed_info = speed_info or data.speed_info
-	if event_list:
-		from . import midi
-		# if len(event_list) > 1:
-		# 	all_events = list(itertools.chain.from_iterable(event_list))
-		# else:
-		# 	all_events = event_list[0]
-		# all_events.sort(key=itemgetter(1))
-		# speed_info = midi.get_step_speed(all_events, ctx=ctx)
-		main_speed_info = None
-		main_tempo = 0
-		for midi_events in event_list:
-			speed_info = midi.get_step_speed(midi_events, ctx=ctx)
-			notes, nc, is_org, instrument_activities2, speed_info = midi.deconstruct(midi_events, speed_info, ctx=ctx)
-			merge_activities(instrument_activities, instrument_activities2)
-			note_candidates += nc
-			if len(inputs) == 1:
-				transport = notes
-				break
-			orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
-			speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
-			wait = round(orig_step_ms / speed_ratio / 50) * 50 if ctx.mc_legal else orig_step_ms / speed_ratio
-			tempo = 1000 / wait
-			if main_speed_info is None:
-				main_speed_info = speed_info
-				main_tempo = tempo
-				ratio = 1
-			else:
-				ratio = fractions.Fraction(main_tempo / tempo).limit_denominator(12)
-				if ratio.is_integer():
-					ratio = int(ratio)
-			if type(ratio) is not int:
-				mult = lcm(ratio.numerator, ratio.denominator)
-				r = mult // ratio.numerator
-				last = []
-				temp = []
-				for i in range(r * len(transport)):
-					if i % r == 0:
-						last = transport[i // r]
-						temp.append(last)
-						last = last.copy()
-						for j, note in enumerate(last):
-							if note[0] == -1:
-								continue
-							last[j] = (*note[:2], 0, *note[3:])
-					else:
-						temp.append(last)
-				transport = temp
-				ratio = mult // ratio.denominator
-			speed_info = (orig_ms_per_clock / ratio, real_ms_per_clock, scale, orig_step_ms, _orig_tempo)
-			if ratio < 1:
-				ratio = 1 / ratio
-				notes, transport = transport, notes
-			print(ratio)
-			ratio = round(ratio)
-			for i, beat in enumerate(notes):
-				i2 = i * ratio
-				while len(transport) <= i2:
-					transport.append([])
-				transport[i2].extend(beat)
-		if is_org:
-			ctx.transpose += 12
-	if not speed_info:
-		speed_info = (50, 50, 1, 50, 500)
-	if transport and not transport[0]:
-		transport = deque(transport)
-		while transport and not transport[0]:
-			transport.popleft()
-		transport = list(transport)
-	return transport, instrument_activities, speed_info, note_candidates
+				s.compress()
+				k -= len(s)
+		raise IndexError(ok)
+
+
+def save_hpc(transport, output, **void):
+	print("Exporting HPC...")
+	data = transport.serialise()
+	# print(transport.tick_delay, [section.tick_delay for section in transport.sections])
+	with open(output, "wb") as f:
+		f.write(data)
+	return len(transport)
+
+def load_hpc(file):
+	print("Importing HPC...")
+	with open(file, "rb") as f:
+		data = f.read()
+	transport = Transport.deserialise(data)
+	# print(transport.tick_delay, [section.tick_delay for section in transport.sections])
+	events = [
+		[0, 0, event_types.HEADER, 1, len(midi_instrument_selection) + 1, 1, 0, 0, 0],
+		[1, 0, event_types.TEMPO, transport.tick_delay * 1000000, 0, 0, 0, 0, 0],
+	]
+	for i in range(len(midi_instrument_selection)):
+		events.append([i + 2, 0, event_types.PROGRAM_C, i + 10, midi_instrument_selection[i], 0, 0, 0, 0])
+	for tick, beat in enumerate(transport):
+		for note in beat:
+			note_event = [note.instrument_class + 2, tick, event_types.NOTE_ON_C, note.instrument_class + 10, note.pitch, note.velocity * 127, note.priority, note.panning, note.timing]
+			events.append(note_event)
+	return events
 
 def transpose(transport, ctx):
+	key_info = {}
 	mapping = {}
-	if ctx.invert_key:
-		notes = [0] * 12
+	if not ctx.microtones:
 		for beat in transport:
 			for note in beat:
-				p = note[1] % 12
-				notes[p] += 1
-		major_scores = [0] * 12
-		minor_scores = [0] * 12
-		for key in range(12):
-			score = 0
-			for scale in (0, 0, 2, 4, 4, 5, 7, 7, 9, 11):
-				score += notes[(key + scale) % 12]
-			for scale in (1, 3, 8):
-				score -= notes[(key + scale) % 12]
-			major_scores[key] = score
-			score = 0
-			for scale in (0, 0, 2, 3, 3, 5, 7, 7, 8, 11):
-				score += notes[(key + scale) % 12]
-			for scale in (4, 4, 6):
-				score -= notes[(key + scale) % 12]
-			minor_scores[key] = score
-		candidates = list(enumerate(major_scores + minor_scores))
-		candidates.sort(key=lambda t: t[1], reverse=True)
-		key = candidates[0][0]
-		key_repr = f"{note_names[key]} Major" if key < 12 else f"{note_names[key - 12]} Minor"
-		print("Detected key signature:", key_repr)
+				note.pitch = round(note.pitch)
+	# if ctx.invert_key or not ctx.accidentals:
+	notes = np.zeros(12, dtype=np.float32)
+	for beat in transport:
+		seen = np.zeros(12, dtype=np.float32)
+		for note in beat:
+			if note.instrument_class == -1 or not note.pitch.is_integer():
+				continue
+			p = round(note.pitch % 12)
+			v = log2lin(note.velocity) * (0.5 if note.priority <= 0 else 1)
+			seen[p] = min(1, seen[p] + v)
+		notes += np.sqrt(seen)
+	major_scores = [0] * 12
+	minor_scores = [0] * 12
+	for key in range(12):
+		score = 0
+		for scale in (0, 0, 0, 2, 4, 4, 5, 7, 7, 9, 11):
+			score += notes[(key + scale) % 12]
+		for scale in (1, 3, 8):
+			score -= notes[(key + scale) % 12]
+		major_scores[key] = score
+		score = 0
+		for scale in (0, 0, 0, 2, 3, 3, 5, 7, 7, 8, 11):
+			score += notes[(key + scale) % 12]
+		for scale in (4, 4, 6):
+			score -= notes[(key + scale) % 12]
+		minor_scores[key] = score
+	candidates = list(enumerate(major_scores + minor_scores))
+	candidates.sort(key=lambda t: t[1], reverse=True)
+	key = candidates[0][0]
+	key_repr = f"{note_names[key]} Major" if key < 12 else f"{note_names[key - 12]} Minor"
+	key_info["key"] = note_names[key] if key < 12 else f"{note_names[key - 12]}m"
+	key_info["natural_key"] = natural_key = key if key < 12 else (key - 9) % 12
+	key_info["natural_name"] = note_names_ex[natural_key]
+	print("Detected key signature:", key_repr)
+	if ctx.invert_key:
 		inv_key = key + 12 if key < 12 else key - 12
 		inv_repr = f"{note_names[inv_key]} Major" if inv_key < 12 else f"{note_names[inv_key - 12]} Minor"
 		print("Inverse key:", inv_repr)
@@ -464,15 +743,22 @@ def transpose(transport, ctx):
 			mapping[(3 + key) % 12] = 1
 			mapping[(8 + key) % 12] = 1
 			mapping[(10 + key) % 12] = 1
-	if ctx.invert_key or ctx.transpose:
+	if not ctx.accidentals:
+		mapping[(1 + natural_key) % 12] = 1
+		mapping[(3 + natural_key) % 12] = 1
+		mapping[(6 + natural_key) % 12] = -1
+		mapping[(8 + natural_key) % 12] = 1
+		mapping[(10 + natural_key) % 12] = 1
+	if mapping or ctx.transpose:
 		for beat in transport:
 			for i, note in enumerate(beat):
-				pitch = note[1]
+				if not note.pitch.is_integer():
+					continue
+				pitch = note.pitch
 				p = pitch % 12
 				adj = ctx.transpose + mapping.get(p, 0)
 				if adj:
-					pitch += adj
-					note = (note[0], pitch, *note[2:])
+					note.pitch = pitch + adj
 					beat[i] = note
 	divisions = 4
 	scores = [0] * divisions
@@ -484,48 +770,36 @@ def transpose(transport, ctx):
 			scores[j] += priorities[j]
 	strongest_beat = scores.index(max(scores))
 	if strongest_beat != 0:
-		buffer = [[]] * (4 - strongest_beat)
-		transport = buffer + transport
+		for i in range(4 - strongest_beat):
+			transport.insert(0, [])
+	return key_info
+
+try:
+	from importlib.metadata import version
+	__version__ = version("hyperchoron")
+except Exception:
+	__version__ = "0.0.0-unknown"
 
 def get_parser():
 	import argparse
 	parser = argparse.ArgumentParser(
 		prog="hyperchoron",
-		# drop the eager version interpolation here:
 		description="MIDI-Tracker-DAW converter and Minecraft Note Block exporter",
 	)
-	# install our lazy action instead of action="version"; _version.py takes an additional 0.5~1s overhead which we do not want to introduce to the whole program
-	from ._version import get_versions
-	class LazyVersion(argparse.Action):
-		def __init__(self, option_strings, dest=argparse.SUPPRESS,
-					default=argparse.SUPPRESS,
-					help="show program's version and exit"):
-			super().__init__(
-				option_strings=option_strings,
-				dest=dest,
-				default=default,
-				nargs=0,
-				help=help
-			)
-		def __call__(self, parser, namespace, values, option_string=None):
-			ver = get_versions()['version']
-			print(f"{parser.prog} v{ver}")
-			parser.exit()
-	parser.add_argument(
-		"-V", "--version",
-		action=LazyVersion
-	)
+	parser.add_argument("-V", '--version', action='version', version=f'%(prog)s {__version__}')
 	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)", required=True)
-	parser.add_argument("-o", "--output", nargs="*", help="Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | *)", required=True)
-	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target time resolution of data, in hertz (per-second). Defaults to 20 for Minecraft outputs, 40 otherwise")
-	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
+	parser.add_argument("-o", "--output", nargs="+", help="Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | .skysheet | .genshinsheet | *)", required=True)
+	parser.add_argument("-f", "--format", default=None, help="Output format (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | .skysheet | .genshinsheet | *)")
+	parser.add_argument("-x", "--mixing", nargs="?", default="IL", help='Behaviour when importing multiple files. "I" to process individually, "L" to layer/stack, "C" to concatenate. If multiple digits are inputted, this will be interpreted as a hierarchy. For example, for a 3-deep nested zip folder where pairs of midis at the bottom layer should be layered, then groups of those layers should be concatenated, and there are multiple of these groups to process independently, input "ICL". Defaults to "IL"')
 	parser.add_argument("-v", "--volume", nargs="?", type=float, default=1, help="Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1")
+	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
+	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target time resolution of data, in hertz (per-second). Defaults to 12 for .🗿, .skysheet and .genshinsheet outputs, 20 for .nbt, .mcfunction and .litematic outputs, 40 otherwise")
+	parser.add_argument("-st", "--strict-tempo", action=argparse.BooleanOptionalAction, default=None, help="Snaps the song's tempo to the target specified by --resolution, being more lenient in allowing misaligned notes to compensate. Defaults to TRUE for .nbt, .mcfunction and .litematic outputs, FALSE otherwise")
 	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0")
 	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
-	parser.add_argument("-sa", "--strum-affinity", nargs="?", default=1, type=float, help="Increases or decreases threshold for sustained notes to be cut into discrete segments; higher = more notes. Defaults to 1")
-	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be treated as regular instrument channels. Defaults to TRUE")
-	parser.add_argument("-ml", "--mc-legal", action=argparse.BooleanOptionalAction, default=None, help="Forces song to be vanilla Minecraft compliant. Defaults to TRUE for .litematic, .mcfunction and .nbt outputs, FALSE otherwise")
+	parser.add_argument("-mt", "--microtones", action=argparse.BooleanOptionalAction, default=None, help="Allows microtones/pitchbends. If disabled, all notes are clamped to integer semitones. For Minecraft outputs, defers affected notes to command blocks. Has no effect if --accidentals is FALSE. Defaults to FALSE for .nbt, .mcfunction, .litematic, .org, .skysheet and .genshinsheet outputs, TRUE otherwise")
+	parser.add_argument("-ac", "--accidentals", action=argparse.BooleanOptionalAction, default=None, help="Allows accidentals. If disabled, all notes are clamped to the closest key signature. Warning: Hyperchoron is currently only implemented to autodetect a single key signature per song. Defaults to FALSE for .skysheet and .genshinsheet outputs, TRUE otherwise")
+	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be discarded. Defaults to TRUE")
 	parser.add_argument("-md", "--max-distance", nargs="?", type=int, default=42, help="For Minecraft outputs only: Restricts the maximum block distance the notes may be placed from the centre line of the structure, in increments of 3 (one module). Decreasing this value makes the output more compact, at the cost of note volume accuracy. Defaults to 42")
-	parser.add_argument("-cb", "--command-blocks", action=argparse.BooleanOptionalAction, default=None, help="For Minecraft outputs only: Enables the use of command blocks in place of notes that require finetune/pitchbend to non-integer semitones. Not survival-legal. Defaults to FALSE if --mc-legal is set, TRUE otherwise")
 	parser.add_argument("-mi", "--minecart-improvements", action=argparse.BooleanOptionalAction, default=False, help="For Minecraft outputs only: Assumes the server is running the [Minecart Improvements](https://minecraft.wiki/w/Minecart_Improvements) version(s). Less powered rails will be applied on the main track, to account for the increased deceleration. Currently only semi-functional; the rail section connecting the midway point may be too slow.")
 	return parser

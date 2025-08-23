@@ -1,10 +1,10 @@
-from collections import deque, namedtuple
+from collections import deque
 import csv
 from dataclasses import dataclass
 import fractions
-from math import ceil, sqrt, log2, hypot
-import os
+from math import ceil, log2, hypot
 from types import SimpleNamespace
+import numpy as np
 try:
 	import tqdm
 except ImportError:
@@ -14,129 +14,91 @@ else:
 	import warnings
 	warnings.filterwarnings("ignore", category=tqdm.TqdmWarning)
 from .mappings import (
-	instrument_mapping, org_instrument_mapping, midi_instrument_selection,
+	instrument_mapping, midi_instrument_selection,
 	material_map, sustain_map, instrument_codelist,
 	fs1, c_1,
 )
 from .util import (
-	round_min, log2lin, lin2log, sync_tempo, transport_note_priority, estimate_filesize,
-	event_types, DEFAULT_NAME, DEFAULT_DESCRIPTION,
+	round_min, log2lin, lin2log, sync_tempo, transport_note_priority, as_int,
+	event_types, DEFAULT_NAME, DEFAULT_DESCRIPTION, NoteSegment, Transport
 )
 
-if os.name == "nt" and os.path.exists("Midicsv.exe") and os.path.exists("Csvmidi.exe"):
-	use_py_midicsv = False
-else:
-	use_py_midicsv = True
 
-
-def midi2csv(file):
-	if use_py_midicsv or estimate_filesize(file) <= 65536:
-		import py_midicsv
-		csv_list = py_midicsv.midi_to_csv(file)
-	else:
-		import subprocess
-		if isinstance(file, str):
-			csv_list = subprocess.check_output(["Midicsv.exe", file, "-"]).decode("utf-8", "replace").splitlines()
-		else:
-			p = subprocess.Popen(["Midicsv.exe", "-", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-			b = file.read()
-			csv_list = p.communicate(b)[0].decode("utf-8", "replace").splitlines()
-	return csv_list
+# def midi2csv(file):
+# 	import py_midicsv
+# 	csv_list = csv.reader(py_midicsv.midi_to_csv(file))
+# 	return csv_list
 def csv2midi(file, output):
-	if use_py_midicsv or estimate_filesize(file) <= 65536:
-		import py_midicsv
-		# py_midicsv.events.csv_to_midi_map.update({k.casefold(): v for k, v in py_midicsv.events.csv_to_midi_map.items()})
-		midi = py_midicsv.csv_to_midi(file)
-		with open(output, "wb") as f:
-			writer = py_midicsv.FileWriter(f)
-			writer.write(midi)
-	else:
-		import subprocess
-		p = subprocess.Popen(["Csvmidi.exe", "-", output], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-		b = file.read().encode("utf-8")
-		p.communicate(b)
+	import py_midicsv
+	midi = py_midicsv.csv_to_midi(file)
+	with open(output, "wb") as f:
+		writer = py_midicsv.FileWriter(f)
+		writer.write(midi)
 	return output
 
+def merge_uniques(vals1, counts1, vals2, counts2):
+    vals = np.concatenate([vals1, vals2])
+    counts = np.concatenate([counts1, counts2])
+    vals_merged, inv = np.unique(vals, return_inverse=True)
+    counts_merged = np.zeros_like(vals_merged, dtype=counts.dtype)
+    np.add.at(counts_merged, inv, counts)
+    return vals_merged, counts_merged
 
-def scan_midi_titles(midi_events):
-	title = None
-	copyright = None
-	is_org = False
-	for event in midi_events[:64]:
-		mode = event[2]
-		match mode:
-			case event_types.TITLE_T:
-				title = event[3].strip(" \t\r\n\"'")
-				if copyright:
-					break
-			case event_types.COPYRIGHT_T:
-				copyright = ",".join(event[3:]).strip(" \t\r\n\"'")
-				if title:
-					break
-	try:
-		display = repr(title)
-		print("Title:", display)
-	except UnicodeEncodeError:
-		display = repr(title.encode("utf-8", "ignore"))
-		print("Title:", display)
-	if title and title.startswith("Organya Symphony No. 1") and copyright == "(C) AUTHOR xxxxx, 2014":
-		print("Using Org mapping...")
-		is_org = True
-	return is_org
+def clamp_uniques(tup, lim=1024):
+	return tup[0][:lim], tup[1][:lim]
+
+def stack_midis(inputs):
+	gen = iter(inputs)
+	first = next(gen)
+	outs = [first]
+	assert first[0][2] == event_types.HEADER, f"Invalid MIDI Header: {first[0]}"
+	cpc = int(first[0][5])
+	for i, second in enumerate(gen, 1):
+		assert second[0][2] == event_types.HEADER, f"Invalid MIDI Header: {second[0]}"
+		cpc2 = second[0][5]
+		if cpc != cpc2:
+			ss = cpc / cpc2
+			second = np.asanyarray(second, dtype=object)
+			second[:, 1] = np.float32(second[:, 1]) * ss
+		second = np.delete(second, second[:, 2] == event_types.TEMPO, axis=0)
+		second[:, 3] += i * 256
+		outs.append(second)
+	if len(outs) == 1:
+		return outs
+	max_len = max((len(a[0]) for a in outs))
+	for i, events in enumerate(outs):
+		if len(events[0]) < max_len:
+			events = np.pad(events, ((0, 0), (0, max_len - len(events[0]))), mode='constant')
+			outs[i] = events
+	return np.concatenate(outs, dtype=object)
 
 def get_step_speed(midi_events, ctx=None):
+	assert midi_events[0][2] == event_types.HEADER, f"Invalid MIDI Header: {midi_events[0]}"
+	clocks_per_crotchet = int(midi_events[0][5])
+
+	has_bends = np.any(midi_events[:, 2] == event_types.PITCH_BEND_C)
+	note_ons, onc = clamp_uniques(np.unique(midi_events[midi_events[:, 2] == event_types.NOTE_ON_C][:, 1], return_counts=True), 1536)
+	note_offs, offc = clamp_uniques(np.unique(midi_events[midi_events[:, 2] == event_types.NOTE_OFF_C][:, 1], return_counts=True), 1536)
+	onc *= 2
+	elements, counts = clamp_uniques(merge_uniques(note_ons, onc, note_offs, offc))
+	timestamps = np.repeat(elements, counts)
+
 	orig_tempo = 0
-	clocks_per_crotchet = 0
 	milliseconds_per_clock = 0
-	timestamps = {}
-	time_diffs = {}
 	tempos = {}
-	since_tempo = 0
-	has_bends = False
-	for event in midi_events:
-		timestamp = event[1]
-		targets = [timestamp]
-		match event[2]:
-			case event_types.NOTE_ON_C:
-				if int(event[5]) == 1:
-					continue
-				channel = int(event[3])
-				for last_timestamp in time_diffs.get(channel, (0,)):
-					target = timestamp - last_timestamp
-					if target <= 0:
-						continue
-					targets.append(target)
-				td = time_diffs.setdefault(channel, deque(maxlen=4))
-				if not td or timestamp != td[-1]:
-					td.append(timestamp)
-			case event_types.NOTE_OFF_C:
-				channel = int(event[3])
-				targets = []
-			case event_types.HEADER:
-				# Header tempo directly specifies clock pulses per quarter note
-				clocks_per_crotchet = int(event[5])
-			case event_types.TEMPO:
-				# Tempo event specifies microseconds per quarter note
-				new_tempo = int(event[3])
-				if orig_tempo and orig_tempo != new_tempo:
-					tempos[orig_tempo] = tempos.get(orig_tempo, 0) + timestamp - since_tempo
-				since_tempo = timestamp
-				orig_tempo = new_tempo
-				milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet
-			case event_types.PITCH_BEND_C:
-				has_bends = True
-		for target in targets:
-			try:
-				timestamps[target] += 1
-			except KeyError:
-				timestamps[target] = 1
+	tempoc = midi_events[midi_events[:, 2] == event_types.TEMPO]
+	tempot = list(tempoc[:, 1]) + [midi_events[-1][1]]
+	deltas = np.diff(tempot)
+	changes = tempoc[:, 3]
+	for c, t in zip(changes, deltas):
+		tempos[c] = tempos.get(c, 0) + t
 	if tempos:
-		tempos[orig_tempo] = tempos.get(orig_tempo, 0) + int(midi_events[-1][1]) - since_tempo
 		tempo_list = list(tempos.items())
 		tempo_list.sort(key=lambda t: t[1], reverse=True)
 		orig_tempo = tempo_list[0][0]
 		milliseconds_per_clock = orig_tempo / 1000 / clocks_per_crotchet
-		print("Multiple tempos detected! Auto-selecting most common from:", min(tempo_list), max(tempo_list))
+		if len(tempo_list) > 1:
+			print("Multiple tempos detected! Auto-selecting most common from:", tempo_list[:5])
 	if not clocks_per_crotchet:
 		clocks_per_crotchet = 4 # Default to 4/4 time signature
 		print("No time signature found! Defaulting to 4/4...")
@@ -146,15 +108,12 @@ def get_step_speed(midi_events, ctx=None):
 		print("No BPM found! Defaulting to 120...")
 	return sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, ctx.resolution / ctx.speed, orig_tempo, has_bends, ctx=ctx)
 
-def preprocess(midi_events, ctx):
+def preprocess(midi_events):
 	"Preprocesses a MIDI file to determine the lengths of all notes based on their corresponding note_end_c events, as well as the maximum note velocity and timestamp"
-	print("Preprocessing note durations...")
-	channel_stats = ChannelStats()
+	print(f"Preprocessing ({len(midi_events)} events total)...")
 	note_lengths = {}
 	temp_active = {}
-	discard = set()
-	midi_events.sort(key=lambda x: (x[1], x[2] == event_types.NOTE_ON_C)) # Sort events by timestamp, keep note events last
-	max_vol = 0
+	discard = []
 	last_timestamp = midi_events[-1][1]
 	for i, e in enumerate(midi_events):
 		m = e[2]
@@ -166,8 +125,6 @@ def preprocess(midi_events, ctx):
 				p = int(e[4])
 				h = (ti, c, p)
 				velocity = int(e[5])
-				volume = velocity * channel_stats[c].volume
-				max_vol = max(max_vol, volume)
 				if velocity < 1:
 					# Treat notes with 0 velocity as note offs
 					try:
@@ -179,12 +136,11 @@ def preprocess(midi_events, ctx):
 					note_lengths[h2] = max(1, t - t2)
 					if not actives:
 						temp_active.pop(h)
-					discard.add(i)
+					discard.append(i)
 				else:
-					try:
-						temp_active[h].append(t)
-					except KeyError:
-						temp_active[h] = [t]
+					temp_active.setdefault(h, []).append(t)
+					if len(e) > 7:
+						break
 			case event_types.NOTE_OFF_C:
 				ti = e[0]
 				t = e[1]
@@ -200,23 +156,23 @@ def preprocess(midi_events, ctx):
 				note_lengths[h2] = max(1, t - t2)
 				if not actives:
 					temp_active.pop(h)
-				discard.add(i)
-			case event_types.CONTROL_C:
-				control = int(e[4])
-				if control == 7:
-					c = int(e[3])
-					value = int(e[5])
-					volume = value / 127
-					channel_stats[c].volume = volume
+				discard.append(i)
 	for k, v in temp_active.items():
 		for t in v:
 			h2 = (t, *k)
 			note_lengths.setdefault(h2, 1)
-	midi_events = [e for i, e in enumerate(midi_events) if i not in discard]
-	return midi_events, note_lengths, max_vol, last_timestamp
+	midi_events = np.delete(midi_events, discard, axis=0)
+	try:
+		volume = np.max(midi_events[:, 5][(midi_events[:, 2] == event_types.CONTROL_C) & (midi_events[:, 4] == 7)]) / 127
+	except ValueError:
+		volume = 1
+	max_vol = np.max(midi_events[:, 5][midi_events[:, 2] == event_types.NOTE_ON_C]) * volume
+	return 0, midi_events, note_lengths, max_vol, last_timestamp
 
 @dataclass(slots=True)
 class TransportNote:
+	modality: int
+	instrument_id: int
 	pitch: int
 	velocity: float
 	start: float
@@ -229,8 +185,6 @@ class TransportNote:
 	panning: float
 	period: int
 	offset: int
-
-NoteSegment = namedtuple("NS", ("instrument", "pitch", "priority", "long", "velocity", "panning"))
 
 class ChannelStats:
 	__slots__ = ("c")
@@ -254,9 +208,8 @@ class ChannelStats:
 		return self.c[i]
 
 def deconstruct(midi_events, speed_info, ctx=None):
-	played_notes = []
-	max_pitch = 101 if not ctx.mc_legal else 84
-	allow_stacks = ctx.mc_legal
+	max_pitch = 101
+	allow_stacks = ctx.strict_tempo
 	active_notes = {i: [] for i in range(len(material_map))}
 	active_notes[-1] = []
 	active_nc = 0
@@ -266,8 +219,12 @@ def deconstruct(midi_events, speed_info, ctx=None):
 	note_candidates = 0
 	_orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, orig_tempo = speed_info
 	step_ms = orig_step_ms
-	is_org = scan_midi_titles(midi_events)
-	midi_events, note_lengths, max_vol, last_timestamp = preprocess(midi_events, ctx=ctx)
+	modality, midi_events, note_lengths, max_vol, last_timestamp = preprocess(midi_events)
+	speed_ratio = real_ms_per_clock / scale / _orig_ms_per_clock
+	wait = orig_step_ms / speed_ratio
+	print("Tick delay:", wait)
+	played_notes = Transport(tick_delay=fractions.Fraction(wait) / 1000)
+	instrument_ids = {}
 	instrument_map = {}
 	channel_stats = ChannelStats()
 	print("Processing quantised notes...")
@@ -280,6 +237,164 @@ def deconstruct(midi_events, speed_info, ctx=None):
 	allowed_leakage = 0
 	low_precision = len(midi_events) > 262144
 	early_triggers = (event_types.PITCH_BEND_C, event_types.CONTROL_C)
+	min_duration = 75
+
+	def parse_note(event):
+		channel = event[3]
+		if channel not in instrument_map:
+			instrument_ids[channel] = 0
+			instrument_map[channel] = -1 if channel & 255 == 9 and ctx.drums else 0
+		instrument = instrument_map[channel]
+		pitch = event[4]
+		panning = 0
+		priority = 2
+		offset = 0
+		if instrument in (-1,):
+			sustain = 0
+		else:
+			sustain = sustain_map[instrument] or 2
+		length = 0
+		if len(event) > 6:
+			if len(event) > 7:
+				if len(event) > 8 and event[8]:
+					if len(event) > 9 and event[9]:
+						offset = event[9]
+					panning = event[8]
+				length_ticks = event[7]
+				length = (length_ticks + 0.25) * timescale
+			priority = event[6]
+		if length == 0:
+			length = 0
+			if sustain or channel_stats[channel]:
+				track = event[0]
+				h = (event_timestamp, track, channel, pitch)
+				try:
+					length = (note_lengths[h] + 0.25) * timescale
+				except KeyError:
+					raise
+					length = 0
+			min_sustain = curr_frac * 2.25 if sustain == 2 else curr_frac * 1.25
+			if length < min_sustain:
+				length = min_sustain
+				if sustain == 1:
+					sustain = 0
+		return TransportNote(
+			modality=modality,
+			instrument_id=instrument_ids[channel],
+			pitch=pitch,
+			velocity=event[5],
+			start=timestamp_approx,
+			length=length,
+			channel=channel,
+			sustain=sustain,
+			priority=priority,
+			volume=0,
+			panning=panning,
+			period=1,
+			offset=offset,
+		)
+
+	def tick_notes(active_nc):
+		ticked = {}
+		long_notes = 0
+		max_volume = 0
+		total_value = 0
+		for notes in active_notes.values():
+			for note in notes:
+				note.volume = channel_stats[note.channel].volume * note.velocity / max_vol * 127
+				if note.volume > max_volume:
+					max_volume = note.volume
+				total_value += note.volume * min(4, note.length)
+		for instrument, notes in active_notes.items():
+			notes.reverse()
+			for i in range(len(notes) - 1, -1, -1):
+				note = notes[i]
+				volume = note.volume
+				if note.length < min_duration:
+					note.length = min_duration
+					note.sustain = note.sustain and 2
+				length = note.length
+				panning = max(-1, min(1, note.panning + channel_stats[note.channel].pan))
+				end = note.start + note.length
+				sms = curr_frac
+				needs_sustain = note.sustain
+				long = length >= sms * 2
+				if note.start + sms * 3 / 4 > timestamp_approx or needs_sustain and timestamp_approx + sms <= end:
+					pitch = channel_stats[note.channel].bend + note.pitch
+					normalised = pitch + ctx.transpose - fs1
+					if normalised > max_pitch:
+						pitch = max_pitch - ctx.transpose + fs1
+					elif normalised < -12:
+						pitch = -12 - ctx.transpose + fs1
+					priority = note.priority
+					if not allow_stacks:
+						if ticked and len(next(iter(ticked))) == 2:
+							bucket = (instrument, pitch)
+						elif len(ticked) >= 36:
+							ticked2 = {}
+							for k, v in ticked.items():
+								k2 = k[:2]
+								try:
+									temp = ticked2[k2]
+								except KeyError:
+									temp = ticked2[k2] = v
+								else:
+									temp[0] = max(temp[0], v[0])
+									temp[2] = temp[2] if temp[1] > v[1] else v[2]
+									temp[1] = temp[1] + v[1]
+							ticked = ticked2
+							bucket = (instrument, pitch)
+						else:
+							bucket = (instrument, pitch, len(ticked))
+					else:
+						bucket = (instrument, pitch)
+					try:
+						temp = ticked[bucket]
+					except KeyError:
+						temp = ticked[bucket] = [priority, log2lin(volume / 127), panning, note.modality, note.instrument_id, note.offset or round((timestamp_approx - note.start) / sms)]
+					else:
+						v = log2lin(volume / 127)
+						temp[0] = max(temp[0], priority)
+						temp[2] = temp[2] if temp[1] > v else panning
+						temp[1] = temp[1] + v if abs(timestamp_approx - time) < 1 / 24000 else hypot(temp[1], v)
+					long_notes += long
+				if timestamp_approx >= end or len(notes) >= 64 and not needs_sustain:
+					notes.pop(i)
+					active_nc -= 1
+				else:
+					note.priority = 0 if note.sustain == 1 else -1
+					if note.sustain == 2 and (length < sms * 3 or (timestamp_approx - note.start) % (sms * 2) >= sms):
+						# Notes that do not have a sustain property should fade out based on their duration
+						note.velocity = max(2, note.velocity - sms / (length + sms * 2) * note.velocity * 2)
+			notes.reverse()
+		return ticked, active_nc
+
+	def to_segments(ticked):
+		beat = []
+		poly = {}
+		for k, v in ticked.items():
+			instrument, pitch, *_ = k
+			priority, volume, pan, modality, i_id, timing = v
+			volume *= ctx.volume
+			count = max(1, int(volume))
+			vel = lin2log(volume / count)
+			block = NoteSegment(priority, modality, i_id, instrument, pitch, vel, pan, timing)
+			for w in range(count):
+				beat.append(block)
+			if instrument != -1:
+				try:
+					poly[instrument] += count
+				except KeyError:
+					poly[instrument] = count
+			else:
+				poly.setdefault(instrument, 0)
+			try:
+				instrument_activities[instrument][0] += volume
+				instrument_activities[instrument][1] = max(instrument_activities[instrument][1], poly[instrument])
+			except KeyError:
+				instrument_activities[instrument] = [volume, poly[instrument]]
+		return beat
+
 	with progress as bar:
 		while global_index < len(midi_events):
 			event = midi_events[global_index]
@@ -297,75 +412,31 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				# Process all events at the current timestamp
 				match mode:
 					case event_types.PROGRAM_C:
-						channel = int(event[3])
-						if channel == 9 and ctx.drums:
+						channel = event[3]
+						if channel & 255 == 9:
 							pass
 						else:
 							value = int(event[4])
-							instrument_map[channel] = org_instrument_mapping[value] if is_org else instrument_mapping[value]
-						# print(instrument_map)
+							instrument_ids[channel] = value
+							instrument_map[channel] = instrument_mapping[value]
 					case event_types.NOTE_ON_C:
-						channel = int(event[3])
-						if channel not in instrument_map:
-							instrument_map[channel] = -1 if channel == 9 and ctx.drums else 0
-						instrument = instrument_map[channel]
-						pitch = round_min(float(event[4]))
-						velocity = int(event[5])
-						panning = 0
+						velocity = event[5]
 						if velocity == 0:
 							pass
 						elif velocity < loud * 0.0625 and active_nc >= 48:
 							note_candidates += 1
 						else:
 							note_candidates += 1
-							priority = 2
-							if instrument in (-1,):
-								sustain = 0
-							else:
-								sustain = sustain_map[instrument] or (1 if is_org else 2 if not ctx.mc_legal else 0)
-							length = 0
-							if len(event) > 6:
-								if len(event) > 7:
-									if len(event) > 8:
-										panning = event[8]
-									length_ticks = event[7]
-									length = (length_ticks + 0.25) * timescale
-								priority = event[6]
-							if length == 0:
-								length = 0
-								if sustain or channel_stats[channel]:
-									track = int(event[0])
-									h = (event_timestamp, track, channel, pitch)
-									try:
-										length = (note_lengths[h] + 0.25) * timescale
-									except KeyError:
-										length = 0
-								min_sustain = curr_frac * 2.25 if sustain == 2 else curr_frac * 1.25
-								if length < min_sustain:
-									length = min_sustain
-									if sustain == 1:
-										sustain = 0
-							note = TransportNote(
-								pitch=pitch,
-								velocity=velocity,
-								start=timestamp_approx,
-								length=length,
-								channel=channel,
-								sustain=sustain,
-								priority=priority,
-								volume=0,
-								panning=panning,
-								period=1,
-								offset=0,
-							)
+							note = parse_note(event)
+							instrument = instrument = instrument_map[note.channel]
 							active_notes[instrument].append(note)
 							active_nc += 1
 							loud = max(loud, velocity)
 						leaked_notes += 1
 					case event_types.PITCH_BEND_C:
-						channel = int(event[3])
-						value = int(event[4])
-						offset = round_min(round((value - 8192) / 8192 * channel_stats[channel].bend_range * 6) / 6)
+						channel = event[3]
+						value = as_int(event[4])
+						offset = round_min(round((value - 8192) / 8192 * channel_stats[channel].bend_range * 1000) / 1000)
 						prev = channel_stats[channel].bend
 						if offset != prev:
 							note_candidates += 1
@@ -378,16 +449,16 @@ def deconstruct(midi_events, speed_info, ctx=None):
 										new_length = float(timestamp_approx + curr_frac * 1.5 - note.start)
 										if new_length <= note.length:
 											found.append(note)
-										if not note.sustain:
+										if not note.sustain and note.instrument_id != -1:
 											note.priority = max(note.priority, 1)
 											note.sustain = True
 								if not found and active_notes[instrument]:
 									for note in active_notes[instrument]:
 										if note.channel == channel:
 											note.length = max(note.length, float(timestamp_approx + curr_frac - note.start))
-					case event_types.CONTROL_C if int(event[4]) == 6:
-						channel = int(event[3])
-						bend_range = int(event[5])
+					case event_types.CONTROL_C if event[4] == 6:
+						channel = event[3]
+						bend_range = as_int(event[5])
 						prev = channel_stats[channel].bend_range
 						if bend_range != prev:
 							note_candidates += 1
@@ -407,9 +478,9 @@ def deconstruct(midi_events, speed_info, ctx=None):
 									for note in active_notes[instrument]:
 										if note.channel == channel:
 											note.length = max(note.length, float(timestamp_approx + curr_frac - note.start))
-					case event_types.CONTROL_C if int(event[4]) == 7:
-						channel = int(event[3])
-						value = int(event[5])
+					case event_types.CONTROL_C if event[4] == 7:
+						channel = event[3]
+						value = as_int(event[5])
 						volume = value / 127
 						orig_volume = channel_stats[channel].volume
 						if volume >= orig_volume * 1.1:
@@ -422,12 +493,12 @@ def deconstruct(midi_events, speed_info, ctx=None):
 										note.priority = max(note.priority, 1)
 						channel_stats[channel].volume = volume
 					case event_types.CONTROL_C if int(event[4]) == 10:
-						channel = int(event[3])
-						value = int(event[5])
+						channel = event[3]
+						value = as_int(event[5])
 						pan = max(-1, (value - 64) / 63)
 						channel_stats[channel].pan = pan
 					case event_types.TEMPO:
-						tempo = int(event[3])
+						tempo = event[3]
 						ratio = tempo / orig_tempo
 						if max(ratio, 1 / ratio) - 1 < 1 / 16:
 							ratio = 1
@@ -451,108 +522,8 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							timestamp_approx = timestamp = round(time)
 				global_index += 1
 			else:
-				ticked = {}
-				long_notes = 0
-				max_volume = 0
-				total_value = 0
-				poly = 0
-				for notes in active_notes.values():
-					for note in notes:
-						note.volume = channel_stats[note.channel].volume * note.velocity / max_vol * 127 * ctx.volume
-						if note.volume > max_volume:
-							max_volume = note.volume
-						total_value += note.volume * min(4, note.length)
-						poly += note.sustain
-				for instrument, notes in active_notes.items():
-					notes.reverse()
-					for i in range(len(notes) - 1, -1, -1):
-						note = notes[i]
-						volume = note.volume
-						length = note.length
-						panning = note.panning + channel_stats[note.channel].pan
-						end = note.start + note.length
-						sms = curr_frac
-						needs_sustain = note.sustain
-						long = length >= sms * 2
-						if note.start + sms * 3 / 4 > timestamp_approx or needs_sustain and timestamp_approx + sms <= end:
-							pitch = channel_stats[note.channel].bend + note.pitch
-							normalised = pitch + ctx.transpose - fs1
-							if normalised > max_pitch:
-								pitch = max_pitch - ctx.transpose + fs1
-							elif normalised < -12:
-								pitch = -12 - ctx.transpose + fs1
-							priority = note.priority
-							if priority > 0 and volume != 0:
-								# For sections that are really loud or for sustained notes at a fast tempo; quantise note segments based on the square root of the ratio between the note's volume and total volume, multiplied by the ratio between note lengths
-								period = note.period = round(min(8, max(1, 50 / sqrt(pitch + 12) / ctx.strum_affinity * sqrt(total_value / volume / min(4, length) + 8) / sms))) if long else 8
-								offset = note.offset = long_notes % period if long else 0
-							elif round((timestamp_approx - note.start) / sms) % note.period != note.offset:
-								priority = -1
-							if not allow_stacks:
-								if ticked and len(next(iter(ticked))) == 2:
-									bucket = (instrument, pitch)
-								elif len(ticked) >= 36:
-									ticked2 = {}
-									for k, v in ticked.items():
-										k2 = k[:2]
-										try:
-											temp = ticked2[k2]
-										except KeyError:
-											temp = ticked2[k2] = v
-										else:
-											temp[0] = max(temp[0], v[0])
-											temp[1] |= v[1]
-											temp[3] = temp[3] if temp[2] > v[2] else v[3]
-											temp[2] = temp[2] + v[2]
-									ticked = ticked2
-									bucket = (instrument, pitch)
-								else:
-									bucket = (instrument, pitch, len(ticked))
-							else:
-								bucket = (instrument, pitch)
-							try:
-								temp = ticked[bucket]
-							except KeyError:
-								temp = ticked[bucket] = [priority, long, log2lin(volume / 127), panning]
-							else:
-								v = log2lin(volume / 127)
-								temp[0] = max(temp[0], priority)
-								temp[1] |= long
-								temp[3] = temp[3] if temp[2] > v else panning
-								temp[2] = temp[2] + v if abs(timestamp_approx - time) < 1 / 24000 else hypot(temp[2], v)
-							long_notes += long
-						if timestamp_approx >= end or len(notes) >= 64 and not needs_sustain:
-							notes.pop(i)
-							active_nc -= 1
-						else:
-							note.priority = 0 if note.sustain == 1 else -1
-							if note.sustain == 2 and (length < sms * 3 or (timestamp_approx - note.start) % (sms * 2) >= sms):
-								# Notes that do not have a sustain property should fade out based on their duration
-								note.velocity = max(2, note.velocity - sms / (length + sms * 2) * note.velocity * 2)
-					notes.reverse()
-				beat = []
-				poly = {}
-				for k, v in ticked.items():
-					instrument, pitch, *_ = k
-					priority, long, volume, pan = v
-					count = max(1, int(volume))
-					vel = max(1, min(127, round(lin2log(volume / count) * 127)))
-					block = NoteSegment(instrument, pitch, priority, long, vel, pan)
-					for w in range(count):
-						beat.append(block)
-					if instrument != -1:
-						try:
-							poly[instrument] += count
-						except KeyError:
-							poly[instrument] = count
-					else:
-						poly.setdefault(instrument, 0)
-					try:
-						instrument_activities[instrument][0] += volume
-						instrument_activities[instrument][1] = max(instrument_activities[instrument][1], poly[instrument])
-					except KeyError:
-						instrument_activities[instrument] = [volume, poly[instrument]]
-				ticked = None
+				ticked, active_nc = tick_notes(active_nc)
+				beat = to_segments(ticked)
 				played_notes.append(beat)
 				timestamp += curr_step
 				if isinstance(timestamp, int) or timestamp.is_integer():
@@ -566,8 +537,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				loud *= 0.5
 				allowed_leakage = (allowed_leakage - leaked_notes) * 2
 				leaked_notes = 0
-				for i in range(global_index, len(midi_events)):
-					e = midi_events[i]
+				for e in midi_events[global_index:]:
 					offs = latest_timestamp - e[1] * timescale
 					if offs >= -curr_step / 3:
 						if e[2] != event_types.NOTE_ON_C:
@@ -583,7 +553,9 @@ def deconstruct(midi_events, speed_info, ctx=None):
 					bar.update(curr_step / 1000)
 	while played_notes and not played_notes[-1]:
 		played_notes.pop(-1)
-	return played_notes, note_candidates, is_org, instrument_activities, speed_info
+	while played_notes and not played_notes[0]:
+		played_notes.pop(0)
+	return played_notes, note_candidates, instrument_activities, speed_info
 
 
 @dataclass(slots=True)
@@ -599,10 +571,8 @@ class MidiNote:
 	events: list
 	aligned: int
 
-def build_midi(notes, instrument_activities, speed_info, ctx):
-	orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
-	speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
-	wait = round(orig_step_ms / speed_ratio * 1000)
+def build_midi(notes, instrument_activities, ctx):
+	wait = max(1, round(notes.tick_delay * 1000))
 	resolution = 6
 	activities = list(map(list, instrument_activities.items()))
 	instruments = [SimpleNamespace(
@@ -633,18 +603,17 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 		last_notes, next_notes = next_notes, set()
 		last_drums, next_drums = next_drums, []
 		if beat:
-			ordered = sorted(beat, key=lambda note: (transport_note_priority(note, sustained=(note[0], note[1] - c_1) in last_notes), note[0] == -1), reverse=True)
+			ordered = sorted(beat, key=lambda note: (transport_note_priority(note, sustained=(note.instrument_class, note.pitch - c_1) in last_notes), note.instrument_class == -1), reverse=True)
 		else:
 			ordered = list(beat)
 		for note in ordered:
-			itype, pitch, priority, _long, vel, pan = note
-			volume = round(min(127, vel))
-			panning = round(pan * 63 + 64)
-			ins = midi_instrument_selection[itype]
+			volume = round(min(127, note.velocity * 127))
+			panning = round(note.panning * 63 + 64)
+			ins = note.instrument_id if note.modality == 0 else midi_instrument_selection[note.instrument_class]
 			if ins < 0:
 				if not drums:
 					continue
-				new_pitch = pitch
+				new_pitch = note.pitch
 				if last_drums:
 					for note in last_drums:
 						note.length = min(resolution * 4, max(resolution, tick - note.tick))
@@ -664,13 +633,15 @@ def build_midi(notes, instrument_activities, speed_info, ctx):
 				drums.notes.append(note)
 				next_drums.append(note)
 				continue
-			new_pitch = pitch - c_1
+			new_pitch = note.pitch - c_1
 			if new_pitch < 0:
 				new_pitch += 12
 			if new_pitch < 0:
 				new_pitch = 0
 			if new_pitch > 127:
 				new_pitch = 127
+			itype = note.instrument_class
+			priority = note.priority
 			h = (itype, new_pitch)
 			if priority < 2:
 				closest = 2
@@ -766,11 +737,12 @@ def load_csv(file):
 
 def load_midi(file):
 	print("Importing MIDI...")
-	# return parse_midi(file)
-	csv_list = midi2csv(file)
-	if not isinstance(file, str):
-		file.close()
-	return csv.reader(csv_list)
+	from . import fastmidi
+	transfer = fastmidi.parse_midi_events(file)
+	events = np.pad(transfer, ((0, 0), (1, 1)), mode='constant')
+	events[:, 7] = events[:, 6]
+	events[:, 6] = 2
+	return events
 
 
 def proceed_save_midi(output, out_name, is_csv, instruments, wait, resolution):
@@ -786,6 +758,8 @@ def proceed_save_midi(output, out_name, is_csv, instruments, wait, resolution):
 	remaining.discard(9)
 	for r in remaining:
 		temp = sorted((ins for ins in instruments if ins.type >= 0), key=lambda ins: ins.ccount, reverse=True)
+		if not temp:
+			break
 		ins = temp[0]
 		ins.channels.append(r)
 		ins.taken.append(0)
@@ -920,12 +894,12 @@ def proceed_save_midi(output, out_name, is_csv, instruments, wait, resolution):
 			csv2midi(b, output)
 	return nc
 
-def save_midi(transport, output, instrument_activities, speed_info, ctx):
+def save_midi(transport, output, instrument_activities, ctx, **void):
 	is_csv = output.casefold().endswith(".csv")
 	if is_csv:
 		print("Exporting CSV...")
 	else:
 		print("Exporting MIDI...")
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	instruments, wait, resolution = list(build_midi(transport, instrument_activities, speed_info, ctx=ctx))
+	instruments, wait, resolution = list(build_midi(transport, instrument_activities, ctx=ctx))
 	return proceed_save_midi(output, out_name, is_csv, instruments, wait, resolution)

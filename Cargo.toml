@@ -1,0 +1,16 @@
+[package]
+name = "fastmidi"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "fastmidi"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.25", features = ["extension-module"] }
+numpy = "0.25"
+midly = "0.5.3"
+
+[build-dependencies]
+pyo3-build-config = "0.25"
