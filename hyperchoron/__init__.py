@@ -178,16 +178,15 @@ def convert_files(**kwargs) -> list:
 		ctx.output = [util.temp_dir + str(util.ts_us()) + "/"]
 	out_format = ctx.get("format") or "mid"
 	output_files = list(ctx.output)
-	if count > 1:
-		if len(output_files) == 1:
-			if output_files[0].endswith("/"):
-				if not os.path.exists(output_files[0]):
-					os.mkdir(output_files[0])
-				output_files = [output_files[0] + (file.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0] or "untitled") + "." + out_format for file in outputs]
-			else:
-				raise ValueError('Expected new (suffixed with "/") or empty folder for multiple outputs.')
-		else:
-			raise ValueError(f"Expected 1 or {count} outputs, got {len(output_files)}.")
+	if len(output_files) == 1:
+		if output_files[0].endswith("/"):
+			if not os.path.exists(output_files[0]):
+				os.mkdir(output_files[0])
+			output_files = [output_files[0] + (file.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0] or "untitled") + "." + out_format for file in outputs]
+		elif count > 1:
+			raise ValueError('Expected new (suffixed with "/") or empty folder for multiple outputs.')
+	elif count > 1:
+		raise ValueError(f"Expected 1 or {count} outputs, got {len(output_files)}.")
 	if count > 1:
 		assert len(output_files) == count, f"Expected {count} outputs, got {len(output_files)}"
 	print(inputs, f"({len(inputs)})", "=>", output_files, f"({len(output_files)})")
