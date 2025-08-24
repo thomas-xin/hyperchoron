@@ -4,6 +4,7 @@ temp
 target
 dist
 fastmidi
+binaries
 DawVert
 examples/csv
 examples/genshinsheet

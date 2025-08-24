@@ -99,7 +99,7 @@ Converting a MIDI file stored on a remote server, accessible via HTTP:
 - `hyperchoron -i https://mizabot.xyz/u/5OK0rYLJEBCJYQYRKBJbaAAQAYBYZA/mk7_rainbow_road.mid -o output.nbt`
 
 Converting a FL Studio project into a Minecraft Note Block Studio project, ignoring vanilla Minecraft limitations (Refer below for additional requirements for .flp):
-- `hyperchoron -i input.flp -x -o output.nbs`
+- `hyperchoron -i input.flp -mt -o output.nbs`
 
 Converting a raw audio file into a .csv, a .🗿 and a .org file, transcribing all notes up a Major 3rd (Refer below for additional requirements for .wav):
 - `hyperchoron -i input.wav -t 4 -o output.csv output.🗿 output.org`
@@ -141,7 +141,7 @@ Hyperchoron can be imported as a Python library for integration with other tools
   - .nbt: A Minecraft NBT structure file, normally intended for use with structure blocks. However, in practice the outputs are usually too large, and will need a third-party mod (litematica included) to paste properly.
   - .org
   - .🗿/.moai
-  - .zip (currently placeholder): An archive containing files that enable playing the song in the Deltarune rhythm game. Included will be three .ogg files which must be placed in the `mus` folder, as well as `rhythmgame_notechart.gml` and `rhythmgame_song_load.gml` files, which must be imported into the `data.win` code using a tool such as UndertaleModTool. See https://youtu.be/rSE3DecbFsM as a guide for this! Requires `pcm` dependencies.
+  - `deltarune`: A list of files that enable playing the song in the Deltarune rhythm game. Included will be three .ogg files which must be placed in the `mus` folder, as well as `rhythmgame_notechart.gml` and `rhythmgame_song_load.gml` files, which must be imported into the `data.win` code using a tool such as UndertaleModTool. See https://youtu.be/rSE3DecbFsM as a guide for this! Requires `pcm` dependencies. Note: This format does not have an extension, and must be manually specified using `-f`/`--format`. The output may be an empty folder or an archive.
   - .skysheet: A recreation and representation of the playable music sheets used in Sky: Children of the Light. The format supported by Hyperchoron is specifically for the https://sky-music.specy.app editor.
   - .genshinsheet: Similar to .skysheet, but for the game Genshin Impact. See https://genshin-music.specy.app for the corresponding editor.
 - WIP:

@@ -22,6 +22,9 @@ base_path = __file__.replace("\\", "/").rsplit("/", 1)[0] + "/"
 temp_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/temp/"
 if not os.path.exists(temp_dir):
 	os.mkdir(temp_dir)
+binary_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/binaries/"
+if not os.path.exists(binary_dir):
+	os.mkdir(binary_dir)
 csv_reader = type(csv.reader([]))
 
 if not hasattr(time, "time_ns"):
@@ -37,15 +40,20 @@ def ts_us():
 fluidsynth = os.path.abspath(base_path + "/fluidsynth/fluidsynth")
 
 def get_sf2():
-	sf2convert = os.path.abspath(base_path + "/fluidsynth/sf2convert")
-	s7z = os.path.abspath(base_path + "/fluidsynth/soundfont.7z")
-	sf3 = os.path.abspath(temp_dir + "soundfont.sf3")
-	sf2 = temp_dir + "soundfont.sf2"
+	sf2 = binary_dir + "soundfont.sf2"
 	if not os.path.exists(sf2) or not os.path.getsize(sf2):
+		s7z = os.path.abspath(temp_dir + "soundfont.7z")
+		if not os.path.exists(s7z):
+			import urllib.request
+			req = urllib.request.Request("https://mizabot.xyz/u/iO-ouosmGJ_wB-xHIHx3H2wypUmn/soundfont.7z", headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"})
+			with open(s7z, "wb") as f:
+				f.write(urllib.request.urlopen(req).read())
 		import py7zr
 		with py7zr.SevenZipFile(s7z, mode='r') as z:
 			z.extractall(temp_dir)
 		import subprocess
+		sf2convert = os.path.abspath(base_path + "/fluidsynth/sf2convert")
+		sf3 = os.path.abspath(temp_dir + "soundfont.sf3")
 		subprocess.run([sf2convert, "-x", sf3, sf2])
 	return sf2
 

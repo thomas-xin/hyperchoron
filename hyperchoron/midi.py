@@ -244,9 +244,14 @@ def deconstruct(midi_events, speed_info, ctx=None):
 
 	def parse_note(event):
 		channel = event[3]
+		c = 0
+		if channel & 255 == 9:
+			if not ctx.drums:
+				return
+			c = -1
 		if channel not in instrument_map:
-			instrument_ids[channel] = 0
-			instrument_map[channel] = -1 if channel & 255 == 9 and ctx.drums else 0
+			instrument_ids[channel] = c
+			instrument_map[channel] = c
 		instrument = instrument_map[channel]
 		pitch = event[4]
 		panning = 0
@@ -431,6 +436,8 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						else:
 							note_candidates += 1
 							note = parse_note(event)
+							if not note:
+								continue
 							instrument = instrument = instrument_map[note.channel]
 							active_notes[instrument].append(note)
 							active_nc += 1
@@ -575,11 +582,12 @@ class MidiNote:
 	aligned: int
 
 def build_midi(notes, instrument_activities, ctx):
-	wait = max(1, round(notes.tick_delay * 1000))
+	wait = max(1, round(notes.tick_delay * 1000000))
 	resolution = 6
 	activities = list(map(list, instrument_activities.items()))
 	instruments = [SimpleNamespace(
 		id=midi_instrument_selection[curr[0]],
+		id_override=None,
 		type=curr[0],
 		notes=[],
 		name=instrument_codelist[curr[0]],
@@ -612,7 +620,7 @@ def build_midi(notes, instrument_activities, ctx):
 		for note in ordered:
 			volume = round(min(127, note.velocity * 127))
 			panning = round(note.panning * 63 + 64)
-			ins = note.instrument_id if note.modality == 0 else midi_instrument_selection[note.instrument_class]
+			ins = midi_instrument_selection[note.instrument_class]
 			if ins < 0:
 				if not drums:
 					continue
@@ -710,6 +718,8 @@ def build_midi(notes, instrument_activities, ctx):
 					continue
 			choices = sorted(instruments, key=lambda instrument: instrument.id == ins, reverse=True)
 			instrument = choices[0]
+			if not instrument.id_override and note.modality == 0 and instrument.id != note.instrument_id:
+				instrument.id_override = note.instrument_id
 			length = resolution if sustain_map[instrument.type] else resolution * 2
 			midi_note = MidiNote(
 				instrument_id=instrument.index,
@@ -729,6 +739,9 @@ def build_midi(notes, instrument_activities, ctx):
 			taken.append(instrument.index)
 			next_active.append(midi_note)
 			next_notes.add(h)
+	for ins in instruments:
+		if ins.id_override:
+			ins.id = ins.id_override
 	return instruments, wait, resolution
 
 

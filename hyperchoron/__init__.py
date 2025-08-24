@@ -27,6 +27,7 @@ nbt | mcfunction | litematic : minecraft.save_litematic
 🗿 | moai : text.save_moai
 skysheet : text.save_skysheet
 genshinsheet : text.save_genshinsheet
+deltarune : text.save_deltarune
 wav | flac | mp3 | aac | ogg | opus | m4a | weba | webm : pcm.save_raw
 _ : dawvert.save_arbitrary
 """.splitlines() if line for exts, v in [line.rsplit(" : ", 1)] for k in exts.split(" | "))

@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hyperchoron"
 readme = "README.md"
-version = "1.0.7"
+version = "1.0.8"
 authors = [
 	{name = "Thomas Xin", email = "thomasxin@gmail.com"},
 ]

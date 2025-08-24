@@ -587,10 +587,11 @@ def join_gml(lines):
 
 def save_deltarune(transport, output, instrument_activities, ctx, **void):
 	tmpl = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	# full_midi = f"{temp_dir}{tmpl}-full.mid"
+	outtmpl = output.rsplit(".", 1)[0]
 	from hyperchoron import midi
 	instruments, wait, resolution = list(midi.build_midi(transport, instrument_activities, ctx=ctx))
-	# midi.proceed_save_midi(full_midi, f"{tmpl}-full", False, instruments, wait, resolution)
+	full_midi = f"{temp_dir}{tmpl}-full.mid"
+	midi.proceed_save_midi(full_midi, f"{tmpl}-full", False, instruments, wait, resolution)
 	all_notes = []
 	for ins in instruments:
 		all_notes.extend(ins.notes)
@@ -768,7 +769,7 @@ def save_deltarune(transport, output, instrument_activities, ctx, **void):
 	minnote = 0;
 }""",
 	]
-	rhythmgame_notes = f"{temp_dir}{tmpl}-rhythmgame_notechart.gml"
+	rhythmgame_notes = f"{outtmpl}-rhythmgame_notechart.gml"
 	with open(rhythmgame_notes, "w") as f:
 		f.write("\n".join(code))
 	code = [
@@ -893,7 +894,7 @@ function scr_rhythmgame_toggle_notes(arg0, arg1 = true) {
 	}
 }""",
 	]
-	rhythmgame_load = f"{temp_dir}{tmpl}-rhythmgame_song_load.gml"
+	rhythmgame_load = f"{outtmpl}-rhythmgame_song_load.gml"
 	with open(rhythmgame_load, "w") as f:
 		f.write("\n".join(code))
 	base_midi = f"{temp_dir}{tmpl}-base.mid"
@@ -913,24 +914,24 @@ function scr_rhythmgame_toggle_notes(arg0, arg1 = true) {
 	base_flac = f"{temp_dir}{tmpl}-base.flac"
 	args = [fluidsynth, "-g", "0.5", "-F", base_flac, "-c", "64", "-o", "synth.polyphony=32767", "-r", "48000", "-n", sf2, base_midi]
 	subprocess.run(args)
-	base_ogg = f"{temp_dir}{tmpl}-base.ogg"
+	base_ogg = f"{outtmpl}-base.ogg"
 	args = [ffmpeg, "-y", "-i", base_flac, "-af", "volume=2", "-c:a", "libvorbis", "-b:a", "128k", base_ogg]
 	proc = subprocess.Popen(args)
 	solo_flac = f"{temp_dir}{tmpl}-solo.flac"
 	args = [fluidsynth, "-g", "0.5", "-F", solo_flac, "-c", "64", "-o", "synth.polyphony=512", "-r", "48000", "-n", sf2, solo_midi]
 	subprocess.run(args)
 	proc.wait()
-	solo_ogg = f"{temp_dir}{tmpl}-solo.ogg"
+	solo_ogg = f"{outtmpl}-solo.ogg"
 	args = [ffmpeg, "-y", "-i", solo_flac, "-af", "volume=2", "-c:a", "libvorbis", "-b:a", "128k", solo_ogg]
 	subprocess.run(args)
-	full_ogg = f"{temp_dir}{tmpl}-full.ogg"
+	full_ogg = f"{outtmpl}-full.ogg"
 	args = [ffmpeg, "-y", "-i", base_flac, "-i", solo_flac, "-filter_complex", "[0:a]volume=2[a1];[1:a]volume=2[a2];[a1][a2]amix=inputs=2:duration=longest", full_ogg]
 	subprocess.run(args)
-	import zipfile
-	with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as z:
-		z.write(rhythmgame_notes, arcname="rhythmgame_notechart.gml")
-		z.write(rhythmgame_load, arcname="rhythmgame_song_load.gml")
-		z.write(base_ogg, arcname=f"{tmpl}-base.ogg")
-		z.write(solo_ogg, arcname=f"{tmpl}-solo.ogg")
-		z.write(full_ogg, arcname=f"{tmpl}-full.ogg")
+	# import zipfile
+	# with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as z:
+	# 	z.write(rhythmgame_notes, arcname="rhythmgame_notechart.gml")
+	# 	z.write(rhythmgame_load, arcname="rhythmgame_song_load.gml")
+	# 	z.write(base_ogg, arcname=f"{tmpl}-base.ogg")
+	# 	z.write(solo_ogg, arcname=f"{tmpl}-solo.ogg")
+	# 	z.write(full_ogg, arcname=f"{tmpl}-full.ogg")
 	return nc
