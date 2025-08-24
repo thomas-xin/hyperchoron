@@ -106,6 +106,7 @@ Converting a raw audio file into a .csv, a .🗿 and a .org file, transcribing a
 ### As a library
 Hyperchoron can be imported as a Python library for integration with other tools, and the following useful functions are exposed:
 - `hyperchoron.convert_files(**kwargs) -> list`: Runs a conversion identical to the one you would get from running the cli tool as a standalone, passing the same optional arguments. This is included as an alternative to the cli, for the sake of performance if you're running multiple conversions. Supports the same multiple input/output/mixing modes the cli tool does, including the folder hierarchy unpacking, and parallelisation of multiple conversions where applicable.
+- `hyperchoron.clear_cache()`: Attempts to delete the folder used for writing temporary data to disk during processing. Useful if you're not using the default handler.
 - `hyperchoron.decoder_mapping`: A dictionary containing the available decoders, "_" representing the fallback decoder.
 - `hyperchoron.encoder_mapping`: A dictionary containing the available encoders, "_" representing the fallback encoder.
 - `hyperchoron.load_file(fi, ctx) -> "np.ndarray"`: Loads a single file from any of the decodable formats, returning a numpy array of the decoded events as MIDI, similar to tools such as midicsv.

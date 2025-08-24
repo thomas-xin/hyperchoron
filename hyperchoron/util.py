@@ -4,9 +4,11 @@ import csv
 from dataclasses import dataclass
 import datetime
 import fractions
+import functools
 import lzma
 from math import isqrt, sqrt, log10
 import os
+import shutil
 import struct
 import time
 import numpy as np
@@ -47,6 +49,11 @@ def get_sf2():
 		subprocess.run([sf2convert, "-x", sf3, sf2])
 	return sf2
 
+def get_ext(path) -> str:
+	return path.split("?", 1)[0].replace("\\", "/").rsplit(".", 1)[-1].rstrip("/")
+
+archive_formats = ("7z", "zip", "tar", "gz", "bz", "xz")
+
 def extract_archive(archive_path, format=None):
 	path = temp_dir + str(ts_us())
 	os.mkdir(path)
@@ -55,10 +62,17 @@ def extract_archive(archive_path, format=None):
 		with py7zr.SevenZipFile(archive_path, mode="r") as z:
 			z.extractall(path=path)
 	else:
-		import shutil
-		shutil.unpack_archive(archive_path, extract_dir=path, format=format)
+		shutil.unpack_archive(archive_path, extract_dir=path, format=format or get_ext(archive_path))
 	return [f"{path}/{fn}" for fn in os.listdir(path)]
 
+def create_archive(root, archive_path, format=None):
+	if format == "7z" or archive_path.endswith(".7z"):
+		import py7zr
+		with py7zr.SevenZipFile(archive_path, "w") as z:
+			return z.writeall(root)
+	return shutil.make_archive(archive_path.rsplit(".", 1)[0], format=format or get_ext(archive_path), root_dir=root)
+
+@functools.lru_cache(maxsize=4096)
 def get_children(path) -> list:
 	assert isinstance(path, str), "Only filename strings are currently supported."
 	if path.startswith("https://") or path.startswith("http://"):
@@ -71,7 +85,7 @@ def get_children(path) -> list:
 	assert os.path.exists(path), f"File {path} does not exist or is not accessible."
 	if os.path.isdir(path):
 		return [f"{path}/{fn}" for fn in os.listdir(path)]
-	if path.rsplit(".", 1)[-1].casefold() in ("7z", "zip", "tar", "gz", "bz", "xz"):
+	if path.rsplit(".", 1)[-1].casefold() in archive_formats:
 		return extract_archive(path)
 	return [path]
 
@@ -240,7 +254,8 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 	min_value = step_ms / milliseconds_per_clock
 	# print("Estimating true resolution...", len(timestamp_collection), clocks_per_crotchet, milliseconds_per_clock, step_ms, min_value)
 	speed, exclusions = approximate_gcd(timestamp_collection, min_value=min_value * 3 / 4)
-	assert speed > 0, speed
+	if speed <= 0:
+		speed = 1
 	use_exact = False
 	req = 1 / 8
 	# print("Confidence:", 1 - exclusions / len(timestamp_collection), req, speed)

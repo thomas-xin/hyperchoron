@@ -63,14 +63,13 @@ class ContextArgs:
 def fix_args(ctx) -> ContextArgs:
 	if not ctx.output:
 		ctx.output = [ctx.input[0].rsplit(".", 1)[0]]
-	formats = [fo.rsplit(".", 1)[-1] if "." in fo else ctx.get("format", "nbs") for fo in ctx.output]
+	formats = [util.get_ext(fo) if "." in fo else ctx.get("format", "nbs") for fo in ctx.output]
 	if not ctx.get("format"):
 		ctx.format = formats[0]
 	for i, fo in enumerate(ctx.output):
 		fo = fo.replace("\\", "/")
 		if fo.endswith("/"):
-			if not os.path.exists(fo):
-				os.mkdir(fo)
+			pass
 		elif os.path.exists(fo) and os.path.isdir(fo):
 			fo = fo + "/"
 		elif "." not in fo:
@@ -163,44 +162,60 @@ def convert_files(**kwargs) -> list:
 	ctx = fix_args(ctx)
 	inputs, outputs = probe_paths(ctx.input[0], ctx.mixing)
 	count = len(outputs)
+	archive_path = None
+	if len(ctx.output) == 1 and util.get_ext(ctx.output[0]) in util.archive_formats:
+		archive_path = ctx.output[0]
+		ctx.output = [util.temp_dir + str(util.ts_us()) + "/"]
 	out_format = ctx.get("format") or "mid"
+	output_files = list(ctx.output)
 	if count > 1:
-		if len(ctx.output) == 1:
-			if os.path.exists(ctx.output[0]) and os.path.isdir(ctx.output[0]):
-				ctx.output = [ctx.output[0] + (file.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0] or "untitled") + "." + out_format for file in outputs]
+		if len(output_files) == 1:
+			if output_files[0].endswith("/"):
+				if not os.path.exists(output_files[0]):
+					os.mkdir(output_files[0])
+				output_files = [output_files[0] + (file.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0] or "untitled") + "." + out_format for file in outputs]
 			else:
 				raise ValueError('Expected new (suffixed with "/") or empty folder for multiple outputs.')
 		else:
-			raise ValueError(f"Expected 1 or {count} outputs, got {len(ctx.output)}.")
+			raise ValueError(f"Expected 1 or {count} outputs, got {len(output_files)}.")
 	if count > 1:
-		assert len(ctx.output) == count, f"Expected {count} outputs, got {len(ctx.output)}"
-	print(inputs, f"({len(inputs)})", "=>", ctx.output, f"({len(ctx.output)})")
-	if len(inputs) == len(ctx.output) == 1:
+		assert len(output_files) == count, f"Expected {count} outputs, got {len(output_files)}"
+	print(inputs, f"({len(inputs)})", "=>", output_files, f"({len(output_files)})")
+	if len(inputs) == len(output_files) == 1:
 		results = process_level(inputs, ctx=ctx)
-		return [save_file(results[0], ctx.output[0], ctx=ctx)]
+		outputs = [save_file(results[0], output_files[0], ctx=ctx)]
 	with concurrent.futures.ProcessPoolExecutor(max_workers=16) as executor:
 		results = process_level(inputs, ctx=ctx, executor=executor)
 		futures = []
-		if type(results) is list and len(results) == 1 and len(ctx.output) > 1:
+		if type(results) is list and len(results) == 1 and len(output_files) > 1:
 			midi_events = results[0]
-			for fo in ctx.output:
+			for fo in output_files:
 				futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx))
 		else:
-			for midi_events, fo in zip(results, ctx.output):
+			for midi_events, fo in zip(results, output_files):
 				futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx))
-		return [fut.result() for fut in futures]
+		outputs = [fut.result() for fut in futures]
+	if archive_path:
+		outputs = [util.create_archive(ctx.output[0], archive_path)]
+	return outputs
 
 
 def main():
-	parser = util.get_parser()
-	args = parser.parse_args()
-	convert_files(**vars(args))
+	try:
+		parser = util.get_parser()
+		args = parser.parse_args()
+		return convert_files(**vars(args))
+	finally:
+		clear_cache()
+
+def clear_cache():
 	try:
 		import shutil
-		shutil.rmtree(util.temp_dir)
+		return shutil.rmtree(util.temp_dir)
 	except Exception:
 		from traceback import print_exc
 		print_exc()
+		raise
 
 
 if __name__ == "__main__":

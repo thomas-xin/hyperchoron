@@ -166,7 +166,10 @@ def preprocess(midi_events):
 		volume = np.max(midi_events[:, 5][(midi_events[:, 2] == event_types.CONTROL_C) & (midi_events[:, 4] == 7)]) / 127
 	except ValueError:
 		volume = 1
-	max_vol = np.max(midi_events[:, 5][midi_events[:, 2] == event_types.NOTE_ON_C]) * volume
+	try:
+		max_vol = np.max(midi_events[:, 5][midi_events[:, 2] == event_types.NOTE_ON_C]) * volume
+	except ValueError:
+		max_vol = 1
 	return 0, midi_events, note_lengths, max_vol, last_timestamp
 
 @dataclass(slots=True)
