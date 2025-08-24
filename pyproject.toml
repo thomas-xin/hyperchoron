@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hyperchoron"
 readme = "README.md"
-version = "1.0.3"
+version = "1.0.6"
 authors = [
 	{name = "Thomas Xin", email = "thomasxin@gmail.com"},
 ]
@@ -25,6 +25,15 @@ dependencies = [
 	"pynbs>=1.1.0",
 	"tqdm>=4.67.1",
 ]
+classifiers = [
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12",
+	"Programming Language :: Python :: 3.13",
+	"Programming Language :: Python :: Implementation :: CPython",
+	"Programming Language :: Rust",
+]
 [project.optional-dependencies]
 pcm = [
 	"audio-separator>=0.34.1",
@@ -39,8 +48,10 @@ Issues = "https://github.com/thomas-xin/hyperchoron/issues"
 
 [tool.setuptools]
 packages = ["hyperchoron"]
+include-package-data = true
 
 [[tool.setuptools-rust.ext-modules]]
-target = "fastmidi"
+target = "hyperchoron.fastmidi"
 path = "Cargo.toml"
 binding = "PyO3"
+py-limited-api = "cp310"

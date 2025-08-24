@@ -547,7 +547,7 @@ note_names_ex = [
 ]
 white_keys = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6, 7]
 white_keys += [i + 7 for i in white_keys[1:]]
-white_keys += [i + 7 for i in white_keys[1:]]
+white_keys += [i + 14 for i in white_keys[1:]]
 genshin_mapping = [14, 15, 16, 17, 18, 19, 20, 7, 8, 9, 10, 11, 12, 13, 0, 1, 2, 3, 4, 5, 6]
 
 harmonics = dict(

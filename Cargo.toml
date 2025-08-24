@@ -1,14 +1,16 @@
 [package]
 name = "fastmidi"
 version = "0.1.0"
-edition = "2024"
+# Use the latest stable edition fully supported by current toolchains for publishing wheels.
+edition = "2021"
 
 [lib]
 name = "fastmidi"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.25", features = ["extension-module"] }
+# Enable abi3 (stable Python C-API) from Python 3.10 upwards so one wheel works for 3.10+.
+pyo3 = { version = "0.25", features = ["extension-module", "abi3-py310"] }
 numpy = "0.25"
 midly = "0.5.3"
 

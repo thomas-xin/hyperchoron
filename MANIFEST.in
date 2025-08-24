@@ -1,0 +1,27 @@
+# Include Rust extension sources so the sdist can build the fastmidi module
+include Cargo.toml
+# (Optional) include Cargo.lock for reproducible builds; comment out if you prefer fresh resolution
+# include Cargo.lock
+recursive-include src *.rs
+
+# Include top-level project metadata
+include README.md
+include LICENSE
+include pyproject.toml
+
+# Exclude build artefacts
+prune target
+prune build
+
+# Exclude Python cache files just in case
+global-exclude __pycache__ *.py[cod]
+
+# Include data/template directories
+graft hyperchoron/litematic
+graft hyperchoron/fluidsynth
+
+# (Optional) exclude debug symbols or large archives if not needed in wheel
+exclude hyperchoron/fluidsynth/*.pdb
+# If the compressed soundfont is only used as a source asset and expanded post-install,
+# you could also exclude it to reduce wheel size (uncomment next line):
+# exclude hyperchoron/fluidsynth/soundfont.7z
