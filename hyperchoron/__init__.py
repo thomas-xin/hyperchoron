@@ -36,8 +36,9 @@ scope = globals()
 def load_file(fi, ctx) -> "np.ndarray":
 	name = fi.replace("\\", "/").rsplit("/", 1)[-1]
 	ext = name.rsplit(".", 1)[-1].casefold()
-	print(list(ext))
 	decoder = decoder_mapping.get(ext) or decoder_mapping["_"]
+	if decoder == "None":
+		return
 	func = util.resolve(decoder, scope=scope)
 	data = func(fi)
 	return util.to_numpy(data, sort=False)
@@ -45,12 +46,16 @@ def load_file(fi, ctx) -> "np.ndarray":
 def export(transport, fo, instrument_activities, speed_info, key_info, ctx=None) -> str:
 	ext = fo.rsplit(".", 1)[-1].casefold()
 	encoder = encoder_mapping.get(ext) or encoder_mapping["_"]
+	if encoder == "None":
+		return
 	func = util.resolve(encoder, scope=scope)
 	nc = func(transport, fo, speed_info=speed_info, key_info=key_info, instrument_activities=instrument_activities, ctx=ctx)
 	print(f"Saved to {fo}, Final note count: {nc}")
 	return fo
 
 def save_file(midi_events, fo, ctx) -> str:
+	if midi_events is None:
+		return
 	midi_events = util.to_numpy(midi_events)
 	speed_info = midi.get_step_speed(midi_events, ctx=ctx)
 	transport, _nc, instrument_activities, speed_info = midi.deconstruct(midi_events, speed_info, ctx=ctx)
