@@ -2,6 +2,7 @@ __pycache__
 amt
 temp
 target
+dist
 fastmidi
 DawVert
 examples/csv
