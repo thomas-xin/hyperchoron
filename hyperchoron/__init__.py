@@ -36,6 +36,7 @@ scope = globals()
 def load_file(fi, ctx) -> "np.ndarray":
 	name = fi.replace("\\", "/").rsplit("/", 1)[-1]
 	ext = name.rsplit(".", 1)[-1].casefold()
+	print(list(ext))
 	decoder = decoder_mapping.get(ext) or decoder_mapping["_"]
 	func = util.resolve(decoder, scope=scope)
 	data = func(fi)
@@ -107,6 +108,8 @@ def probe_paths(path, modes, depth=0) -> tuple:
 	mode = modes[depth] if depth < len(modes) else modes[-1]
 	if mode == "I":
 		children = util.get_children(path)
+		while len(children) == 1 and os.path.isdir(children[0]):
+			children = util.get_children(children[0])
 		if len(children) == 1:
 			if depth:
 				return children[0], [children[0]]
@@ -120,6 +123,8 @@ def probe_paths(path, modes, depth=0) -> tuple:
 		return inputsi, flati
 	elif mode in ("L", "C"):
 		children = util.get_children(path)
+		while len(children) == 1 and os.path.isdir(children[0]):
+			children = util.get_children(children[0])
 		if len(children) == 1:
 			if depth:
 				return children[0], [children[0]]
