@@ -12,7 +12,7 @@ import shutil
 import struct
 import time
 import numpy as np
-from .mappings import note_names, note_names_ex, midi_instrument_selection, c1
+from .mappings import note_names, note_names_ex, c1
 
 
 sample_rate = 44100
@@ -184,7 +184,7 @@ def leb128(n):
 		n >>= 7
 		if n:
 			data[-1] |= 128
-	return data or b"\x00"
+	return data or bytearray(b"\x00")
 def decode_leb128(data, mode="cut"): # mode: cut | index
 	"Decodes an integer from LEB128 encoded data; optionally returns the remaining data."
 	i = n = 0
@@ -198,6 +198,17 @@ def decode_leb128(data, mode="cut"): # mode: cut | index
 	if mode == "cut":
 		return n, data[i + 1:]
 	return n, i + 1
+
+def count_leaves(obj, _type=list):
+	stack = [obj]
+	count = 0
+	while stack:
+		current = stack.pop()
+		if isinstance(current, _type):
+			stack.extend(current)
+		else:
+			count += 1
+	return count
 
 def approximate_gcd(arr, min_value=8):
 	if not len(arr):
@@ -440,13 +451,24 @@ class NoteSegment:
 	def copy(self):
 		return self.__class__(*(getattr(self, k) for k in self.__slots__))
 
+	def is_compressible(self, modality=0):
+		if modality != self.modality:
+			return False
+		if type(self.pitch) not in (int, np.integer) and not self.pitch.is_integer():
+			return False
+		if self.velocity and (self.velocity < 1 / 127 or self.velocity >= 256 / 127):
+			return False
+		return True
+
 filters = {"id": lzma.FILTER_LZMA2, "preset": 7 | lzma.PRESET_DEFAULT}
-compress_threshold = 172800
+compress_threshold = 86400
 
 class TransportSection(collections.abc.MutableSequence):
 
 	codec = "<BBbeebB"
+	compact_codec = "<BBbBBb"
 	codec_size = struct.calcsize(codec)
+	compact_codec_size = struct.calcsize(compact_codec)
 
 	def __init__(self, beats=None, tick_delay=0):
 		self.data = beats or []
@@ -456,24 +478,84 @@ class TransportSection(collections.abc.MutableSequence):
 		return struct.pack("<LLL", len(self), self.tick_delay.numerator, self.tick_delay.denominator) + self.compress()
 
 	@classmethod
-	def deserialise(cls, data):
+	def deserialise(cls, data, clone=True):
 		data = memoryview(data)
 		_len, num, denom = struct.unpack("<LLL", data[:12])
 		data = data[12:]
+		if clone and type(data) is not bytes:
+			data = bytes(data)
 		self = cls(beats=data, tick_delay=fractions.Fraction(num, denom))
 		self._len = _len
 		return self
+
+	def pack_note(self, note):
+		meta = ((note.priority & 15) << 4) | note.modality
+		return struct.pack(
+			self.codec,
+			meta,
+			note.instrument_id & 255,
+			note.instrument_class,
+			note.pitch,
+			note.velocity,
+			round(note.panning * 127),
+			note.timing & 255,
+		)
+	def unpack_note(self, data):
+		meta, instrument_id, instrument_class, pitch, velocity, panning, timing = struct.unpack(self.codec, data)
+		return NoteSegment(
+			p if (p := meta >> 4) != 15 else -1,
+			meta & 15,
+			instrument_id,
+			instrument_class,
+			pitch,
+			velocity,
+			panning / 127,
+			timing,
+		)
+
+	def pack_note_compact(self, note):
+		meta = ((note.priority & 15) << 4) | note.timing & 15
+		return struct.pack(
+			self.compact_codec,
+			meta,
+			note.instrument_id & 255,
+			note.instrument_class,
+			round(note.pitch),
+			min(255, round(note.velocity * 255)),
+			round(note.panning * 127),
+		)
+	def unpack_note_compact(self, data, modality=0):
+		meta, instrument_id, instrument_class, pitch, velocity, panning = struct.unpack(self.compact_codec, data)
+		return NoteSegment(
+			p if (p := meta >> 4) != 15 else -1,
+			modality,
+			instrument_id,
+			instrument_class,
+			pitch,
+			velocity / 255,
+			panning / 127,
+			meta & 15,
+		)
 
 	def compress(self):
 		if not isinstance(self.data, (bytes, memoryview)):
 			self._len = len(self.data)
 			data = deque()
 			for beat in self.data:
-				block = [leb128(len(beat))]
-				for note in beat:
-					meta = ((note.priority & 15) << 4) | note.modality
-					block.append(struct.pack(self.codec, meta, note.instrument_id, note.instrument_class, note.pitch, note.velocity, round(note.panning * 127), note.timing & 255))
-				data.extend(block)
+				modality = beat[0].modality if beat else 0
+				if not beat or all(note.is_compressible(modality) for note in beat):
+					header = leb128(len(beat))
+					header.append(modality & 255)
+					block = [header]
+					block.extend(map(self.pack_note_compact, beat))
+					data.extend(block)
+				else:
+					header = leb128(len(beat))
+					header[-1] |= 0x80
+					header.append(0)
+					block = [header]
+					block.extend(map(self.pack_note, beat))
+					data.extend(block)
 			data = b"".join(data)
 			self.data = lzma.compress(data, format=lzma.FORMAT_RAW, filters=[filters], check=lzma.CHECK_NONE)
 		return self.data
@@ -484,14 +566,22 @@ class TransportSection(collections.abc.MutableSequence):
 			blocks = []
 			while data:
 				beat = []
-				n, data = decode_leb128(data)
-				size = n * self.codec_size
-				block, data = data[:size], data[size:]
-				while block:
-					meta, instrument_id, instrument_class, pitch, velocity, panning, timing = struct.unpack(self.codec, block[:self.codec_size])
-					block = block[self.codec_size:]
-					note = NoteSegment(p if (p := meta >> 4) != 15 else -1, meta & 15, instrument_id, instrument_class, pitch, velocity, panning / 127, timing)
-					beat.append(note)
+				n, i = decode_leb128(data, mode="index")
+				if data[i - 1] == 0 and data[0] != 0:
+					data = data[i:]
+					size = n * self.codec_size
+					block, data = data[:size], data[size:]
+					while block:
+						beat.append(self.unpack_note(block[:self.codec_size]))
+						block = block[self.codec_size:]
+				else:
+					modality = data[i]
+					data = data[i + 1:]
+					size = n * self.compact_codec_size
+					block, data = data[:size], data[size:]
+					while block:
+						beat.append(self.unpack_note_compact(block[:self.compact_codec_size], modality=modality))
+						block = block[self.compact_codec_size:]
 				blocks.append(beat)
 			self.data = blocks
 		self._len = len(self.data)
@@ -552,7 +642,7 @@ class Transport(collections.abc.MutableSequence):
 				if not s.tick_delay:
 					s.tick_delay = self.tick_delay
 		data = b"".join([leb128(len(b := s.serialise())) + b for s in self.sections])
-		version = 0
+		version = 1
 		title = "Untitled".encode("utf-8")
 		header = b"~HPC" + struct.pack("<L", version)
 		header += leb128(len(title)) + title
@@ -563,7 +653,7 @@ class Transport(collections.abc.MutableSequence):
 		data = memoryview(data)
 		assert data[:4] == b"~HPC"
 		version, = struct.unpack("<L", data[4:8])
-		assert version == 0, version
+		assert version == 1, version
 		data = data[8:]
 		n, data = decode_leb128(data)
 		data = data[n:]
@@ -574,6 +664,28 @@ class Transport(collections.abc.MutableSequence):
 			self.sections.append(TransportSection.deserialise(data[:n]))
 			data = data[n:]
 		return self
+
+	def get_metadata(self):
+		instrument_activities = {}
+		for beat in self:
+			poly = {}
+			for note in beat:
+				instrument = note.instrument_class
+				volume = note.velocity
+				if instrument != -1:
+					try:
+						poly[instrument] += 1
+					except KeyError:
+						poly[instrument] = 1
+				else:
+					poly.setdefault(instrument, 0)
+				try:
+					instrument_activities[instrument][0] += volume
+					instrument_activities[instrument][1] = max(instrument_activities[instrument][1], poly[instrument])
+				except KeyError:
+					instrument_activities[instrument] = [volume, poly[instrument]]
+		speed_info = (self.tick_delay * 1000, self.tick_delay * 1000, 1, self.tick_delay * 1000, self.tick_delay * 1000000)
+		return instrument_activities, speed_info
 
 	@property
 	def tick_delay(self):
@@ -698,19 +810,7 @@ def load_hpc(file):
 	print("Importing HPC...")
 	with open(file, "rb") as f:
 		data = f.read()
-	transport = Transport.deserialise(data)
-	# print(transport.tick_delay, [section.tick_delay for section in transport.sections])
-	events = [
-		[0, 0, event_types.HEADER, 1, len(midi_instrument_selection) + 1, 1, 0, 0, 0],
-		[1, 0, event_types.TEMPO, transport.tick_delay * 1000000, 0, 0, 0, 0, 0],
-	]
-	for i in range(len(midi_instrument_selection)):
-		events.append([i + 2, 0, event_types.PROGRAM_C, i + 10, midi_instrument_selection[i], 0, 0, 0, 0])
-	for tick, beat in enumerate(transport):
-		for note in beat:
-			note_event = [note.instrument_class + 2, tick, event_types.NOTE_ON_C, note.instrument_class + 10, note.pitch, note.velocity * 127, note.priority, note.panning, note.timing]
-			events.append(note_event)
-	return events
+	return Transport.deserialise(data)
 
 def transpose(transport, ctx):
 	key_info = {}
@@ -812,7 +912,7 @@ def get_parser():
 	parser.add_argument("-V", '--version', action='version', version=f'%(prog)s {__version__}')
 	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)", required=True)
 	parser.add_argument("-o", "--output", nargs="+", help="Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | .skysheet | .genshinsheet | *)", required=True)
-	parser.add_argument("-f", "--format", default=None, help="Output format (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | .skysheet | .genshinsheet | *)")
+	parser.add_argument("-f", "--format", default=None, help="Output format (mid | csv | nbs | nbt | mcfunction | litematic | org | skysheet | genshinsheet | deltarune | *)")
 	parser.add_argument("-x", "--mixing", nargs="?", default="IL", help='Behaviour when importing multiple files. "I" to process individually, "L" to layer/stack, "C" to concatenate. If multiple digits are inputted, this will be interpreted as a hierarchy. For example, for a 3-deep nested zip folder where pairs of midis at the bottom layer should be layered, then groups of those layers should be concatenated, and there are multiple of these groups to process independently, input "ICL". Defaults to "IL"')
 	parser.add_argument("-v", "--volume", nargs="?", type=float, default=1, help="Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")

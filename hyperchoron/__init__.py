@@ -1,8 +1,15 @@
 import concurrent.futures
 import itertools
 import os
-from . import midi, util
-from .util import __version__ as __version__
+import numpy as np
+from . import midi
+from .mappings import midi_instrument_selection
+from .util import (
+	__version__ as __version__, Transport, ts_us,
+	resolve, event_types, to_numpy, transpose,
+	get_ext, get_children, archive_formats, temp_dir,
+	count_leaves, create_archive, get_parser,
+)
 
 
 decoder_mapping = dict((k, v) for line in """
@@ -34,33 +41,51 @@ _ : dawvert.save_arbitrary
 
 scope = globals()
 
-def load_file(fi, ctx) -> "np.ndarray":
+def load_file(fi, ctx) -> np.ndarray | Transport:
 	name = fi.replace("\\", "/").rsplit("/", 1)[-1]
 	ext = name.rsplit(".", 1)[-1].casefold()
 	decoder = decoder_mapping.get(ext) or decoder_mapping["_"]
 	if decoder == "None":
 		return
-	func = util.resolve(decoder, scope=scope)
+	func = resolve(decoder, scope=scope)
 	data = func(fi)
-	return util.to_numpy(data, sort=False)
+	if isinstance(data, Transport):
+		if ctx.one_to_one:
+			return data
+		events = [
+			[0, 0, event_types.HEADER, 1, len(midi_instrument_selection) + 1, 1, 0, 0, 0],
+			[1, 0, event_types.TEMPO, data.tick_delay * 1000000, 0, 0, 0, 0, 0],
+		]
+		for i in range(len(midi_instrument_selection)):
+			events.append([i + 2, 0, event_types.PROGRAM_C, i + 10, midi_instrument_selection[i], 0, 0, 0, 0])
+		for tick, beat in enumerate(data):
+			for note in beat:
+				note_event = [note.instrument_class + 2, tick, event_types.NOTE_ON_C, note.instrument_class + 10, note.pitch, note.velocity * 127, note.priority, note.panning, note.timing]
+				events.append(note_event)
+		data = events
+	return to_numpy(data, sort=False)
 
 def export(transport, fo, instrument_activities, speed_info, key_info, ctx=None) -> str:
 	ext = fo.rsplit(".", 1)[-1].casefold()
 	encoder = encoder_mapping.get(ext) or encoder_mapping["_"]
 	if encoder == "None":
 		return
-	func = util.resolve(encoder, scope=scope)
+	func = resolve(encoder, scope=scope)
 	nc = func(transport, fo, speed_info=speed_info, key_info=key_info, instrument_activities=instrument_activities, ctx=ctx)
 	print(f"Saved to {fo}, Final note count: {nc}")
 	return fo
 
-def save_file(midi_events, fo, ctx) -> str:
-	if midi_events is None:
+def save_file(events, fo, ctx) -> str:
+	if events is None:
 		return
-	midi_events = util.to_numpy(midi_events)
-	speed_info = midi.get_step_speed(midi_events, ctx=ctx)
-	transport, _nc, instrument_activities, speed_info = midi.deconstruct(midi_events, speed_info, ctx=ctx)
-	key_info = util.transpose(transport, ctx)
+	if not isinstance(events, Transport):
+		events = to_numpy(events)
+		speed_info = midi.get_step_speed(events, ctx=ctx)
+		transport, _nc, instrument_activities, speed_info = midi.deconstruct(events, speed_info, ctx=ctx)
+	else:
+		transport = events
+		instrument_activities, speed_info = transport.get_metadata()
+	key_info = transpose(transport, ctx)
 	return export(transport, fo, instrument_activities, speed_info, key_info, ctx=ctx)
 
 class ContextArgs:
@@ -70,7 +95,7 @@ class ContextArgs:
 def fix_args(ctx) -> ContextArgs:
 	if not ctx.output:
 		ctx.output = [ctx.input[0].rsplit(".", 1)[0]]
-	formats = [util.get_ext(fo) if "." in fo else ctx.get("format", "nbs") for fo in ctx.output]
+	formats = [get_ext(fo) if "." in fo else ctx.get("format", "nbs") for fo in ctx.output]
 	if not ctx.get("format"):
 		ctx.format = formats[0]
 	for i, fo in enumerate(ctx.output):
@@ -108,14 +133,16 @@ def fix_args(ctx) -> ContextArgs:
 		ctx.max_distance = 42
 	if ctx.get("minecart_improvements") is None:
 		ctx.minecart_improvements = False
+	if ctx.get("one_to_one") is None:
+		ctx.one_to_one = False
 	return ctx
 
 def probe_paths(path, modes, depth=0) -> tuple:
 	mode = modes[depth] if depth < len(modes) else modes[-1]
 	if mode == "I":
-		children = util.get_children(path)
+		children = get_children(path)
 		while len(children) == 1 and os.path.isdir(children[0]):
-			children = util.get_children(children[0])
+			children = get_children(children[0])
 		if len(children) == 1:
 			if depth:
 				return children[0], [children[0]]
@@ -128,9 +155,9 @@ def probe_paths(path, modes, depth=0) -> tuple:
 			flati.extend(flat)
 		return inputsi, flati
 	elif mode in ("L", "C"):
-		children = util.get_children(path)
+		children = get_children(path)
 		while len(children) == 1 and os.path.isdir(children[0]):
-			children = util.get_children(children[0])
+			children = get_children(children[0])
 		if len(children) == 1:
 			if depth:
 				return children[0], [children[0]]
@@ -174,9 +201,9 @@ def convert_files(**kwargs) -> list:
 	inputs, outputs = probe_paths(ctx.input[0], ctx.mixing)
 	count = len(outputs)
 	archive_path = None
-	if len(ctx.output) == 1 and util.get_ext(ctx.output[0]) in util.archive_formats:
+	if len(ctx.output) == 1 and get_ext(ctx.output[0]) in archive_formats:
 		archive_path = ctx.output[0]
-		ctx.output = [util.temp_dir + str(util.ts_us()) + "/"]
+		ctx.output = [temp_dir + str(ts_us()) + "/"]
 	out_format = ctx.get("format") or "mid"
 	output_files = list(ctx.output)
 	if len(output_files) == 1:
@@ -190,7 +217,10 @@ def convert_files(**kwargs) -> list:
 		raise ValueError(f"Expected 1 or {count} outputs, got {len(output_files)}.")
 	if count > 1:
 		assert len(output_files) == count, f"Expected {count} outputs, got {len(output_files)}"
-	print(inputs, f"({len(inputs)})", "=>", output_files, f"({len(output_files)})")
+	filecount = count_leaves(inputs)
+	print("Total input files:", filecount, ",", "total inputs:", len(inputs), ",", "total outputs:", len(output_files))
+	ctx.one_to_one = filecount == len(inputs)
+	# print(inputs, f"({len(inputs)})", "=>", output_files, f"({len(output_files)})")
 	if len(inputs) == len(output_files) == 1:
 		results = process_level(inputs, ctx=ctx)
 		outputs = [save_file(results[0], output_files[0], ctx=ctx)]
@@ -206,13 +236,13 @@ def convert_files(**kwargs) -> list:
 				futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx))
 		outputs = [fut.result() for fut in futures]
 	if archive_path:
-		outputs = [util.create_archive(ctx.output[0], archive_path)]
+		outputs = [create_archive(ctx.output[0], archive_path)]
 	return outputs
 
 
 def main():
 	try:
-		parser = util.get_parser()
+		parser = get_parser()
 		args = parser.parse_args()
 		return convert_files(**vars(args))
 	finally:
@@ -221,7 +251,7 @@ def main():
 def clear_cache():
 	try:
 		import shutil
-		return shutil.rmtree(util.temp_dir)
+		return shutil.rmtree(temp_dir)
 	except Exception:
 		from traceback import print_exc
 		print_exc()

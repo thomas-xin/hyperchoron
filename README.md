@@ -103,6 +103,7 @@ Converting a FL Studio project into a Minecraft Note Block Studio project, ignor
 
 Converting a raw audio file into a .csv, a .🗿 and a .org file, transcribing all notes up a Major 3rd (Refer below for additional requirements for .wav):
 - `hyperchoron -i input.wav -t 4 -o output.csv output.🗿 output.org`
+  - Warning: Performing multiple conversions of different formats will cause default parameters to take on the values of those for the first format!
 ### As a library
 Hyperchoron can be imported as a Python library for integration with other tools, and the following useful functions are exposed:
 - `hyperchoron.convert_files(**kwargs) -> list`: Runs a conversion identical to the one you would get from running the cli tool as a standalone, passing the same optional arguments. This is included as an alternative to the cli, for the sake of performance if you're running multiple conversions. Supports the same multiple input/output/mixing modes the cli tool does, including the folder hierarchy unpacking, and parallelisation of multiple conversions where applicable.
