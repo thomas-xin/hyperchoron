@@ -8,7 +8,7 @@ from .mappings import (
 	instrument_names, midi_instrument_selection,
 	c4, c1, percussion_mats
 )
-from .util import create_reader, priority_ordering, temp_dir, sample_rate
+from .util import create_reader, priority_ordering, temp_dir, in_sample_rate, event_types
 
 
 @dataclass(slots=True)
@@ -259,26 +259,26 @@ def load_org(file):
 				e.panning = read(offsets + j, 1)
 			offsets += len(ins.events)
 	events = [
-		[0, 0, "header", 1, len(instruments) + 1, 1],
-		[1, 0, "tempo", wait * 1000],
+		[0, 0, event_types.HEADER, 1, len(instruments) + 1, 1, 0, 2],
+		[1, 0, event_types.TEMPO, wait * 1000],
 	]
 	for i, ins in enumerate(instruments):
 		if i not in range(8, 16):
-			events.append([i + 2, 0, "program_c", i, midi_instrument_selection[org_instrument_mapping[ins.id]]])
+			events.append([i + 2, 0, event_types.PROGRAM_C, i, midi_instrument_selection[org_instrument_mapping[ins.id]], ins.id])
 			channel = i
 			pitch = None
 		else:
 			channel = 9
 			if i == 8:
-				events.append([i + 2, 0, "program_c", channel, 0])
+				events.append([i + 2, 0, event_types.PROGRAM_C, channel, 0])
 			pitch = [35, 38, 42, 46, 47, 73, 35, 35][i - 8]
 		for j, e in enumerate(ins.events):
 			if e.panning != 255:
-				events.append([i + 2, e.tick, "control_c", channel, 10, (e.panning - 6) / 6 * 63 + 64])
+				events.append([i + 2, e.tick, event_types.CONTROL_C, channel, 10, (e.panning - 6) / 6 * 63 + 64])
 			if e.volume != 255:
-				events.append([i + 2, e.tick, "control_c", channel, 7, e.volume / 254 * (127 - min_vol) + min_vol])
+				events.append([i + 2, e.tick, event_types.CONTROL_C, channel, 7, e.volume / 254 * (127 - min_vol) + min_vol])
 			if e.pitch != 255:
-				events.append([i + 2, e.tick, "note_on_c", channel, pitch or e.pitch + c1, 127, 1, e.length])
+				events.append([i + 2, e.tick, event_types.NOTE_ON_C, channel, pitch or e.pitch + c1, 127, 1, e.length])
 	return events
 
 
@@ -385,9 +385,9 @@ def load_xm(file):
 				# print(name, sample_sustains[j], len(sample), sr / 2)
 				if sample_sustains[j] and len(sample) < sr / 2:
 					sample = np.tile(sample, ceil(sr / 2 / len(sample)))
-				adjusted = librosa.resample(sample, orig_sr=sr, target_sr=sample_rate)
+				adjusted = librosa.resample(sample, orig_sr=sr, target_sr=in_sample_rate)
 
-				if len(adjusted) >= sample_rate / 4 or not sample_sustains[j]:
+				if len(adjusted) >= in_sample_rate / 4 or not sample_sustains[j]:
 					# XM carries NO reliable information about the instruments themselves; this means we have to analyse the samples to decide if they're percussion, and if they're not, analyse the actual pitch they play at!
 					D = librosa.stft(adjusted)
 					H, P = librosa.decompose.hpss(D)
@@ -398,7 +398,7 @@ def load_xm(file):
 					print(name, harm, perc, len(adjusted))
 					if perc >= harm / 8:
 						sample_file = f"{temp_dir}{tmpl}-{i}-{j}.flac"
-						sf.write(sample_file, adjusted, sample_rate)
+						sf.write(sample_file, adjusted, in_sample_rate)
 						if perc < harm / 3:
 							# Instrument may still be percussion; call stem separation to verify
 							output_names = {k: tmpl + f"-{i}-{j}-" + v for k, v in dict(
@@ -408,7 +408,7 @@ def load_xm(file):
 								Other="O",
 							).items()}
 							separate_audio("htdemucs_ft.yaml", sample_file, output_names)
-							drums, *_ = librosa.load(temp_dir + output_names["Drums"] + ".flac", sr=sample_rate, mono=True)
+							drums, *_ = librosa.load(temp_dir + output_names["Drums"] + ".flac", sr=in_sample_rate, mono=True)
 							rms_orig = librosa.feature.rms(y=adjusted, frame_length=len(adjusted), hop_length=len(adjusted))
 							rms_drum = librosa.feature.rms(y=drums, frame_length=len(drums), hop_length=len(drums))
 							orig = np.sum(rms_orig)
@@ -426,7 +426,7 @@ def load_xm(file):
 								Crash="C",
 							).items()}
 							separate_audio("MDX23C-DrumSep-aufr33-jarredou.ckpt", sample_file, output_names)
-							outputs = {k: librosa.load(temp_dir + v + ".flac", sr=sample_rate, mono=True)[0] for k, v in output_names.items()}
+							outputs = {k: librosa.load(temp_dir + v + ".flac", sr=in_sample_rate, mono=True)[0] for k, v in output_names.items()}
 							scales = [0.5, 1, 1, 1.5, 2, 2]
 							output_volumes = {k: scales[i] * np.sum(librosa.feature.rms(y=v, frame_length=len(v), hop_length=len(v))) for i, (k, v) in enumerate(outputs.items())}
 							highest = np.argmax(tuple(output_volumes.values()))
@@ -441,7 +441,7 @@ def load_xm(file):
 				# Even for melodic instruments, xm does not guarantee the notes being played or the relative/fine tuning would produce the actual pitch a human would hear. Therefore, we must once again analyse the instrument samples, this time for their individual fundamental frequency.
 				f0, voiced_flag, _ = librosa.pyin(
 					adjusted,
-					sr=sample_rate,
+					sr=in_sample_rate,
 					fmin=librosa.note_to_hz("C1"),
 					fmax=librosa.note_to_hz("C8"),
 					resolution=1,
@@ -458,8 +458,8 @@ def load_xm(file):
 						instrument.pitches[k] = k + average_note - 60 + 11
 				offs += size
 	events = [
-		[0, 0, "header", 1, len(instruments) + 1, tempo],
-		[1, 0, "tempo", 2500000 / bpm * tempo],
+		[0, 0, event_types.HEADER, 1, len(instruments) + 1, tempo],
+		[1, 0, event_types.TEMPO, 2500000 / bpm * tempo],
 	]
 	@functools.lru_cache(maxsize=pattern_count)
 	def decode_pattern(p):
@@ -475,7 +475,7 @@ def load_xm(file):
 				ins = last_params[channel]["ins"]
 				instrument = instruments[ins - 1]
 				iid = instrument.midi[pitch]
-				output.append([channel, tick, "note_off_c", 9 if iid == -1 else channel + 10, instrument.pitches[pitch], 0])
+				output.append([channel, tick, event_types.NOTE_OFF_C, 9 if iid == -1 else channel + 10, instrument.pitches[pitch], 0])
 				return pitch == original_pitch
 
 		breakafter = False
@@ -525,7 +525,7 @@ def load_xm(file):
 						ins = 1
 				instrument = instruments[ins - 1]
 				iid = instrument.midi[pitch]
-				output.append([channel, tick, "control_c", 9 if iid == -1 else channel + 10, 7, vel])
+				output.append([channel, tick, event_types.CONTROL_C, 9 if iid == -1 else channel + 10, 7, vel])
 			else:
 				if pitch == 0:
 					try:
@@ -541,9 +541,9 @@ def load_xm(file):
 					priority = 1
 				instrument = instruments[ins - 1]
 				iid = instrument.midi[pitch]
-				events.append([channel, tick, "program_c", 9 if iid == -1 else channel + 10, iid])
-				output.append([channel, tick, "control_c", 9 if iid == -1 else channel + 10, 7, vel])
-				output.append([channel, tick, "note_on_c", 9 if iid == -1 else channel + 10, instrument.pitches[pitch], 127, priority])
+				events.append([channel, tick, event_types.PROGRAM_C, 9 if iid == -1 else channel + 10, iid])
+				output.append([channel, tick, event_types.CONTROL_C, 9 if iid == -1 else channel + 10, 7, vel])
+				output.append([channel, tick, event_types.NOTE_ON_C, 9 if iid == -1 else channel + 10, instrument.pitches[pitch], 127, priority])
 				last_params[channel] = {"pitch": pitch, "ins": ins, "vel": vel}
 			channel += 1
 			if channel >= channel_count:

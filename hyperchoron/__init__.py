@@ -5,7 +5,7 @@ import numpy as np
 from . import midi
 from .mappings import midi_instrument_selection
 from .util import (
-	__version__ as __version__, Transport, ts_us,
+	__version__ as __version__, Transport, ts_us, round_min,
 	resolve, event_types, to_numpy, transpose,
 	get_ext, get_children, archive_formats, temp_dir,
 	count_leaves, create_archive, get_parser,
@@ -50,17 +50,18 @@ def load_file(fi, ctx) -> np.ndarray | Transport:
 	func = resolve(decoder, scope=scope)
 	data = func(fi)
 	if isinstance(data, Transport):
-		if ctx.one_to_one:
+		if ctx.one_to_one and (not ctx.strict_tempo or ctx.resolution == 1 / data.tick_delay):
 			return data
+		# Reconstruct as MIDI events if further processing is necessary
 		events = [
-			[0, 0, event_types.HEADER, 1, len(midi_instrument_selection) + 1, 1, 0, 0, 0],
-			[1, 0, event_types.TEMPO, data.tick_delay * 1000000, 0, 0, 0, 0, 0],
+			[0, 0, event_types.HEADER, 1, len(midi_instrument_selection) + 1, 1, 0, 0, 0, 0, 0],
+			[1, 0, event_types.TEMPO, data.tick_delay * 1000000, 0, 0, 0, 0, 0, 0, 0],
 		]
 		for i in range(len(midi_instrument_selection)):
-			events.append([i + 2, 0, event_types.PROGRAM_C, i + 10, midi_instrument_selection[i], 0, 0, 0, 0])
+			events.append([i + 2, 0, event_types.PROGRAM_C, i + 10, midi_instrument_selection[i], 0, 0, 0, 0, 0, 0])
 		for tick, beat in enumerate(data):
 			for note in beat:
-				note_event = [note.instrument_class + 2, tick, event_types.NOTE_ON_C, note.instrument_class + 10, note.pitch, note.velocity * 127, note.priority, note.panning, note.timing]
+				note_event = [note.instrument_class + 2, tick, event_types.NOTE_ON_C, note.instrument_class + 10, note.pitch, note.velocity * 127, note.priority, 1, note.panning, note.timing, note.modality]
 				events.append(note_event)
 		data = events
 	return to_numpy(data, sort=False)
@@ -218,35 +219,72 @@ def convert_files(**kwargs) -> list:
 	if count > 1:
 		assert len(output_files) == count, f"Expected {count} outputs, got {len(output_files)}"
 	filecount = count_leaves(inputs)
-	print("Total input files:", filecount, ",", "total inputs:", len(inputs), ",", "total outputs:", len(output_files))
+	print(f"Total input files: {filecount}, total inputs: {len(inputs)}, total outputs: {len(output_files)}")
 	ctx.one_to_one = filecount == len(inputs)
-	# print(inputs, f"({len(inputs)})", "=>", output_files, f"({len(output_files)})")
+	if ctx.one_to_one and len(inputs) == len(output_files) and all(fo.rsplit(".", 1)[-1] in "wav | flac | mp3 | aac | ogg | opus | m4a | weba | webm".split(" | ") for fo in output_files):
+		from . import pcm
+		removed = set()
+		for i, (fi, fo) in enumerate(zip(inputs, output_files)):
+			ofmt = fo.rsplit(".", 1)[-1]
+			ofi = ".flac" if ofmt != "wav" else "." + ofmt
+			match fi.rsplit(".", 1)[-1]:
+				case "mid" | "midi":
+					tmpl = temp_dir + str(ts_us()) + "1"
+					out = tmpl + ofi
+					pcm.render_midi([fi], [out], fmt=ofi[1:])
+					pcm.mix_raw([out], fo)
+					removed.add(i)
+				case "nbs":
+					tmpl = temp_dir + str(ts_us()) + "1"
+					out = tmpl + ofi
+					pcm.render_nbs([fi], [out], fmt=ofi[1:])
+					pcm.mix_raw([out], fo)
+					removed.add(i)
+				case "org":
+					tmpl = temp_dir + str(ts_us()) + "2"
+					if ofi == ".flac":
+						ofi = ".wav"
+					out = tmpl + ofi
+					pcm.render_org([fi], [out], fmt=ofi[1:])
+					pcm.mix_raw([out], fo)
+					removed.add(i)
+				case "xm":
+					tmpl = temp_dir + str(ts_us()) + "99"
+					out = tmpl + ofi
+					pcm.render_xm([fi], [out], fmt=ofi[1:])
+					pcm.mix_raw([out], fo)
+					removed.add(i)
+		inputs = [fi for i, fi in enumerate(inputs) if i not in removed]
+		output_files = [fo for i, fo in enumerate(output_files) if i not in removed]
 	if len(inputs) == len(output_files) == 1:
 		results = process_level(inputs, ctx=ctx)
 		outputs = [save_file(results[0], output_files[0], ctx=ctx)]
-	with concurrent.futures.ProcessPoolExecutor(max_workers=16) as executor:
-		results = process_level(inputs, ctx=ctx, executor=executor)
-		futures = []
-		if type(results) is list and len(results) == 1 and len(output_files) > 1:
-			midi_events = results[0]
-			for fo in output_files:
-				futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx))
-		else:
-			for midi_events, fo in zip(results, output_files):
-				futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx))
-		outputs = [fut.result() for fut in futures]
+	elif len(inputs):
+		with concurrent.futures.ProcessPoolExecutor(max_workers=16) as executor:
+			results = process_level(inputs, ctx=ctx, executor=executor)
+			futures = []
+			if type(results) is list and len(results) == 1 and len(output_files) > 1:
+				midi_events = results[0]
+				for fo in output_files:
+					futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx))
+			else:
+				for midi_events, fo in zip(results, output_files):
+					futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx))
+			outputs = [fut.result() for fut in futures]
 	if archive_path:
 		outputs = [create_archive(ctx.output[0], archive_path)]
 	return outputs
 
 
 def main():
-	try:
-		parser = get_parser()
-		args = parser.parse_args()
-		return convert_files(**vars(args))
-	finally:
-		clear_cache()
+	parser = get_parser()
+	args = parser.parse_args()
+	import time
+	t = time.time()
+	outputs = convert_files(**vars(args))
+	taken = time.time() - t
+	print(f"{len(outputs)} files rendered in {round_min(round(taken, 3))} second(s).")
+	clear_cache()
 
 def clear_cache():
 	try:

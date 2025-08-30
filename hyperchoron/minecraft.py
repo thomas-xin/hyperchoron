@@ -15,10 +15,10 @@ else:
 from .mappings import (
 	material_map, percussion_mats, pitches, falling_blocks, non_note_blocks,
 	instrument_names, nbs_names, nbs_values, midi_instrument_selection,
-	instrument_codelist, default_instruments,
+	instrument_codelist, default_instruments, fixed_instruments,
 	fs1,
 )
-from .util import round_min, log2lin, lin2log, base_path, temp_dir, transport_note_priority, event_types, NoteSegment, DEFAULT_NAME, DEFAULT_DESCRIPTION
+from .util import round_min, log2lin, lin2log, base_path, transport_note_priority, event_types, NoteSegment, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 
 def nbt_from_dict(d):
@@ -689,14 +689,14 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	secondary_width = 0
 	yc = 14
 	master = litemapy.Region(0, 0, -3, 1, 1, 1)
-	schem = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Header.litematic")
+	schem = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Header.litematic")
 	header, = schem.regions.values()
 	header = move_region(header, -8, yc - 14, -3)
-	timer, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Timer.litematic").regions.values()
-	track, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Track.litematic").regions.values()
+	timer, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Timer.litematic").regions.values()
+	track, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Track.litematic").regions.values()
 	if ctx.minecart_improvements:
 		track = setblock(track, (1, 4, 0), litemapy.BlockState("minecraft:rail", shape="north_south"))
-	skeleton, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 skeleton.litematic").regions.values()
+	skeleton, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 skeleton.litematic").regions.values()
 	# For faraway segments that do not need to be as quiet, we can allocate trapdoors to conserve survival mode resources
 	skeleton2 = clone_region(skeleton)
 	skeleton2.filter(lambda block: air if block.id == "minecraft:tripwire" else trapdoor if block.id in ("minecraft:note_block", "minecraft:waxed_oxidized_copper_bulb") else block)
@@ -706,7 +706,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	skeletonf2.filter(lambda block: litemapy.BlockState("minecraft:activator_rail", **dict(block.properties())) if block.id == "minecraft:powered_rail" else block)
 	skeleton3 = clone_region(skeleton)
 	skeleton3 = fill_region(skeleton3, air)
-	looping, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Looping.litematic").regions.values()
+	looping, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Looping.litematic").regions.values()
 	start = header.z + header.length - 2
 
 	# redstone_dot = litemapy.BlockState("minecraft:redstone_wire", east="none", north="none", west="none", south="none")
@@ -1444,9 +1444,9 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 		master[locate((1 - tile_width, ym + 3, end))] = litemapy.BlockState("minecraft:observer", facing="south")
 		master[locate((1 - tile_width, ym + 4, end))] = black_carpet
 	x, y, z = 0, yc + 1, end - 22
-	turn1, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Turn 1.litematic").regions.values()
-	turn2, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Turn 2.litematic").regions.values()
-	turn3, = litemapy.Schematic.load(f"{base_path}litematic/Hyperchoron V2 Turn 3.litematic").regions.values()
+	turn1, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Turn 1.litematic").regions.values()
+	turn2, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Turn 2.litematic").regions.values()
+	turn3, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Turn 3.litematic").regions.values()
 	turn1 = move_region(turn1, x - 1, y, z)
 	master = paste_region(master, turn1, ignore_src_air=True)
 	turn2 = move_region(turn2, x - tile_width, y - 1, z - 1)
@@ -1523,24 +1523,23 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 def load_nbs(file):
 	print("Importing NBS...")
 	import pynbs
-	if not isinstance(file, (str, bytes)):
-		path = str(hash(file))
-		tmpl = path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-		fn = f"{temp_dir}{tmpl}.nbs"
-		with open(fn, "wb") as f:
-			f.write(file.read())
-		file.close()
-		file = fn
+	# if not isinstance(file, (str, bytes)):
+	# 	path = str(hash(file))
+	# 	tmpl = path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+	# 	fn = f"{temp_dir}{tmpl}.nbs"
+	# 	with open(fn, "wb") as f:
+	# 		f.write(file.read())
+	# 	file.close()
+	# 	file = fn
 	nbs = pynbs.read(file)
 	header = nbs.header
 	events = [
-		[0, 0, event_types.HEADER, 1, 9 + 1, 1],
+		[0, 0, event_types.HEADER, 1, 9 + 1, 1, 0, 1],
 		[1, 0, event_types.TEMPO, 1000 * 1000 / header.tempo],
 	]
 	for i in range(len(midi_instrument_selection) - 1):
 		events.append([i + 2, 0, event_types.PROGRAM_C, i + 10, midi_instrument_selection[i]])
 	ticked = {}
-	# pannings = {}
 	for tick, chord in nbs:
 		for note in chord:
 			instrument_name = nbs.layers[note.layer].name.rsplit("_", 1)[0]
@@ -1555,11 +1554,8 @@ def load_nbs(file):
 						pitch = 42
 					case _:
 						raise NotImplementedError(pitch)
-				# if note.panning not in range(-1, 2) or pannings.get(10):
-				# 	events.append([128, tick, "control_c", 10, 10, note.panning / 100 * 63 + 64])
-				# 	pannings[10] = note.panning
 				volume = round(lin2log(note.velocity * 1.28))
-				note_event = [128, tick, event_types.NOTE_ON_C, 9, pitch, volume, 1, 1, note.panning / 100 * 63, tick & 255]
+				note_event = [128, tick, event_types.NOTE_ON_C, 9, pitch, volume, 1, 1, note.panning / 100, tick & 255, 1, note.instrument]
 				events.append(note_event)
 				continue
 			default = instrument_codelist.index(default_instruments[note_instrument])
@@ -1569,9 +1565,6 @@ def load_nbs(file):
 				ins = default
 			pitch = note.key + round_min(note.pitch / 100) - 33 + fs1 + pitches[note_instrument]
 			bucket = (note.layer, pitch)
-			# if note.panning not in range(-1, 2) or pannings.get(ins + 10):
-			# 	events.append([ins + 2, tick, "control_c", ins + 10, 10, note.panning / 100 * 63 + 64])
-			# 	pannings[ins + 10] = note.panning
 			volume = round(lin2log(note.velocity * 1.28))
 			if note.panning & 1:
 				if bucket in ticked:
@@ -1579,19 +1572,16 @@ def load_nbs(file):
 					if prev[5] == volume and tick - prev[1] < header.tempo / 2:
 						prev[7] = max(prev[7], 1 + tick - prev[1])
 						continue
-			note_event = [ins + 2, tick, event_types.NOTE_ON_C, ins + 10, pitch, volume, 1, 1, note.panning / 100 * 63, tick & 255]
+			note_event = [ins + 2, tick, event_types.NOTE_ON_C, ins + 10, pitch, volume, 1, 1, note.panning / 100, tick & 255, 1, note.instrument]
 			events.append(note_event)
 			ticked[bucket] = note_event
-	events.sort(key=lambda e: e[1])
+	# events.sort(key=lambda e: e[1])
 	return events
 
-def save_nbs(transport, output, speed_info, ctx, **void):
+def save_nbs(transport, output, ctx, **void):
 	print("Exporting NBS...")
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
-	speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
-	wait = round(orig_step_ms / speed_ratio / 50) * 50 if ctx.strict_tempo else orig_step_ms / speed_ratio
-	tempo = 1000 / wait
+	tempo = 1 / transport.tick_delay
 	import pynbs
 	nbs = pynbs.new_file(
 		song_name=out_name,
@@ -1608,42 +1598,42 @@ def save_nbs(transport, output, speed_info, ctx, **void):
 			if note.priority < 0:
 				continue
 			ins = note.instrument_class
-			base, pitch = get_note_mat(note, odd=i & 1)
-			if base == "PLACEHOLDER":
-				continue
-			instrument = instrument_names[base]
-			# if ins != -1:
-			# 	if not ctx.strict_tempo:
-			# 		instrument2 = fixed_instruments[instrument_codelist[ins]]
-			# 		pitch2 = note.pitch - pitches[instrument2] - fs1
-			# 		if -12 <= pitch2 < 36:
-			# 			pitch = pitch2
-			# 			instrument = instrument2
-			# 		else:
-			# 			pitch2 = note.pitch - pitches[instrument] - fs1
-			# 			if -33 <= pitch2 < 55:
-			# 				pitch = pitch2
+			kwargs = {}
+			if note.modality == 1 and note.instrument_class != -1:
+				nbi = note.instrument_id
+				instrument = nbs_values[nbi]
+				pitch = note.pitch - pitches[instrument] - fs1
+			else:
+				base, pitch = get_note_mat(note, odd=i & 1)
+				if base == "PLACEHOLDER":
+					continue
+				instrument = instrument_names[base]
+				if ins != -1:
+					instrument2 = fixed_instruments[instrument_codelist[ins]]
+					pitch2 = note.pitch - pitches[instrument2] - fs1
+					if 0 <= pitch2 < 24:
+						pitch = pitch2
+						instrument = instrument2
+					else:
+						pitch2 = note.pitch - pitches[instrument] - fs1
+						if -33 <= pitch2 < 55:
+							pitch = pitch2
 			nbi = nbs_names[instrument]
 			try:
 				current_poly[ins] += 1
 			except KeyError:
 				current_poly[ins] = 1
+			raw_key = round(pitch)
+			if raw_key != pitch:
+				kwargs["pitch"] = round((pitch - raw_key) * 100)
 			volume = note.velocity * 100
 			if note.priority <= 0:
 				volume *= min(1, 0.9 ** (tempo / 20))
-			# if ctx.microtones:
-			# 	pass
-			# else:
-			# 	pitch = round(pitch)
-			raw_key = round(pitch)
-			kwargs = {}
 			if volume != 100:
 				kwargs["velocity"] = round(log2lin(volume / 100) * 100)
 			panning = int(note.panning * 49) * 2 + (0 if note.priority > 0 else 1 if i & 1 else -1)
 			if panning != 0:
 				kwargs["panning"] = panning
-			if raw_key != pitch:
-				kwargs["pitch"] = round((pitch - raw_key) * 100)
 			rendered = pynbs.Note(
 				tick=i,
 				layer=ins,
@@ -1654,7 +1644,7 @@ def save_nbs(transport, output, speed_info, ctx, **void):
 			nbs.notes.append(rendered)
 		for k, v in current_poly.items():
 			layer_poly[k] = max(v, layer_poly.get(k, 0))
-	layer_map = sorted(layer_poly.items(), key=lambda tup: (tup[0] not in (-1, 8), tup[0] != 6, tup[-1]), reverse=True)
+	layer_map = sorted(layer_poly.items(), key=lambda tup: (tup[0] != -1, tup[0] != 6, tup[-1]), reverse=True)
 	layer_index = 0
 	layer_starts = {}
 	for ins, poly in layer_map:

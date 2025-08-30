@@ -111,6 +111,7 @@ def get_step_speed(midi_events, ctx=None):
 def preprocess(midi_events):
 	"Preprocesses a MIDI file to determine the lengths of all notes based on their corresponding note_end_c events, as well as the maximum note velocity and timestamp"
 	print(f"Preprocessing ({len(midi_events)} events total)...")
+	modality = midi_events[0][7]
 	note_lengths = {}
 	temp_active = {}
 	discard = []
@@ -170,7 +171,7 @@ def preprocess(midi_events):
 		max_vol = np.max(midi_events[:, 5][midi_events[:, 2] == event_types.NOTE_ON_C]) * volume
 	except ValueError:
 		max_vol = 1
-	return 0, midi_events, note_lengths, max_vol, last_timestamp
+	return modality, midi_events, note_lengths, max_vol, last_timestamp
 
 @dataclass(slots=True)
 class TransportNote:
@@ -257,15 +258,21 @@ def deconstruct(midi_events, speed_info, ctx=None):
 		panning = 0
 		priority = 2
 		offset = 0
+		instrument_id = None
 		if instrument in (-1,):
 			sustain = 0
 		else:
 			sustain = sustain_map[instrument] or 2
+		_modality = modality
 		length = 0
 		if len(event) > 6:
 			if len(event) > 7:
-				if len(event) > 8 and event[8]:
-					if len(event) > 9 and event[9]:
+				if len(event) > 8:
+					if len(event) > 9:
+						if len(event) > 10:
+							if len(event) > 11:
+								instrument_id = event[11]
+							_modality = event[10] or modality
 						offset = event[9]
 					panning = event[8]
 				length_ticks = event[7]
@@ -287,8 +294,8 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				if sustain == 1:
 					sustain = 0
 		return TransportNote(
-			modality=modality,
-			instrument_id=instrument_ids[channel],
+			modality=_modality,
+			instrument_id=instrument_id if instrument_id is not None else instrument_ids[channel],
 			pitch=pitch,
 			velocity=event[5],
 			start=timestamp_approx,
@@ -438,7 +445,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							note = parse_note(event)
 							if not note:
 								continue
-							instrument = instrument = instrument_map[note.channel]
+							instrument = instrument_map[note.channel]
 							active_notes[instrument].append(note)
 							active_nc += 1
 							loud = max(loud, velocity)
@@ -897,7 +904,7 @@ def proceed_save_midi(output, out_name, is_csv, instruments, wait, resolution):
 		writer.writerows([
 			[0, 0, "Header", 1, highest_track, resolution * 24],
 			[1, 0, "Start_track"],
-			[1, 0, "Title_t", out_name],
+			*([[1, 0, "Title_t", out_name]] if out_name else ()),
 			[1, 0, "Copyright_t", DEFAULT_NAME],
 			[1, 0, "Text_t", DEFAULT_DESCRIPTION],
 			[1, 0, "Time_signature", 4, 4, 8, 8],

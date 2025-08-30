@@ -145,11 +145,66 @@ Hyperchoron can be imported as a Python library for integration with other tools
   - `deltarune`: A list of files that enable playing the song in the Deltarune rhythm game. Included will be three .ogg files which must be placed in the `mus` folder, as well as `rhythmgame_notechart.gml` and `rhythmgame_song_load.gml` files, which must be imported into the `data.win` code using a tool such as UndertaleModTool. See https://youtu.be/rSE3DecbFsM as a guide for this! Requires `pcm` dependencies. Note: This format does not have an extension, and must be manually specified using `-f`/`--format`. The output may be an empty folder or an archive.
   - .skysheet: A recreation and representation of the playable music sheets used in Sky: Children of the Light. The format supported by Hyperchoron is specifically for the https://sky-music.specy.app editor.
   - .genshinsheet: Similar to .skysheet, but for the game Genshin Impact. See https://genshin-music.specy.app for the corresponding editor.
+  - .wav (+ FFmpeg outputs): Requires PCM dependencies. Renders songs as raw audio, possibly layered depending on options.
 - WIP:
   - .xm
-  - .wav (+ FFmpeg outputs)
+  - .schematic (+ other Minecraft formats)
 - Limited:
   - Once again, DawVert-supported formats are also automatically supported by Hyperchoron.
+
+## HPC Format
+If you are looking to read/write Hyperchoron's compact memory format for any reason, the following details may be helpful:
+- Header Magic: 4 bytes, string, always `~HPC`
+- Version: 4 bytes, unsigned integer, currently 1
+- Metadata:
+  - LEB128-encoded size of data
+  - Binary or text data, currently unused
+- Data Sections (Possibly multiple):
+  - LEB128-encoded size of section
+  - Tick Count: 4 bytes, unsigned integer
+  - Tick Delay: 8 bytes, fraction, represents delay of each tick in seconds:
+    - Numerator: 4 bytes, unsigned integer
+    - Denominator: 4 bytes, unsigned integer
+  - LZMA2-compressed note data:
+    - Note Column/Tick (Possibly multiple):
+      - LEB128-encoded note count
+        - Contains an additional condition that if this number is artificially extended to end in a `0x00` byte (does not normally occur with LEB128 encoding), the column is in "full" mode rather than "compact" mode, allowing out-of-range notes, finetunes, extremely high or low volumes, or chords with mixed modality, at the cost of slight compression efficiency. All notes encoded inside this column, defined below, will follow this mode.
+      - Modality (Optional, only included in "compact" mode): 1 byte, unsigned integer, representing what format the note(s) originated from. Used for rendering raw audio.
+        - Currently `0` for MIDI, `1` for NBS, `2` for ORG (other formats are not yet implemented, and will be interpreted as one of the aforementioned modalities).
+      - Notes (Possibly multiple):
+        - Full Note (9 bytes each):
+          - Priority: 0.5 bytes, signed integer:
+            - 2 for known note heads, 1 for standard notes, 0 for note trails, and -1 for deprioritised notes to be discarded in discrete outputs
+          - Modality: 0.5 bytes, unsigned integer
+          - Instrument ID: 1 byte, unsigned integer, with 255 representing -1; the instrument ID from the original format/modality
+          - Instrument Class: 1 byte, signed integer; the instrument ID within Hyperchoron's known classes of instruments, used to assist mappings during conversions
+            - 0: Plucked
+            - 1: Piano
+            - 2: Wind
+            - 3: Square Synth
+            - 4: Pitched Percussion
+            - 5: Bell
+            - 6: Unpitched Percussion
+            - 7: String
+            - 8: Banjo
+            - 9: Voice
+            - 10: Brass
+            - 11: Saw Synth
+            - 12: Organ
+            - 13: Overdrive Guitar
+            - -1: MIDI-mapped Drumset
+          - Pitch: 2 bytes, float, in semitones starting from C0
+          - Volume: 2 bytes, float, in logarithmic scale normalised at 1.0
+          - Panning: 1 byte, signed integer, centred at 0 with -127 representing maximum left and 127 representing maximum right
+          - Timing Offset: 1 byte, unsigned integer (irrelevant for most scenarios)
+        - Compact Note (6 bytes each):
+          - Priority: 0.5 bytes, signed integer
+          - Timing: 0.5 bytes, unsigned integer
+          - Instrument ID: 1 byte, unsigned integer
+          - Instrument Class: 1 byte, signed integer
+          - Pitch: 1 byte, unsigned integer, in semitones starting from C0
+          - Volume: 1 byte, unsigned integer, in logarithmic scale normalised at 255
+          - Panning: 1 byte, signed integer
 
 ## Minecraft info
 Odds are, most people finding their way to this repository will be mainly interested in the Minecraft export capabilities and instructions. As such, all information listed below will specifically be about exporting to Minecraft note blocks.

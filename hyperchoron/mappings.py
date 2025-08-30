@@ -102,6 +102,29 @@ nbs_names = {k: i for i, k in enumerate([
 	"pling",
 ])}
 nbs_values = {v: k for k, v in nbs_names.items()}
+nbs_raws = [
+	"harp",
+	"bass",
+	"bd",
+	"snare",
+	"hat",
+	"guitar",
+	"flute",
+	"bell",
+	"icechime",
+	"xylobone",
+	"iron_xylophone",
+	"cow_bell",
+	"didgeridoo",
+	"bit",
+	"banjo",
+	"pling",
+	"banjo",
+	"flute",
+	"bit",
+	"bit",
+	"guitar",
+]
 for unsupported in ("skeleton", "wither_skeleton", "zombie", "creeper", "piglin", "trapdoor", "fence_gate", "dispenser"):
 	nbs_names[unsupported] = nbs_names["snare"]
 nbs_names.update(dict(

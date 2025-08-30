@@ -8,10 +8,11 @@ from .mappings import (
 	thirtydollar_names, thirtydollar_volumes,
 	nbs2thirtydollar, thirtydollar_unmap, thirtydollar_drums,
 	percussion_mats, material_map, pitches, default_instruments,
+	nbs_names, fixed_instruments,
 	specy_map, specy_percussion_mats, genshin_mapping, white_keys, note_names_ex,
 	c1, c3, fs1, fs4,
 )
-from .util import ts_us, round_min, log2lin, lin2log, temp_dir, fluidsynth, get_sf2, DEFAULT_DESCRIPTION
+from .util import ts_us, round_min, log2lin, lin2log, temp_dir, event_types, DEFAULT_DESCRIPTION
 
 
 @functools.lru_cache(maxsize=256)
@@ -143,11 +144,11 @@ def load_moai(file):
 	with open(file, "r", encoding="utf-8") as f:
 		actions = f.read().replace("\n", "|").split("|")
 	events = [
-		[0, 0, "header", 1, 9 + 1, 1],
-		[1, 0, "tempo", 1000 * 1000 / (300 / 60)],
+		[0, 0, event_types.HEADER, 1, 9 + 1, 1, 0, 2],
+		[1, 0, event_types.TEMPO, 1000 * 1000 / (300 / 60)],
 	]
 	for i in range(len(midi_instrument_selection) - 1):
-		events.append([i + 2, 0, "program_c", i + 10, midi_instrument_selection[i]])
+		events.append([i + 2, 0, event_types.PROGRAM_C, i + 10, midi_instrument_selection[i], nbs_names[fixed_instruments[instrument_codelist[i]]]])
 	tick = 0
 	vm = 100
 	pm = 0
@@ -156,7 +157,7 @@ def load_moai(file):
 			case _ if action.startswith("!speed@"):
 				action = action.split("@", 1)[-1]
 				speed = float(action)
-				events.append([1, 0, "tempo", 1000 * 1000 / (speed / 60)])
+				events.append([1, 0, event_types.TEMPO, 1000 * 1000 / (speed / 60)])
 			case _ if action.startswith("!stop@"):
 				action = action.split("@", 1)[-1]
 				stop = float(action)
@@ -215,10 +216,10 @@ def load_moai(file):
 						tick += int(rep)
 						continue
 					for i in range(int(rep)):
-						note_event = [int(ins) + 2, tick, "note_on_c", int(ins) + 10, pitch_override, lin2log(float(vm) / 100 * float(velocity) / 100) / float(vol), 1, 1]
+						note_event = [int(ins) + 2, tick, event_types.NOTE_ON_C, int(ins) + 10, pitch_override, lin2log(float(vm) / 100 * float(velocity) / 100) / float(vol), 1, 1]
 						events.append(note_event)
 						tick += 1
-	events.sort(key=lambda e: e[1])
+	# events.sort(key=lambda e: e[1])
 	return events
 
 def save_moai(transport, output, ctx, **void):
@@ -263,17 +264,16 @@ def save_moai(transport, output, ctx, **void):
 						mod += 12
 					case _:
 						instrument = instrument_names[mat]
-						# if note.instrument_class != -1:
-						# 	if not ctx.mc_legal:
-						# 		instrument2 = fixed_instruments[instrument_codelist[note.instrument_class]]
-						# 		pitch2 = note.pitch - pitches[instrument2] - fs1
-						# 		if pitch2 in range(-12, 48):
-						# 			mod = pitch2
-						# 			instrument = instrument2
-						# 		else:
-						# 			pitch2 = note.pitch - pitches[instrument] - fs1
-						# 			if pitch2 in range(-33, 55):
-						# 				mod = pitch2
+						if note.instrument_class != -1:
+							instrument2 = fixed_instruments[instrument_codelist[note.instrument_class]]
+							pitch2 = note.pitch - pitches[instrument2] - fs1
+							if pitch2 in range(0, 24):
+								mod = pitch2
+								instrument = instrument2
+							else:
+								pitch2 = note.pitch - pitches[instrument] - fs1
+								if pitch2 in range(-33, 55):
+									mod = pitch2
 						if instrument in nbs2thirtydollar:
 							name = nbs2thirtydollar[instrument]
 						else:
@@ -588,7 +588,7 @@ def join_gml(lines):
 def save_deltarune(transport, output, instrument_activities, ctx, **void):
 	tmpl = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 	outtmpl = output.rsplit(".", 1)[0]
-	from hyperchoron import midi
+	from . import midi
 	instruments, wait, resolution = list(midi.build_midi(transport, instrument_activities, ctx=ctx))
 	full_midi = f"{temp_dir}{tmpl}-full.mid"
 	midi.proceed_save_midi(full_midi, f"{tmpl}-full", False, instruments, wait, resolution)
@@ -626,7 +626,11 @@ def save_deltarune(transport, output, instrument_activities, ctx, **void):
 			rmss[tick] += log2lin(note.volume / 127) ** 2
 			melodic_ticks.add(tick)
 	rmss = np.array([n ** 0.5 for n in rmss], dtype=np.float32)
-	hard_percentile = min(np.percentile(rmss[np.fromiter(melodic_ticks, dtype=np.uint32)], 90), 8) # Allow no more than 10% of song to contain double-notes, unless there is a crazy amount of notes adding up to rms of 800%+ (e.g. black midi)
+	# Allow no more than 10% of song to contain double-notes, unless there is a crazy amount of notes adding up to rms of 800%+ (e.g. black midi)
+	try:
+		hard_percentile = min(np.percentile(rmss[np.fromiter(melodic_ticks, dtype=np.uint32)], 90), 8)
+	except IndexError:
+		hard_percentile = 1
 	for note in all_notes:
 		if note.instrument_type == -1:
 			special = 0
@@ -906,32 +910,8 @@ function scr_rhythmgame_toggle_notes(arg0, arg1 = true) {
 		instrument.notes.append(note)
 	solo_midi = f"{temp_dir}{tmpl}-solo.mid"
 	nc += midi.proceed_save_midi(solo_midi, f"{tmpl}-solo", False, instruments, wait, resolution)
-	import subprocess
-	import imageio_ffmpeg as ii
-	ffmpeg = ii.get_ffmpeg_exe()
-	sf2 = get_sf2()
-
-	base_flac = f"{temp_dir}{tmpl}-base.flac"
-	args = [fluidsynth, "-g", "0.5", "-F", base_flac, "-c", "64", "-o", "synth.polyphony=32767", "-r", "48000", "-n", sf2, base_midi]
-	subprocess.run(args)
+	from .pcm import render_midi
 	base_ogg = f"{outtmpl}-base.ogg"
-	args = [ffmpeg, "-y", "-i", base_flac, "-af", "volume=2", "-c:a", "libvorbis", "-b:a", "128k", base_ogg]
-	proc = subprocess.Popen(args)
-	solo_flac = f"{temp_dir}{tmpl}-solo.flac"
-	args = [fluidsynth, "-g", "0.5", "-F", solo_flac, "-c", "64", "-o", "synth.polyphony=512", "-r", "48000", "-n", sf2, solo_midi]
-	subprocess.run(args)
-	proc.wait()
 	solo_ogg = f"{outtmpl}-solo.ogg"
-	args = [ffmpeg, "-y", "-i", solo_flac, "-af", "volume=2", "-c:a", "libvorbis", "-b:a", "128k", solo_ogg]
-	subprocess.run(args)
-	full_ogg = f"{outtmpl}-full.ogg"
-	args = [ffmpeg, "-y", "-i", base_flac, "-i", solo_flac, "-filter_complex", "[0:a]volume=2[a1];[1:a]volume=2[a2];[a1][a2]amix=inputs=2:duration=longest", full_ogg]
-	subprocess.run(args)
-	# import zipfile
-	# with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as z:
-	# 	z.write(rhythmgame_notes, arcname="rhythmgame_notechart.gml")
-	# 	z.write(rhythmgame_load, arcname="rhythmgame_song_load.gml")
-	# 	z.write(base_ogg, arcname=f"{tmpl}-base.ogg")
-	# 	z.write(solo_ogg, arcname=f"{tmpl}-solo.ogg")
-	# 	z.write(full_ogg, arcname=f"{tmpl}-full.ogg")
+	render_midi([base_midi, solo_midi], [base_ogg, solo_ogg], fmt="ogg")
 	return nc

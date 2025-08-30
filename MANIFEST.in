@@ -13,7 +13,7 @@ prune build
 global-exclude __pycache__ *.py[cod]
 
 # Include data/template directories
-graft hyperchoron/litematic
+graft hyperchoron/minecraft_templates
 graft hyperchoron/fluidsynth
 
 exclude hyperchoron/fluidsynth/*.pdb

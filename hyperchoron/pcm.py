@@ -1,11 +1,12 @@
 import contextlib
 from dataclasses import dataclass
 from math import isfinite
+import functools
 import os
-import librosa
+import subprocess
 import numpy as np
-from .mappings import c1
-from .util import temp_dir, sample_rate
+from .mappings import c1, nbs_raws
+from .util import base_path, temp_dir, ts_us, in_sample_rate, out_sample_rate, fluidsynth, orgexport, get_sf2, round_random
 
 
 bps = 2
@@ -30,7 +31,7 @@ def separate_audio(model, file, outputs):
 		return
 	if not globals().get("separator"):
 		from audio_separator.separator import Separator
-		separator = Separator(output_dir=temp_dir, output_format="FLAC", sample_rate=sample_rate, use_soundfile=True)
+		separator = Separator(output_dir=temp_dir, output_format="FLAC", in_sample_rate=in_sample_rate, use_soundfile=True)
 	separator.load_model(model)
 	with contextlib.chdir(temp_dir):
 		return separator.separate(file, outputs)
@@ -41,8 +42,9 @@ def load_raw(file):
 	path = os.path.abspath(file)
 	tmpl = path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 
-	song, *_ = librosa.load(path, sr=sample_rate, mono=True, dtype=np.float32)
-	bpm_, *_ = librosa.beat.beat_track(y=song.astype(np.float16), sr=sample_rate)
+	import librosa
+	song, *_ = librosa.load(path, sr=in_sample_rate, mono=True, dtype=np.float32)
+	bpm_, *_ = librosa.beat.beat_track(y=song.astype(np.float16), sr=in_sample_rate)
 	bpm = bpm_[0]
 	print("Detected BPM:", bpm)
 
@@ -91,12 +93,12 @@ def load_raw(file):
 	# ).items()}
 	# separate_audio("htdemucs_6s.yaml", others, output_names)
 
-	bufsize = round(sample_rate / (bpm / 60) / 12)
+	bufsize = round(in_sample_rate / (bpm / 60) / 12)
 
 	def decompose_stem(fn, instrument=0, pitch=None, monophonic=True, pitch_range=("C1", "C7"), tolerance=256, mult=1):
 		ins = instrument if instrument != -1 else 9
 		events = [[ins, 0, "program_c", ins, instrument]]
-		song, *_ = librosa.load(temp_dir + fn + ".flac", sr=sample_rate, mono=False, dtype=np.float32)
+		song, *_ = librosa.load(temp_dir + fn + ".flac", sr=in_sample_rate, mono=False, dtype=np.float32)
 		mono = librosa.to_mono(song)
 		# volumes = np.array([np.mean(np.abs(mono[i:i + bufsize])) for i in range(0, len(mono), bufsize)])
 		volumes = librosa.feature.rms(y=mono, frame_length=bufsize * 4, hop_length=bufsize)[0]
@@ -121,7 +123,7 @@ def load_raw(file):
 			) > 0 else 0 for i in range(0, len(right), bufsize)])
 			f0, voiced_flag, _ = librosa.pyin(
 				mono,
-				sr=sample_rate,
+				sr=in_sample_rate,
 				fmin=librosa.note_to_hz(pitch_range[0]),
 				fmax=librosa.note_to_hz(pitch_range[1]),
 				frame_length=bufsize * 4,
@@ -148,7 +150,7 @@ def load_raw(file):
 			return events
 		c = librosa.hybrid_cqt(
 			mono,
-			sr=sample_rate,
+			sr=in_sample_rate,
 			fmin=librosa.note_to_hz(pitch_range[0]),
 			n_bins=bpo * octaves,
 			bins_per_octave=bpo,
@@ -188,7 +190,7 @@ def load_raw(file):
 
 	events = [
 		[0, 0, "header", 1, 1 + 1, 1],
-		[1, 0, "tempo", bufsize / sample_rate * 1000 * 1000 * 1],
+		[1, 0, "tempo", bufsize / in_sample_rate * 1000 * 1000 * 1],
 	]
 	print("Decomposing Bass...")
 	events.extend(decompose_stem(tmpl + "-B", 46, monophonic=True, pitch_range=("C0", "C6"), mult=3))
@@ -208,6 +210,254 @@ def load_raw(file):
 	return events
 
 
-def save_raw(transport, output, ctx, **void):
-	print(ctx)
-	raise NotImplementedError
+def ffmpeg_output(fo):
+	ext = fo.rsplit(".", 1)[-1]
+	extra = []
+	match ext:
+		case "ogg" | "opus":
+			ba = "160k"
+			extra = ["-c:a", "libopus"]
+		case "aac":
+			ba = "192k"
+			extra = ["-cutoff", "16000", "-c:a", "libfdk_aac"]
+		case "mp3":
+			ba = "224k"
+			extra = ["-c:a", "libmp3lame"]
+		case _:
+			return [fo]
+	return extra + ["-b:a", ba, fo]
+
+
+def render_midi(inputs, outputs, fmt="flac"):
+	sf2 = get_sf2()
+	convert = fmt not in ("wav", "flac")
+	if convert:
+		intermediate = [temp_dir + str(ts_us()) + str(i) + ".flac" for i, fo in enumerate(outputs)]
+	else:
+		intermediate = outputs
+	procs = []
+	for fi, fo in zip(inputs, intermediate):
+		args = [fluidsynth, "-g", "0.5" if convert else "1", "-F", fo, "-c", "64", "-o", "synth.polyphony=32767", "-r", str(out_sample_rate), "-n", sf2, fi]
+		proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)
+		procs.append(proc)
+	for proc in procs:
+		proc.wait()
+	procs.clear()
+	if not convert:
+		assert all(os.path.exists(fo) and os.path.getsize(fo) for fo in outputs)
+		return outputs
+	import imageio_ffmpeg as ii
+	ffmpeg = ii.get_ffmpeg_exe()
+	for fi, fo in zip(intermediate, outputs):
+		args = [ffmpeg, "-y", "-i", fi, "-af", "volume=2", *(ffmpeg_output(fo))]
+		proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)
+		procs.append(proc)
+	for proc in procs:
+		proc.wait()
+	assert all(os.path.exists(fo) and os.path.getsize(fo) for fo in outputs)
+	return outputs
+
+
+def render_nbs(inputs, outputs, fmt="flac"):
+	import concurrent.futures
+	import zipfile
+	from audiotsm import phasevocoder
+	from audiotsm.io.array import ArrayReader, ArrayWriter
+	from librosa import load, resample
+	import pynbs
+	from soundfile import SoundFile
+	@functools.lru_cache(maxsize=192)
+	def load_audio(fn):
+		with zipfile.ZipFile(f"{base_path}minecraft_templates/Notes.zip", "r") as z:
+			with z.open(fn, "r") as f:
+				a = load(f, sr=out_sample_rate)[0]
+		# Cut silence at end of audio to minimise later processing
+		last = len(a) - 1 - np.argmax(a[::-1] != 0)
+		a = a[:last]
+		a *= 0.5
+		return a
+	@functools.lru_cache(maxsize=768)
+	def pitch_audio(fn, p):
+		a = load_audio(f"{fn}.ogg")
+		speed = 1 / 2 ** (p / 12)
+		if -12 <= p <= 12:
+			a = resample(a, orig_sr=out_sample_rate, target_sr=round(out_sample_rate * speed), res_type="soxr_hq", fix=False)
+		elif p < 0:
+			p += 12
+			r = ArrayReader(a.reshape((1, len(a))))
+			w = ArrayWriter(1)
+			tsm = phasevocoder(r.channels, speed=speed)
+			tsm.run(r, w)
+			a = w.data.ravel()
+			a = resample(a, orig_sr=out_sample_rate, target_sr=round(out_sample_rate * speed), res_type="soxr_hq", fix=False)
+		else:
+			a = resample(a, orig_sr=out_sample_rate, target_sr=round(out_sample_rate * speed), res_type="soxr_hq", fix=False)
+			p -= 12
+			r = ArrayReader(a.reshape((1, len(a))))
+			w = ArrayWriter(1)
+			tsm = phasevocoder(r.channels, speed=speed)
+			tsm.run(r, w)
+			a = w.data.ravel()
+		return a
+	@functools.lru_cache(maxsize=256)
+	def render_note_block(instrument, pitch, panning):
+		fn = nbs_raws[3 if instrument > 15 else instrument]
+		a = pitch_audio(fn, pitch / 100 - 33 - 12)
+		# This implementation is technically too "correct" compared to nbswave/Note Block Studio, but is kept as it is not particularly performance-intensive to apply
+		t = (panning / 100 + 1) * np.pi / 4
+		l, r = np.cos(t), np.sin(t)
+		a = np.stack([a * l, a * r], axis=1)
+		return a
+	for fi, fo in zip(inputs, outputs):
+		nbs = pynbs.read(fi)
+		buf_seconds = 2
+		bufsize = buf_seconds * out_sample_rate
+		# We keep an additional 3 seconds of buffer space to account for sounds that last a while
+		buffer = np.zeros((bufsize + 3 * out_sample_rate, 2), dtype=np.float32)
+		def render_note(idx, rendered, velocity):
+			buffer[idx:idx + len(rendered)] += (rendered if velocity == 1 else rendered * velocity)
+		# Use a reader and writer thread to minimise overhead of file IO + sound resampling
+		with concurrent.futures.ThreadPoolExecutor(max_workers=1) as wx:
+			with concurrent.futures.ThreadPoolExecutor(max_workers=1) as rx:
+				with SoundFile(fo, "w", out_sample_rate, channels=2, format=fmt) as f:
+					pos = 0
+					futs = []
+					for tick, chord in nbs:
+						while (tick - pos) / nbs.header.tempo >= buf_seconds:
+							for fut in futs:
+								fut.result()
+							fut = wx.submit(f.write, buffer[:bufsize].copy())
+							futs.clear()
+							futs.append(fut)
+							buffer[:-bufsize] = buffer[bufsize:]
+							buffer[-bufsize:] = 0
+							pos += buf_seconds * nbs.header.tempo
+						stats = {}
+						for note in chord:
+							tup = (note.instrument, note.key, note.pitch, note.velocity, note.panning)
+							stats[tup] = stats.get(tup, 0) + 1
+						for (instrument, key, pitch, velocity, panning), count in stats.items():
+							idx = round_random(out_sample_rate * (tick - pos) / nbs.header.tempo)
+							rendered = render_note_block(instrument, key * 100 + pitch, panning)
+							fut = rx.submit(render_note, idx, rendered, velocity * count / 100)
+							futs.append(fut)
+					for fut in futs:
+						fut.result()
+					if np.any(buffer):
+						last = len(buffer) - 1 - np.argmax(buffer[::-1] != 0)
+						f.write(buffer[:last])
+
+
+def render_org(inputs, outputs, fmt="wav"):
+	convert = fmt != "wav"
+	intermediate = [temp_dir + str(ts_us()) + str(i) + ".wav" for i, fo in enumerate(outputs)]
+	temps = [fo.rsplit(".", 1)[0] + ".org" for i, fo in enumerate(intermediate)]
+	import shutil
+	for fi, fo in zip(inputs, temps):
+		shutil.copyfile(fi, fo)
+	cwd = orgexport.replace("\\", "/").rsplit("/", 1)[0]
+	procs = []
+	for fi, fo in zip(temps, intermediate):
+		args = [orgexport, fi, "48000", "0"]
+		proc = subprocess.Popen(args, cwd=cwd, stdin=subprocess.DEVNULL)
+		procs.append(proc)
+	for proc in procs:
+		proc.wait()
+	procs.clear()
+	if not convert:
+		for fi, fo in zip(intermediate, outputs):
+			os.replace(fi, fo)
+		assert all(os.path.exists(fo) and os.path.getsize(fo) for fo in outputs)
+		return outputs
+	import imageio_ffmpeg as ii
+	ffmpeg = ii.get_ffmpeg_exe()
+	for fi, fo in zip(intermediate, outputs):
+		args = [ffmpeg, "-y", "-i", fi, *(ffmpeg_output(fo))]
+		proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)
+		procs.append(proc)
+	for proc in procs:
+		proc.wait()
+	assert all(os.path.exists(fo) and os.path.getsize(fo) for fo in outputs)
+	return outputs
+
+
+def render_xm(inputs, outputs, fmt="flac"):
+	import imageio_ffmpeg as ii
+	ffmpeg = ii.get_ffmpeg_exe()
+	procs = []
+	for fi, fo in zip(inputs, outputs):
+		args = [ffmpeg, "-y", "-i", fi, *(ffmpeg_output(fo))]
+		proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)
+		procs.append(proc)
+	for proc in procs:
+		proc.wait()
+	assert all(os.path.exists(fo) and os.path.getsize(fo) for fo in outputs)
+	return outputs
+
+
+def mix_raw(inputs, output):
+	if len(inputs) == 1 and inputs[0].rsplit(".", 1)[-1] == output.rsplit(".", 1)[-1]:
+		os.replace(inputs[0], output)
+		return output
+	import imageio_ffmpeg as ii
+	ffmpeg = ii.get_ffmpeg_exe()
+	args = [ffmpeg, "-y"]
+	for fi in inputs:
+		args.extend(("-i", fi))
+	if len(inputs) > 1:
+		args.extend(("-filter_complex", "".join(f"[{i}:a]" for i in range(len(inputs))) + f"amix=inputs={len(inputs)}:duration=longest"))
+	args.extend(ffmpeg_output(output))
+	subprocess.check_output(args)
+	assert os.path.exists(output) and os.path.getsize(output)
+	return output
+
+
+def save_raw(transport, output, ctx, speed_info, instrument_activities, **void):
+	print(f"Exporting {output.rsplit('.', 1)[-1].upper()}...")
+	from .util import Transport
+	modalities = {}
+	for beat in transport:
+		for t in modalities.values():
+			t.append([])
+		for note in beat:
+			m = note.modality
+			try:
+				modalities[m][-1].append(note)
+			except KeyError:
+				modalities[m] = Transport(tick_delay=transport.tick_delay)
+				modalities[m].append([note])
+	ofmt = output.rsplit(".", 1)[-1]
+	ofi = ".flac" if ofmt != "wav" else "." + ofmt
+	nc = 0
+	outputs = []
+	if 0 in modalities:
+		m_transport = modalities.pop(0)
+		tmpl = temp_dir + str(ts_us()) + "0"
+		m_out = tmpl + ".mid"
+		from . import midi
+		m_out_f = tmpl + ofi
+		nc += midi.save_midi(m_transport, m_out, speed_info=speed_info, instrument_activities=instrument_activities, ctx=ctx)
+		render_midi([m_out], [m_out_f], fmt=ofi[1:])
+		outputs.append(m_out_f)
+	if 1 in modalities:
+		m_transport = modalities.pop(1)
+		tmpl = temp_dir + str(ts_us()) + "1"
+		m_out = tmpl + ".nbs"
+		from . import minecraft
+		m_out_f = tmpl + ofi
+		nc += minecraft.save_nbs(m_transport, m_out, speed_info=speed_info, instrument_activities=instrument_activities, ctx=ctx)
+		render_nbs([m_out], [m_out_f], fmt=ofi[1:])
+		outputs.append(m_out_f)
+	if 2 in modalities:
+		m_transport = modalities.pop(2)
+		tmpl = temp_dir + str(ts_us()) + "2"
+		m_out = tmpl + ".org"
+		from . import tracker
+		m_out_f = tmpl + ofi
+		nc += tracker.save_org(m_transport, m_out, speed_info=speed_info, instrument_activities=instrument_activities, ctx=ctx)
+		render_org([m_out], [m_out_f], fmt=ofi[1:])
+		outputs.append(m_out_f)
+	if modalities:
+		raise NotImplementedError(tuple(modalities))
+	mix_raw(outputs, output)
+	return nc

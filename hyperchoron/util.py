@@ -8,6 +8,7 @@ import functools
 import lzma
 from math import isqrt, sqrt, log10
 import os
+import random
 import shutil
 import struct
 import time
@@ -15,7 +16,8 @@ import numpy as np
 from .mappings import note_names, note_names_ex, c1
 
 
-sample_rate = 44100
+in_sample_rate = 44100
+out_sample_rate = 48000
 DEFAULT_NAME = "Hyperchoron"
 DEFAULT_DESCRIPTION = f"Exported by Hyperchoron on {datetime.datetime.now().date()}"
 base_path = __file__.replace("\\", "/").rsplit("/", 1)[0] + "/"
@@ -38,6 +40,7 @@ def ts_us():
 	return ts
 
 fluidsynth = os.path.abspath(base_path + "/fluidsynth/fluidsynth")
+orgexport = os.path.abspath(base_path + "/fluidsynth/orgexport202")
 
 def get_sf2():
 	sf2 = binary_dir + "soundfont.sf2"
@@ -141,6 +144,18 @@ def arround_min(x, atol=1 / 4096):
 	except TypeError:
 		print(x.dtype)
 		raise
+
+def round_random(x) -> int:
+	try:
+		y = int(x)
+	except (ValueError, TypeError):
+		return x
+	if y == x:
+		return y
+	x -= y
+	if random.random() <= x:
+		y += 1
+	return y
 
 def as_int(x):
 	try:
@@ -427,6 +442,11 @@ event_dict = dict(
 )
 MIDIEvents = namedtuple("MIDIEvents", tuple(t.upper() for t in event_dict))
 event_types = MIDIEvents(*event_dict.values())
+
+# Modalities:
+# 0: MIDI
+# 1: NBS
+# 2: ORG
 
 @dataclass(slots=True)
 class NoteSegment:
