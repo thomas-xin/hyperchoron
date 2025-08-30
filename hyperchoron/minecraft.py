@@ -696,7 +696,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	track, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Track.litematic").regions.values()
 	if ctx.minecart_improvements:
 		track = setblock(track, (1, 4, 0), litemapy.BlockState("minecraft:rail", shape="north_south"))
-	skeleton, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 skeleton.litematic").regions.values()
+	skeleton, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Skeleton.litematic").regions.values()
 	# For faraway segments that do not need to be as quiet, we can allocate trapdoors to conserve survival mode resources
 	skeleton2 = clone_region(skeleton)
 	skeleton2.filter(lambda block: air if block.id == "minecraft:tripwire" else trapdoor if block.id in ("minecraft:note_block", "minecraft:waxed_oxidized_copper_bulb") else block)
