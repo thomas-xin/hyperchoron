@@ -89,11 +89,12 @@ options:
 Converting a MIDI file into a Minecraft Litematica schematic:
 - `hyperchoron -i input.mid -o output.litematic`
 
-Converting a recursively nested .7z archive of .xm files into a MIDI file, stacking them together as if they were individual instrument parts:
+Converting a recursively nested .7z archive of .xm files into a MIDI file, stacking them together as if they were individual instrument parts (Refer below for additional requirements for .xm):
 - `hyperchoron -i input.7z -x L -o output.mid`
 
 Converting all elements (of various file types) from the folder of example inputs into .skysheet keeping their original filenames otherwise, placing them into a new folder:
 - `hyperchoron -i examples/input -a -f skysheet -o examples/skysheet/`
+  - Warning: May consume several gigabytes of RAM!
 
 Converting a MIDI file stored on a remote server, accessible via HTTP:
 - `hyperchoron -i https://mizabot.xyz/u/5OK0rYLJEBCJYQYRKBJbaAAQAYBYZA/mk7_rainbow_road.mid -o output.nbt`

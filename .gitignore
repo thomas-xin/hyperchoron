@@ -7,6 +7,7 @@ fastmidi
 binaries
 DawVert
 examples/csv
+examples/flac
 examples/genshinsheet
 examples/hpc
 examples/litematic
@@ -16,6 +17,7 @@ examples/midi
 examples/moai
 examples/nbs
 examples/nbt
+examples/ogg
 examples/org
 examples/skysheet
 examples/zip

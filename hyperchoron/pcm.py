@@ -31,7 +31,7 @@ def separate_audio(model, file, outputs):
 		return
 	if not globals().get("separator"):
 		from audio_separator.separator import Separator
-		separator = Separator(output_dir=temp_dir, output_format="FLAC", in_sample_rate=in_sample_rate, use_soundfile=True)
+		separator = Separator(output_dir=temp_dir, output_format="FLAC", sample_rate=in_sample_rate, use_soundfile=True)
 	separator.load_model(model)
 	with contextlib.chdir(temp_dir):
 		return separator.separate(file, outputs)

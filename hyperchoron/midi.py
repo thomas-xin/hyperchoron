@@ -111,7 +111,7 @@ def get_step_speed(midi_events, ctx=None):
 def preprocess(midi_events):
 	"Preprocesses a MIDI file to determine the lengths of all notes based on their corresponding note_end_c events, as well as the maximum note velocity and timestamp"
 	print(f"Preprocessing ({len(midi_events)} events total)...")
-	modality = midi_events[0][7]
+	modality = midi_events[0][7] if len(midi_events[0]) > 7 else 0
 	note_lengths = {}
 	temp_active = {}
 	discard = []
