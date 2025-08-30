@@ -136,7 +136,7 @@ Hyperchoron can be imported as a Python library for integration with other tools
   - .mid/.midi
   - .csv
   - .nbs
-    - If you want to ensure that the output stays vanilla Minecraft compliant, be sure to use the `--mc-legal` argument. This option is normally enabled by default for `.litematic`, `.mcfunction` and `.nbt` outputs. If not specified, Hyperchoron will attempt to utilise the full capacity of the `.nbs` format including non-integer tick rates, and will only switch instruments if notes fall outside even the extended range provided by Note Block Studio.
+    - If you want to ensure that the output stays vanilla Minecraft compliant, be sure to use the `--strict-tempo` argument, and optionally `--no-microtones` if you would like to output to also be survival-legal. These options are normally enabled by default for `.litematic`, `.mcfunction` and `.nbt` outputs. If not specified, Hyperchoron will attempt to utilise the full capacity of the `.nbs` format including non-integer tick rates, and will only switch instruments if notes fall outside even the extended range provided by Note Block Studio.
   - .mcfunction: A list of Minecraft `/setblock` commands, to be run through a modded client or a datapack. The notes will be mapped to a multi-layered structure enabling 20Hz playback, but with limitations on polyphony, volume and pan control.
   - .litematic: Similar output to `.mcfunction`, but more easily viewed and pasted using the [Litematica](https://modrinth.com/mod/litematica) mod.
   - .nbt: A Minecraft NBT structure file, normally intended for use with structure blocks. However, in practice the outputs are usually too large, and will need a third-party mod (litematica included) to paste properly.
