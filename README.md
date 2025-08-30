@@ -9,7 +9,7 @@ The decoders are optimised to handle black MIDIs with up to hundreds of millions
 
 ![thumbnail](https://raw.githubusercontent.com/thomas-xin/hyperchoron/refs/heads/main/thumb.jpg)
 
-- Disclaimer: Hyperchoron does not apply generative AI to produce songs; all notes are produced from the inputs only, and are not manifested by neural networks. This means that if you want the best results, you should find existing versions or transcriptions of the song that are of high quality.
+- Disclaimer: Hyperchoron does not apply generative AI to produce songs; all notes are produced from the inputs only, and are not manifested or extrapolated by neural networks. This means that if you want the best results, you should find existing versions or transcriptions of the song that are of high quality.
 # Instructions for use
 ## Installation
 - Install [python](https://www.python.org) and [pip](https://pip.pypa.io/en/stable/)
@@ -199,7 +199,7 @@ If you are looking to read/write Hyperchoron's compact memory format for any rea
           - Timing Offset: 1 byte, unsigned integer (irrelevant for most scenarios)
         - Compact Note (6 bytes each):
           - Priority: 0.5 bytes, signed integer
-          - Timing: 0.5 bytes, unsigned integer
+          - Timing Offset: 0.5 bytes, unsigned integer
           - Instrument ID: 1 byte, unsigned integer
           - Instrument Class: 1 byte, signed integer
           - Pitch: 1 byte, unsigned integer, in semitones starting from C0
@@ -224,6 +224,6 @@ Odds are, most people finding their way to this repository will be mainly intere
   - Note Volume: Notes are automatically spread out further from the centreline where the player is, depending on their volume/velocity. This additionally respects the direction of the notes' panning if specified.
 
 ### Additional notes
-- Hyperchoron's design is focused on importing and exporting to vanilla Minecraft as accurately and as reasonably as possible. That means, there are limitations when attempting to convert songs with a much higher speed or many stacked notes; in both cases the notes will be compacted and quantised.
-- Please note that conversion quality may vary significantly between different versions of Hyperchoron. This is an unavoidable nuance that comes with attempting to provide a one-size-fits-all solution for MIDI files; often making one thing sound better will make another sound worse.
+- Hyperchoron's design was originally focused on importing and exporting to vanilla Minecraft as accurately and as reasonably as possible. That means, there may be limitations when attempting to convert songs with a much higher speed or many stacked notes; in cases where the target resolution is lower, the notes will be compacted and quantised to fit.
+- Please note that conversion quality may vary significantly between different versions of Hyperchoron. This is an unavoidable nuance that comes with attempting to provide a one-size-fits-all solution for sheet music of many kinds; often making one thing sound better will make another sound worse.
 - Here is a video showcasing some of the example outputs in an earlier version: https://youtu.be/Vtmh1Qi0w9s, and here is an example of the latest version with volume control: https://www.youtube.com/watch?v=qK1n4zVSjM0
