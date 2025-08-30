@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hyperchoron"
 readme = "README.md"
-version = "1.0.10"
+version = "1.0.11"
 authors = [
 	{name = "Thomas Xin", email = "thomasxin@gmail.com"},
 ]
@@ -36,6 +36,7 @@ classifiers = [
 ]
 [project.optional-dependencies]
 pcm = [
+	"audiotsm>=0.1.2",
 	"audio-separator>=0.34.1",
 	"imageio-ffmpeg>=0.6.0",
 	"librosa>=0.11.0",
