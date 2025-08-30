@@ -65,6 +65,18 @@ def get_ext(path) -> str:
 
 archive_formats = ("7z", "zip", "tar", "gz", "bz", "xz")
 
+def unpack_gz(archive_name, extract_dir):
+	import gzip
+	with gzip.open(archive_name, "rb") as f_in:
+		with open(os.path.join(extract_dir, os.path.basename(archive_name).replace(".gz", "")), "wb") as f_out:
+			f_out.write(f_in.read())
+shutil.register_unpack_format("gz", [".gz"], unpack_gz)
+def unpack_xz(filename, extract_dir):
+	import tarfile
+	with tarfile.open(filename, "r:xz") as tar:
+		tar.extractall(path=extract_dir)
+shutil.register_unpack_format("xz", [".xz"], unpack_xz)
+
 def extract_archive(archive_path, format=None):
 	path = temp_dir + str(ts_us())
 	os.mkdir(path)
