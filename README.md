@@ -24,7 +24,8 @@ The decoders are optimised to handle black MIDIs with up to hundreds of millions
 usage: hyperchoron [-h] [-V] -i INPUT [INPUT ...] -o OUTPUT [OUTPUT ...] [-f FORMAT] [-x [MIXING]] [-v [VOLUME]]
                    [-s [SPEED]] [-r [RESOLUTION]] [-st | --strict-tempo | --no-strict-tempo] [-t [TRANSPOSE]]
                    [-ik | --invert-key | --no-invert-key] [-mt | --microtones | --no-microtones]
-                   [-ac | --accidentals | --no-accidentals] [-d | --drums | --no-drums] [-md [MAX_DISTANCE]]
+                   [-ac | --accidentals | --no-accidentals] [-tc | --tempo-changes | --no-tempo-changes]
+                   [-d | --drums | --no-drums] [-md [MAX_DISTANCE]]
                    [-mi | --minecart-improvements | --no-minecart-improvements]
 
 MIDI-Tracker-DAW converter and Minecraft Note Block exporter
@@ -35,10 +36,10 @@ options:
   -i, --input INPUT [INPUT ...]
                         Input file (.zip | .mid | .csv | .nbs | .org | *)
   -o, --output OUTPUT [OUTPUT ...]
-                        Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | .skysheet |
-                        .genshinsheet | *)
-  -f, --format FORMAT   Output format (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | .skysheet |
-                        .genshinsheet | *)
+                        Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .schem | .schematic | .org
+                        | .skysheet | .genshinsheet | *)
+  -f, --format FORMAT   Output format (mid | csv | nbs | nbt | mcfunction | litematic | .schem | .schematic | org |
+                        skysheet | genshinsheet | deltarune | *)
   -x, --mixing [MIXING]
                         Behaviour when importing multiple files. "I" to process individually, "L" to layer/stack, "C"
                         to concatenate. If multiple digits are inputted, this will be interpreted as a hierarchy. For
@@ -72,6 +73,10 @@ options:
                         Allows accidentals. If disabled, all notes are clamped to the closest key signature. Warning:
                         Hyperchoron is currently only implemented to autodetect a single key signature per song.
                         Defaults to FALSE for .skysheet and .genshinsheet outputs, TRUE otherwise
+  -tc, --tempo-changes, --no-tempo-changes
+                        Allows tempo changes. If disabled, all notes are moved to an approximate relative tick based
+                        on their real time as calculated with the tempo change, but without tempo changes in the
+                        output. CURRENTLY UNIMPLEMENTED; ALWAYS FALSE.
   -d, --drums, --no-drums
                         Allows percussion channel. If disabled, percussion channels will be discarded. Defaults to
                         TRUE
@@ -88,6 +93,9 @@ options:
 ### Examples
 Converting a MIDI file into a Minecraft Litematica schematic:
 - `hyperchoron -i input.mid -o output.litematic`
+
+Converting a MIDI file into a Minecraft WorldEdit schematic:
+- `hyperchoron -i input.mid -o output.schem`
 
 Converting a recursively nested .7z archive of .xm files into a MIDI file, stacking them together as if they were individual instrument parts (Refer below for additional requirements for .xm):
 - `hyperchoron -i input.7z -x L -o output.mid`

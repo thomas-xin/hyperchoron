@@ -4,6 +4,7 @@ temp
 target
 dist
 fastmidi
+fluidsynth
 binaries
 DawVert
 examples/csv

@@ -1,5 +1,6 @@
 import collections
 from collections import deque, namedtuple
+import concurrent.futures
 import csv
 from dataclasses import dataclass
 import datetime
@@ -22,12 +23,11 @@ DEFAULT_NAME = "Hyperchoron"
 DEFAULT_DESCRIPTION = f"Exported by Hyperchoron on {datetime.datetime.now().date()}"
 base_path = __file__.replace("\\", "/").rsplit("/", 1)[0] + "/"
 temp_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/temp/"
-if not os.path.exists(temp_dir):
-	os.mkdir(temp_dir)
 binary_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/binaries/"
-if not os.path.exists(binary_dir):
-	os.mkdir(binary_dir)
 csv_reader = type(csv.reader([]))
+http_headers = {
+	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+}
 
 if not hasattr(time, "time_ns"):
 	time.time_ns = lambda: int(time.time() * 1e9)
@@ -39,25 +39,48 @@ def ts_us():
 	UNIQUE_TS = ts
 	return ts
 
-fluidsynth = os.path.abspath(base_path + "/fluidsynth/fluidsynth")
-orgexport = os.path.abspath(base_path + "/fluidsynth/orgexport202")
+synth_dir = os.path.abspath(binary_dir + "fluidsynth") + "/"
+fluidsynth = synth_dir + "fluidsynth"
+orgexport = synth_dir + "orgexport202"
+
+def ensure_synths():
+	if not os.path.exists(binary_dir):
+		os.mkdir(binary_dir)
+	if not os.path.exists(synth_dir):
+		os.mkdir(synth_dir)
+	if len(os.listdir(synth_dir)) <= 1:
+		if os.name != "nt":
+			raise NotImplementedError("No current synthesizer has been assigned for this platform. Please open an issue on the GitHub repo if you would like this added!")
+		import urllib.request
+		req = urllib.request.Request("https://mizabot.xyz/u/3tCcoP9QGJ_wH43x-H33BAGwLQE1/fluidsynth.7z", headers=http_headers)
+		f7z = os.path.abspath(temp_dir + "fluidsynth.7z")
+		with open(f7z, "wb") as f:
+			f.write(urllib.request.urlopen(req).read())
+		import py7zr
+		with py7zr.SevenZipFile(f7z, mode="r") as z:
+			z.extractall(synth_dir)
 
 def get_sf2():
-	sf2 = binary_dir + "soundfont.sf2"
-	if not os.path.exists(sf2) or not os.path.getsize(sf2):
-		s7z = os.path.abspath(temp_dir + "soundfont.7z")
-		if not os.path.exists(s7z):
-			import urllib.request
-			req = urllib.request.Request("https://mizabot.xyz/u/iO-ouosmGJ_wB-xHIHx3H2wypUmn/soundfont.7z", headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"})
-			with open(s7z, "wb") as f:
-				f.write(urllib.request.urlopen(req).read())
-		import py7zr
-		with py7zr.SevenZipFile(s7z, mode='r') as z:
-			z.extractall(temp_dir)
-		import subprocess
-		sf2convert = os.path.abspath(base_path + "/fluidsynth/sf2convert")
-		sf3 = os.path.abspath(temp_dir + "soundfont.sf3")
-		subprocess.run([sf2convert, "-x", sf3, sf2])
+	with concurrent.futures.ThreadPoolExecutor(max_workers=1) as exc:
+		fut = exc.submit(ensure_synths)
+		if not os.path.exists(binary_dir):
+			os.mkdir(binary_dir)
+		sf2 = binary_dir + "soundfont.sf2"
+		if not os.path.exists(sf2) or not os.path.getsize(sf2):
+			s7z = os.path.abspath(temp_dir + "soundfont.7z")
+			if not os.path.exists(s7z):
+				import urllib.request
+				req = urllib.request.Request("https://mizabot.xyz/u/iO-ouosmGJ_wB-xHIHx3H2wypUmn/soundfont.7z", headers=http_headers)
+				with open(s7z, "wb") as f:
+					f.write(urllib.request.urlopen(req).read())
+			import py7zr
+			with py7zr.SevenZipFile(s7z, mode="r") as z:
+				z.extractall(temp_dir)
+			import subprocess
+			sf2convert = os.path.abspath(base_path + "/fluidsynth/sf2convert")
+			sf3 = os.path.abspath(temp_dir + "soundfont.sf3")
+			subprocess.run([sf2convert, "-x", sf3, sf2])
+		fut.result()
 	return sf2
 
 def get_ext(path) -> str:
@@ -943,8 +966,8 @@ def get_parser():
 	)
 	parser.add_argument("-V", '--version', action='version', version=f'%(prog)s {__version__}')
 	parser.add_argument("-i", "--input", nargs="+", help="Input file (.zip | .mid | .csv | .nbs | .org | *)", required=True)
-	parser.add_argument("-o", "--output", nargs="+", help="Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .org | .skysheet | .genshinsheet | *)", required=True)
-	parser.add_argument("-f", "--format", default=None, help="Output format (mid | csv | nbs | nbt | mcfunction | litematic | org | skysheet | genshinsheet | deltarune | *)")
+	parser.add_argument("-o", "--output", nargs="+", help="Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .schem | .schematic | .org | .skysheet | .genshinsheet | *)", required=True)
+	parser.add_argument("-f", "--format", default=None, help="Output format (mid | csv | nbs | nbt | mcfunction | litematic | .schem | .schematic | org | skysheet | genshinsheet | deltarune | *)")
 	parser.add_argument("-x", "--mixing", nargs="?", default="IL", help='Behaviour when importing multiple files. "I" to process individually, "L" to layer/stack, "C" to concatenate. If multiple digits are inputted, this will be interpreted as a hierarchy. For example, for a 3-deep nested zip folder where pairs of midis at the bottom layer should be layered, then groups of those layers should be concatenated, and there are multiple of these groups to process independently, input "ICL". Defaults to "IL"')
 	parser.add_argument("-v", "--volume", nargs="?", type=float, default=1, help="Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
@@ -954,6 +977,7 @@ def get_parser():
 	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
 	parser.add_argument("-mt", "--microtones", action=argparse.BooleanOptionalAction, default=None, help="Allows microtones/pitchbends. If disabled, all notes are clamped to integer semitones. For Minecraft outputs, defers affected notes to command blocks. Has no effect if --accidentals is FALSE. Defaults to FALSE for .nbt, .mcfunction, .litematic, .org, .skysheet and .genshinsheet outputs, TRUE otherwise")
 	parser.add_argument("-ac", "--accidentals", action=argparse.BooleanOptionalAction, default=None, help="Allows accidentals. If disabled, all notes are clamped to the closest key signature. Warning: Hyperchoron is currently only implemented to autodetect a single key signature per song. Defaults to FALSE for .skysheet and .genshinsheet outputs, TRUE otherwise")
+	parser.add_argument("-tc", "--tempo-changes", action=argparse.BooleanOptionalAction, default=None, help="Allows tempo changes. If disabled, all notes are moved to an approximate relative tick based on their real time as calculated with the tempo change, but without tempo changes in the output. CURRENTLY UNIMPLEMENTED; ALWAYS FALSE.")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be discarded. Defaults to TRUE")
 	parser.add_argument("-md", "--max-distance", nargs="?", type=int, default=42, help="For Minecraft outputs only: Restricts the maximum block distance the notes may be placed from the centre line of the structure, in increments of 3 (one module). Decreasing this value makes the output more compact, at the cost of note volume accuracy. Defaults to 42")
 	parser.add_argument("-mi", "--minecart-improvements", action=argparse.BooleanOptionalAction, default=False, help="For Minecraft outputs only: Assumes the server is running the [Minecart Improvements](https://minecraft.wiki/w/Minecart_Improvements) version(s). Less powered rails will be applied on the main track, to account for the increased deceleration. Currently only semi-functional; the rail section connecting the midway point may be too slow.")

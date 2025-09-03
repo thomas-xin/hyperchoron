@@ -6,8 +6,10 @@ import os
 import subprocess
 import numpy as np
 from .mappings import c1, nbs_raws
-from .util import base_path, temp_dir, ts_us, in_sample_rate, out_sample_rate, fluidsynth, orgexport, get_sf2, round_random
+from .util import base_path, temp_dir, ts_us, in_sample_rate, out_sample_rate, fluidsynth, orgexport, ensure_synths, get_sf2, round_random
 
+
+writer_sr = 32000
 
 bps = 2
 bpo = bps * 12
@@ -212,7 +214,7 @@ def load_raw(file):
 
 def ffmpeg_output(fo):
 	ext = fo.rsplit(".", 1)[-1]
-	extra = []
+	extra = ["-ar", str(out_sample_rate)]
 	match ext:
 		case "ogg" | "opus":
 			ba = "160k"
@@ -237,7 +239,7 @@ def render_midi(inputs, outputs, fmt="flac"):
 		intermediate = outputs
 	procs = []
 	for fi, fo in zip(inputs, intermediate):
-		args = [fluidsynth, "-g", "0.5" if convert else "1", "-F", fo, "-c", "64", "-o", "synth.polyphony=32767", "-r", str(out_sample_rate), "-n", sf2, fi]
+		args = [fluidsynth, "-g", "0.5" if convert else "1", "-F", fo, "-c", "64", "-o", "synth.polyphony=32767", "-r", str(writer_sr), "-n", sf2, fi]
 		proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)
 		procs.append(proc)
 	for proc in procs:
@@ -264,24 +266,24 @@ def render_nbs(inputs, outputs, fmt="flac"):
 	from audiotsm import phasevocoder
 	from audiotsm.io.array import ArrayReader, ArrayWriter
 	from librosa import load, resample
-	import pynbs
 	from soundfile import SoundFile
+	from .minecraft import segment_nbs
 	@functools.lru_cache(maxsize=192)
 	def load_audio(fn):
 		with zipfile.ZipFile(f"{base_path}minecraft_templates/Notes.zip", "r") as z:
 			with z.open(fn, "r") as f:
-				a = load(f, sr=out_sample_rate)[0]
+				a = load(f, sr=writer_sr)[0]
 		# Cut silence at end of audio to minimise later processing
 		last = len(a) - 1 - np.argmax(a[::-1] != 0)
 		a = a[:last]
 		a *= 0.5
 		return a
-	@functools.lru_cache(maxsize=768)
-	def pitch_audio(fn, p):
+	@functools.lru_cache(maxsize=1024)
+	def _pitch_audio(fn, p):
 		a = load_audio(f"{fn}.ogg")
 		speed = 1 / 2 ** (p / 12)
 		if -12 <= p <= 12:
-			a = resample(a, orig_sr=out_sample_rate, target_sr=round(out_sample_rate * speed), res_type="soxr_hq", fix=False)
+			a = resample(a, orig_sr=writer_sr, target_sr=round(writer_sr * speed), res_type="soxr_hq", fix=False)
 		elif p < 0:
 			p += 12
 			r = ArrayReader(a.reshape((1, len(a))))
@@ -289,66 +291,93 @@ def render_nbs(inputs, outputs, fmt="flac"):
 			tsm = phasevocoder(r.channels, speed=speed)
 			tsm.run(r, w)
 			a = w.data.ravel()
-			a = resample(a, orig_sr=out_sample_rate, target_sr=round(out_sample_rate * speed), res_type="soxr_hq", fix=False)
+			a = resample(a, orig_sr=writer_sr, target_sr=round(writer_sr * speed), res_type="soxr_hq", fix=False)
 		else:
-			a = resample(a, orig_sr=out_sample_rate, target_sr=round(out_sample_rate * speed), res_type="soxr_hq", fix=False)
+			a = resample(a, orig_sr=writer_sr, target_sr=round(writer_sr * speed), res_type="soxr_hq", fix=False)
 			p -= 12
 			r = ArrayReader(a.reshape((1, len(a))))
 			w = ArrayWriter(1)
 			tsm = phasevocoder(r.channels, speed=speed)
 			tsm.run(r, w)
 			a = w.data.ravel()
-		return a
-	@functools.lru_cache(maxsize=256)
-	def render_note_block(instrument, pitch, panning):
-		fn = nbs_raws[3 if instrument > 15 else instrument]
-		a = pitch_audio(fn, pitch / 100 - 33 - 12)
-		# This implementation is technically too "correct" compared to nbswave/Note Block Studio, but is kept as it is not particularly performance-intensive to apply
-		t = (panning / 100 + 1) * np.pi / 4
-		l, r = np.cos(t), np.sin(t)
-		a = np.stack([a * l, a * r], axis=1)
-		return a
+		return a.astype(np.float16)
+	@functools.lru_cache(maxsize=192)
+	def pitch_audio(fn, p):
+		return _pitch_audio(fn, p).astype(np.float32)
 	for fi, fo in zip(inputs, outputs):
-		nbs = pynbs.read(fi)
 		buf_seconds = 2
-		bufsize = buf_seconds * out_sample_rate
+		bufsize = buf_seconds * writer_sr
 		# We keep an additional 3 seconds of buffer space to account for sounds that last a while
-		buffer = np.zeros((bufsize + 3 * out_sample_rate, 2), dtype=np.float32)
-		def render_note(idx, rendered, velocity):
-			buffer[idx:idx + len(rendered)] += (rendered if velocity == 1 else rendered * velocity)
+		buffer = np.zeros((bufsize + 3 * writer_sr, 2), dtype=np.float32)
+		sides = [buffer[:, 0], buffer[:, 1]]
+		queue = [[], []]
 		# Use a reader and writer thread to minimise overhead of file IO + sound resampling
 		with concurrent.futures.ThreadPoolExecutor(max_workers=1) as wx:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=1) as rx:
-				with SoundFile(fo, "w", out_sample_rate, channels=2, format=fmt) as f:
-					pos = 0
+				def render_note(side, idx, rendered, vel=1):
+					sides[side][idx:idx + len(rendered)] += (rendered if vel == 1 else rendered * vel)
+				def render_note_block(side, idx, instrument, pitch, velocity, panning):
+					fn = nbs_raws[3 if instrument > 15 else instrument]
+					p = pitch / 100 - 33 - 12
+					if p < -60:
+						p = -60 + p % 12
+					elif p >= 72:
+						p = 60 + p % 12
+					a = pitch_audio(fn, p)
+					t = (panning / 100 + 1) * np.pi / 4
+					mult = velocity * (np.sin(t) if side else np.cos(t))
+					render_note(side, idx, a, mult)
+				def update_queue(side):
+					for (idx, instrument, pitch, velocity, panning) in queue[side]:
+						render_note_block(side, idx, instrument, pitch, velocity, panning)
+					queue[side].clear()
+				with SoundFile(fo, "w", writer_sr, channels=2, format=fmt) as f:
 					futs = []
-					for tick, chord in nbs:
-						while (tick - pos) / nbs.header.tempo >= buf_seconds:
+					for tempo, segment in segment_nbs(fi):
+						pos = segment[0][0]
+						for tick, chord in segment:
+							while (tick - pos) / tempo >= buf_seconds:
+								fut = rx.submit(update_queue, 0)
+								update_queue(1)
+								fut.result()
+								for fut in futs:
+									fut.result()
+								futs.clear()
+								fut = wx.submit(f.write, buffer[:bufsize].copy())
+								futs.clear()
+								futs.append(fut)
+								buffer[:-bufsize] = buffer[bufsize:]
+								buffer[-bufsize:] = 0
+								pos += buf_seconds * tempo
+							stats = {}
+							for note in chord:
+								if note.velocity == 0:
+									continue
+								pitch = note.key * 100 + note.pitch
+								tup = (note.instrument, pitch, note.panning)
+								stats[tup] = stats.get(tup, 0) + note.velocity / 100
+							for (instrument, pitch, panning), velocity in stats.items():
+								idx = round_random(writer_sr * (tick - pos) / tempo)
+								queue[0].append((idx, instrument, pitch, velocity, panning))
+								idx = round_random(writer_sr * (tick - pos) / tempo)
+								queue[1].append((idx, instrument, pitch, velocity, panning))
+						tick += 1
+						extra_buff = round_random((tick - pos) / tempo * writer_sr)
+						if extra_buff:
+							fut = rx.submit(update_queue, 0)
+							update_queue(1)
+							fut.result()
 							for fut in futs:
 								fut.result()
-							fut = wx.submit(f.write, buffer[:bufsize].copy())
 							futs.clear()
+							fut = wx.submit(f.write, buffer[:extra_buff].copy())
 							futs.append(fut)
-							buffer[:-bufsize] = buffer[bufsize:]
-							buffer[-bufsize:] = 0
-							pos += buf_seconds * nbs.header.tempo
-						stats = {}
-						for note in chord:
-							tup = (note.instrument, note.key, note.pitch, note.velocity, note.panning)
-							stats[tup] = stats.get(tup, 0) + 1
-						for (instrument, key, pitch, velocity, panning), count in stats.items():
-							idx = round_random(out_sample_rate * (tick - pos) / nbs.header.tempo)
-							rendered = render_note_block(instrument, key * 100 + pitch, panning)
-							fut = rx.submit(render_note, idx, rendered, velocity * count / 100)
-							futs.append(fut)
-					for fut in futs:
-						fut.result()
-					if np.any(buffer):
-						last = len(buffer) - 1 - np.argmax(buffer[::-1] != 0)
-						f.write(buffer[:last])
+							buffer[:-extra_buff] = buffer[extra_buff:]
+							buffer[-extra_buff:] = 0
 
 
 def render_org(inputs, outputs, fmt="wav"):
+	ensure_synths()
 	convert = fmt != "wav"
 	intermediate = [temp_dir + str(ts_us()) + str(i) + ".wav" for i, fo in enumerate(outputs)]
 	temps = [fo.rsplit(".", 1)[0] + ".org" for i, fo in enumerate(intermediate)]
@@ -358,7 +387,7 @@ def render_org(inputs, outputs, fmt="wav"):
 	cwd = orgexport.replace("\\", "/").rsplit("/", 1)[0]
 	procs = []
 	for fi, fo in zip(temps, intermediate):
-		args = [orgexport, fi, "48000", "0"]
+		args = [orgexport, fi, str(writer_sr), "0"]
 		proc = subprocess.Popen(args, cwd=cwd, stdin=subprocess.DEVNULL)
 		procs.append(proc)
 	for proc in procs:

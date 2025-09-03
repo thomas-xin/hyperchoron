@@ -30,7 +30,7 @@ hpc : util.save_hpc
 nbs : minecraft.save_nbs
 mid | midi | csv : midi.save_midi
 org : tracker.save_org
-nbt | mcfunction | litematic : minecraft.save_litematic
+nbt | mcfunction | litematic | schem | schematic : minecraft.save_litematic
 🗿 | moai : text.save_moai
 skysheet : text.save_skysheet
 genshinsheet : text.save_genshinsheet
@@ -104,7 +104,7 @@ def fix_args(ctx) -> ContextArgs:
 		if fo.endswith("/"):
 			pass
 		elif os.path.exists(fo) and os.path.isdir(fo):
-			fo = fo + "/"
+			ctx.output[i] = fo + "/"
 		elif "." not in fo:
 			ctx.output[i] = f"{fo}.{formats[i]}"
 
@@ -115,15 +115,15 @@ def fix_args(ctx) -> ContextArgs:
 	if ctx.get("speed") is None:
 		ctx.speed = 1
 	if ctx.get("resolution") is None:
-		ctx.resolution = 12 if ctx.format in ("🗿", "moai", "skysheet", "genshinsheet") else 20 if ctx.format in ("nbt", "mcfunction", "litematic") else 40
+		ctx.resolution = 12 if ctx.format in ("🗿", "moai", "skysheet", "genshinsheet") else 20 if ctx.format in ("nbt", "mcfunction", "litematic", "schem", "schematic") else 40
 	if ctx.get("strict_tempo") is None:
-		ctx.strict_tempo = ctx.format in ("nbt", "mcfunction", "litematic")
+		ctx.strict_tempo = ctx.format in ("nbt", "mcfunction", "litematic", "schem", "schematic")
 	if ctx.get("transpose") is None:
 		ctx.transpose = 0
 	if ctx.get("invert_key") is None:
 		ctx.invert_key = False
 	if ctx.get("microtones") is None:
-		ctx.microtones = ctx.format not in ("nbt", "mcfunction", "litematic", "org", "skysheet", "genshinsheet")
+		ctx.microtones = ctx.format not in ("nbt", "mcfunction", "litematic", "schem", "schematic", "org", "skysheet", "genshinsheet")
 	if ctx.get("accidentals") is None:
 		ctx.accidentals = ctx.format not in ("skysheet", "genshinsheet")
 	if not ctx.accidentals:
@@ -196,6 +196,8 @@ def process_level(paths, ctx, depth=0, executor=None) -> list:
 	raise NotImplementedError(mode)
 
 def convert_files(**kwargs) -> list:
+	if not os.path.exists(temp_dir):
+		os.mkdir(temp_dir)
 	ctx = ContextArgs()
 	ctx.__dict__.update(kwargs)
 	ctx = fix_args(ctx)
@@ -260,17 +262,21 @@ def convert_files(**kwargs) -> list:
 		results = process_level(inputs, ctx=ctx)
 		outputs = [save_file(results[0], output_files[0], ctx=ctx)]
 	elif len(inputs):
-		with concurrent.futures.ProcessPoolExecutor(max_workers=16) as executor:
-			results = process_level(inputs, ctx=ctx, executor=executor)
+		try:
+			thread_count = 16
+			executor = concurrent.futures.ProcessPoolExecutor(max_workers=thread_count)
 			futures = []
+			results = process_level(inputs, ctx=ctx, executor=executor)
 			if type(results) is list and len(results) == 1 and len(output_files) > 1:
-				midi_events = results[0]
-				for fo in output_files:
-					futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx))
-			else:
-				for midi_events, fo in zip(results, output_files):
-					futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx))
+				results *= len(output_files)
+			for midi_events, fo in zip(results, output_files):
+				futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx))
 			outputs = [fut.result() for fut in futures]
+		finally:
+			executor.shutdown(cancel_futures=True, wait=False)
+			import psutil
+			for child in psutil.Process().children(recursive=True):
+				child.terminate()
 	if archive_path:
 		outputs = [create_archive(ctx.output[0], archive_path)]
 	return outputs
@@ -283,7 +289,7 @@ def main():
 	t = time.time()
 	outputs = convert_files(**vars(args))
 	taken = time.time() - t
-	print(f"{len(outputs)} files rendered in {round_min(round(taken, 3))} second(s).")
+	print(f"{len(outputs)} file(s) rendered in {round_min(round(taken, 3))} second(s).")
 	clear_cache()
 
 def clear_cache():

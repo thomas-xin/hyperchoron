@@ -2,6 +2,7 @@ from collections import abc, deque, namedtuple
 import copy
 import functools
 from math import ceil, sqrt
+import os
 import litemapy
 from nbtlib.tag import Int, Double, String, List, Compound, Byte
 import numpy as np
@@ -18,7 +19,7 @@ from .mappings import (
 	instrument_codelist, default_instruments, fixed_instruments,
 	fs1,
 )
-from .util import round_min, log2lin, lin2log, base_path, transport_note_priority, event_types, NoteSegment, DEFAULT_NAME, DEFAULT_DESCRIPTION
+from .util import ts_us, temp_dir, round_min, log2lin, lin2log, base_path, transport_note_priority, event_types, NoteSegment, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 
 def nbt_from_dict(d):
@@ -557,7 +558,7 @@ def extract_bounds(schem):
 		schem.regions[f"Void {i}"] = r
 	return schem
 
-def crop_region(region, size):
+def crop_region(region, size, optimise=True):
 	"""
 	Crop a subregion from a Litemapy Region.
 
@@ -581,7 +582,8 @@ def crop_region(region, size):
 	new_region = litemapy.Region(x, y, z, width, height, length)
 	new_region._Region__blocks = new_blocks
 	new_region._Region__palette = region._Region__palette.copy()
-	new_region._optimize_palette()
+	if optimise:
+		new_region._optimize_palette()
 	return new_region
 
 def flip_region(region, axes=2):
@@ -603,6 +605,25 @@ def flip_region(region, axes=2):
 				z = Mz - z + mz
 			e.position = (x, y, z)
 	return region
+
+def shrink_wrap(region):
+	a = region._Region__blocks
+	mask = a != 0
+	idx = np.nonzero(mask)
+	x, y, z = idx[0].min().item(), idx[1].min().item(), idx[2].min().item()
+	new = crop_region(
+		region,
+		(
+			x, y, z,
+			(idx[0].max() - idx[0].min()).item() + 1, (idx[1].max() - idx[1].min()).item() + 1, (idx[2].max() - idx[2].min()).item() + 1,
+		),
+		optimise=False,
+	)
+	new._Region__x = x + region.x
+	new._Region__y = y + region.y
+	new._Region__z = z + region.z
+	return new
+
 
 flips = [
 	{"east": "west", "west": "east"},
@@ -688,7 +709,6 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	primary_width = 0
 	secondary_width = 0
 	yc = 14
-	master = litemapy.Region(0, 0, -3, 1, 1, 1)
 	schem = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Header.litematic")
 	header, = schem.regions.values()
 	header = move_region(header, -8, yc - 14, -3)
@@ -708,6 +728,9 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	skeleton3 = fill_region(skeleton3, air)
 	looping, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Looping.litematic").regions.values()
 	start = header.z + header.length - 2
+
+	end = half_segments * skeleton.length + 10
+	master = litemapy.Region(0, 0, -3, 1, 1, end)
 
 	# redstone_dot = litemapy.BlockState("minecraft:redstone_wire", east="none", north="none", west="none", south="none")
 	waxed_oxidized_copper_bulb = litemapy.BlockState("minecraft:waxed_oxidized_copper_bulb", lit="false", powered="false")
@@ -937,7 +960,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 		loops = {}
 		skeleton_counts = {}
 		dz = half_segments * skeleton.length if backwards else half_segments * skeleton.length + buffer
-		main = litemapy.Region(-1, 0, 0, 3, 31, dz)
+		main = litemapy.Region(-ctx.max_distance, 0, 0, ctx.max_distance * 2, 31, dz)
 		timer1 = tile_region(timer, (1, 1, half_segments - backwards))
 		timer1 = move_region(timer1, 0, yc - 10, 0)
 		main = paste_region(main, timer1)
@@ -989,7 +1012,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				delay = 0
 				z2 = z
 				for n in range(3):
-					if z2 >= skeleton.length and abs(x) >= 18 and skeleton_counts.get(z2 - skeleton.length, 0) <= 32:
+					if z2 >= skeleton.length and abs(x) >= 18 and skeleton_counts.get(z2 - skeleton.length, 0) < 48:
 						if x > 0:
 							x -= 12
 							delay += 16
@@ -1329,9 +1352,9 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					main[x + 2 - main.x, y - 2, z + 4 + offs] = slab
 					for zi in range(offs):
 						main[x + 2 - main.x, y - 1, z + 4 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
-						main[x + 2 - main.x, y - 2, z + 4 + zi] = bamboo_trapdoor
+						main[x + 2 - main.x, y - 2, z + 4 + zi] = slab
 					main[x + 2 - main.x, y - 1, z + 3] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
-					main[x + 2 - main.x, y - 2, z + 3] = bamboo_trapdoor
+					main[x + 2 - main.x, y - 2, z + 3] = slab
 					main[x + 2 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
 					main[x + 2 - main.x, y - 2, z + 2] = slab
 					main[x + 2 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="north")
@@ -1372,9 +1395,9 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					main[x - main.x, y - 2, z + 4 + offs] = slab
 					for zi in range(offs):
 						main[x - main.x, y - 1, z + 4 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
-						main[x - main.x, y - 2, z + 4 + zi] = bamboo_trapdoor
+						main[x - main.x, y - 2, z + 4 + zi] = slab
 					main[x - main.x, y - 1, z + 3] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
-					main[x - main.x, y - 2, z + 3] = bamboo_trapdoor
+					main[x - main.x, y - 2, z + 3] = slab
 					main[x - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
 					main[x - main.x, y - 2, z + 2] = slab
 					main[x - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="north")
@@ -1399,6 +1422,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 			track1._Region__z = 2 * skeleton.length
 		track1._Region__y = yc
 		main = paste_region(main, track1, ignore_src_air=True)
+		main = shrink_wrap(main)
 		if backwards:
 			secondary_width = main.max_x() + main.x
 			tile_width = primary_width + secondary_width
@@ -1516,66 +1540,72 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 		)
 	)
 	extremities = get_bounding(master)
-	# print(extremities)
+	print(extremities)
 	return schem, extremities, nc
+
+
+def segment_nbs(file):
+	import pynbs
+	nbs = pynbs.read(file)
+	tc_ids = {ins.id + nbs.header.default_instruments for ins in nbs.instruments if ins.name == "Tempo Changer" and ins.file == ""}
+	segment = [round_min(nbs.header.tempo), []]
+	for tick, chord in nbs:
+		tempos = {i: note for i, note in enumerate(chord) if note.instrument in tc_ids}
+		if tempos:
+			if segment[1]:
+				yield segment
+			tempo = round_min(tempos[max(tempos)].pitch / 15)
+			segment = [tempo, []]
+			chord = [note for i, note in enumerate(chord) if i not in tempos]
+		segment[1].append((tick, chord))
+	yield segment
 
 
 def load_nbs(file):
 	print("Importing NBS...")
-	import pynbs
-	# if not isinstance(file, (str, bytes)):
-	# 	path = str(hash(file))
-	# 	tmpl = path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	# 	fn = f"{temp_dir}{tmpl}.nbs"
-	# 	with open(fn, "wb") as f:
-	# 		f.write(file.read())
-	# 	file.close()
-	# 	file = fn
-	nbs = pynbs.read(file)
-	header = nbs.header
 	events = [
 		[0, 0, event_types.HEADER, 1, 9 + 1, 1, 0, 1],
-		[1, 0, event_types.TEMPO, 1000 * 1000 / header.tempo],
 	]
 	for i in range(len(midi_instrument_selection) - 1):
 		events.append([i + 2, 0, event_types.PROGRAM_C, i + 10, midi_instrument_selection[i]])
 	ticked = {}
-	for tick, chord in nbs:
-		for note in chord:
-			instrument_name = nbs.layers[note.layer].name.rsplit("_", 1)[0]
-			note_instrument = nbs_values.get(note.instrument, "snare")
-			if note_instrument in ("basedrum", "snare", "hat"):
-				match note_instrument:
-					case "basedrum":
-						pitch = 35
-					case "snare":
-						pitch = 38
-					case "hat":
-						pitch = 42
-					case _:
-						raise NotImplementedError(pitch)
+	for tempo, segment in segment_nbs(file):
+		events.append([1, segment[0][0], event_types.TEMPO, 1000 * 1000 / tempo])
+		for tick, chord in segment:
+			for note in chord:
+				# instrument_name = nbs.layers[note.layer].name.rsplit("_", 1)[0]
+				note_instrument = nbs_values.get(note.instrument, "snare")
+				if note_instrument in ("basedrum", "snare", "hat"):
+					match note_instrument:
+						case "basedrum":
+							pitch = 35
+						case "snare":
+							pitch = 38
+						case "hat":
+							pitch = 42
+						case _:
+							raise NotImplementedError(pitch)
+					volume = round(lin2log(note.velocity * 1.28))
+					note_event = [128, tick, event_types.NOTE_ON_C, 9, pitch, volume, 1, 1, note.panning / 100, tick & 255, 1, note.instrument]
+					events.append(note_event)
+					continue
+				ins = instrument_codelist.index(default_instruments[note_instrument])
+				# try:
+				# 	ins = instrument_codelist.index(instrument_name)
+				# except ValueError:
+				# 	pass
+				pitch = note.key + round_min(note.pitch / 100) - 33 + fs1 + pitches[note_instrument]
+				bucket = (note.layer, pitch)
 				volume = round(lin2log(note.velocity * 1.28))
-				note_event = [128, tick, event_types.NOTE_ON_C, 9, pitch, volume, 1, 1, note.panning / 100, tick & 255, 1, note.instrument]
+				if note.panning & 1:
+					if bucket in ticked:
+						prev = ticked[bucket]
+						if prev[5] == volume and tick - prev[1] < tempo / 2:
+							prev[7] = max(prev[7], 1 + tick - prev[1])
+							continue
+				note_event = [ins + 2, tick, event_types.NOTE_ON_C, ins + 10, pitch, volume, 1, 1, note.panning / 100, tick & 255, 1, note.instrument]
 				events.append(note_event)
-				continue
-			default = instrument_codelist.index(default_instruments[note_instrument])
-			try:
-				ins = instrument_codelist.index(instrument_name)
-			except ValueError:
-				ins = default
-			pitch = note.key + round_min(note.pitch / 100) - 33 + fs1 + pitches[note_instrument]
-			bucket = (note.layer, pitch)
-			volume = round(lin2log(note.velocity * 1.28))
-			if note.panning & 1:
-				if bucket in ticked:
-					prev = ticked[bucket]
-					if prev[5] == volume and tick - prev[1] < header.tempo / 2:
-						prev[7] = max(prev[7], 1 + tick - prev[1])
-						continue
-			note_event = [ins + 2, tick, event_types.NOTE_ON_C, ins + 10, pitch, volume, 1, 1, note.panning / 100, tick & 255, 1, note.instrument]
-			events.append(note_event)
-			ticked[bucket] = note_event
-	# events.sort(key=lambda e: e[1])
+				ticked[bucket] = note_event
 	return events
 
 def save_nbs(transport, output, ctx, **void):
@@ -1679,47 +1709,69 @@ def save_nbs(transport, output, ctx, **void):
 	return len(nbs.notes)
 
 def save_litematic(transport, output, ctx, **void):
-	is_nbt = output.casefold().endswith(".nbt")
-	if is_nbt:
-		print("Exporting NBT...")
-	else:
-		is_mcfunction = output.casefold().endswith(".mcfunction")
-		if is_mcfunction:
+	fmt = output.casefold().rsplit(".", 1)[-1]
+	match fmt:
+		case "nbt":
+			print("Exporting NBT...")
+		case "mcfunction":
 			print("Exporting MCFunction...")
-		else:
+		case "litematic":
 			print("Exporting Litematic...")
+		case "schem" | "schematic":
+			print("Exporting Schematic...")
+		case _:
+			raise NotImplementedError(fmt)
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 	schem, ext, nc = build_minecraft(transport, ctx=ctx, name=ctx.input[0].replace("\\", "/").rsplit("/", 1)[-1])
-	if is_nbt:
-		reg = get_region(schem)
-		nbt = reg.to_structure_nbt(mc_version=4325)
-		nbt.filename = out_name
-		with open(output, "wb") as f:
-			nbt.save(f)
-	elif is_mcfunction:
-		zrange = 16 * 16
-		lines = ["gamerule maxCommandChainLength 2147483647\n"]
-		lines.extend(f"forceload add ~{ext.mx} ~{z} ~{ext.Mx} ~{z + zrange}\n" for z in range(ext.mz, ext.Mz + zrange - 1, zrange))
-		lines.extend((
-			"gamerule commandModificationBlockLimit 2147483647\n",
-			f"fill ~{ext.mx} ~{ext.my} ~{ext.mz} ~{ext.Mx} ~{ext.My} ~{ext.Mz} air strict\n",
-		))
-		reg = get_region(schem)
-		blocks = reg._Region__blocks
-		mask = blocks != 0
-		for z in reg.range_z():
-			for y in reg.range_y():
-				for x in reg.range_x():
-					pos = (x, y, z)
-					if mask[pos] != 0:
-						block = str(reg[pos]).removeprefix("minecraft:")
-						if block not in ("end_rod[facing=up]", "wall_torch[facing=west]", "wall_torch[facing=east]", "sea_lantern"):
-							block += " strict"
-						lines.append(f"setblock ~{x + reg.x} ~{y + reg.y} ~{z + reg.z} {block}\n")
-		lines.append("forceload remove all")
-		with open(output, "w") as f:
-			f.writelines(lines)
-	else:
-		schem.name = out_name
-		schem.save(output)
+	match fmt:
+		case "nbt":
+			reg = get_region(schem)
+			nbt = reg.to_structure_nbt(mc_version=4325)
+			nbt.filename = out_name
+			with open(output, "wb") as f:
+				nbt.save(f)
+		case "mcfunction":
+			zrange = 16 * 16
+			lines = ["gamerule maxCommandChainLength 2147483647\n"]
+			lines.extend(f"forceload add ~{ext.mx} ~{z} ~{ext.Mx} ~{z + zrange}\n" for z in range(ext.mz, ext.Mz + zrange - 1, zrange))
+			lines.extend((
+				"gamerule commandModificationBlockLimit 2147483647\n",
+				f"fill ~{ext.mx} ~{ext.my} ~{ext.mz} ~{ext.Mx} ~{ext.My} ~{ext.Mz} air strict\n",
+			))
+			reg = get_region(schem)
+			blocks = reg._Region__blocks
+			mask = blocks != 0
+			for z in reg.range_z():
+				for y in reg.range_y():
+					for x in reg.range_x():
+						pos = (x, y, z)
+						if mask[pos] != 0:
+							block = str(reg[pos]).removeprefix("minecraft:")
+							if block not in ("end_rod[facing=up]", "wall_torch[facing=west]", "wall_torch[facing=east]", "sea_lantern"):
+								block += " strict"
+							lines.append(f"setblock ~{x + reg.x} ~{y + reg.y} ~{z + reg.z} {block}\n")
+			lines.append("forceload remove all")
+			with open(output, "w") as f:
+				f.writelines(lines)
+		case "schem" | "schematic":
+			import mcschematic
+			out = mcschematic.MCSchematic()
+			reg = get_region(schem)
+			blocks = reg._Region__blocks
+			mask = blocks != 0
+			for z in reg.range_z():
+				for y in reg.range_y():
+					for x in reg.range_x():
+						pos = (x, y, z)
+						if mask[pos] != 0:
+							block = str(reg[pos]).removeprefix("minecraft:")
+							out.setBlock((x + reg.x, y + reg.y, z + reg.z), block)
+			folder = temp_dir + str(ts_us())
+			os.mkdir(folder)
+			out.save(folder, schemName=out_name, version=mcschematic.Version.JE_1_21)
+			assert len(files := os.listdir(folder)) == 1 and os.path.getsize(file := folder + "/" + files[0])
+			os.replace(file, output)
+		case _:
+			schem.name = out_name
+			schem.save(output)
 	return nc
