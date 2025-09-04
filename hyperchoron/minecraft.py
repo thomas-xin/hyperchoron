@@ -15,7 +15,7 @@ else:
 	warnings.filterwarnings("ignore", category=tqdm.TqdmWarning)
 from .mappings import (
 	material_map, percussion_mats, pitches, falling_blocks, non_note_blocks,
-	instrument_names, nbs_names, nbs_values, midi_instrument_selection,
+	instrument_names, nbs_names, nbs_values, instrument_values, midi_instrument_selection,
 	instrument_codelist, default_instruments, fixed_instruments,
 	fs1,
 )
@@ -51,6 +51,14 @@ black_carpet = litemapy.BlockState("minecraft:black_carpet")
 
 @functools.lru_cache(maxsize=256)
 def get_note_mat(note, odd=False):
+	if note.modality == 1 and note.instrument_class != -1:
+		nbi = note.instrument_id
+		if nbi >= 16:
+			return "PLACEHOLDER", 0
+		instrument = nbs_values[nbi]
+		pitch = note.pitch - pitches[instrument] - fs1
+		if 0 <= pitch <= 24:
+			return instrument_values[instrument], pitch
 	material = material_map[note.instrument_class]
 	pitch = note.pitch
 	if not material:
@@ -738,13 +746,13 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	scaffolding = litemapy.BlockState("minecraft:scaffolding", distance="0")
 	bamboo_trapdoor = litemapy.BlockState("minecraft:bamboo_trapdoor", facing="north", half="top")
 
-	def get_skeleton(x, y, z):
+	def get_skeleton(x, y, z, delta=False):
 		nonlocal main
 		try:
 			return skeletons[x, y, z]
 		except KeyError:
 			pass
-		if abs(x) < 15 or edge:
+		if not delta and abs(x) < 15 or edge:
 			target = skeleton if x >= 0 else skeletonf
 		else:
 			target = skeleton2 if x >= 0 else skeletonf2
@@ -1031,7 +1039,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				try:
 					ordering = (1, 0, 2) if x > 0 else (1, 2, 0)
 					while True:
-						taken = get_skeleton(x, y, z2)
+						taken = get_skeleton(x, y, z2, bool(delay))
 						if delay == 0 or x and (not taken or taken.get(None) == delay):
 							if delay:
 								taken[None] = delay

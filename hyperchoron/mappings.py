@@ -83,6 +83,7 @@ instrument_names = dict(
 	bamboo_fence_gate="fence_gate",
 	dropper="dispenser",
 )
+instrument_values = {v: k for k, v in instrument_names.items()}
 nbs_names = {k: i for i, k in enumerate([
 	"harp",
 	"bass",
