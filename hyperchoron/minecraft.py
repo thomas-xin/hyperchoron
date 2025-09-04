@@ -614,9 +614,17 @@ def flip_region(region, axes=2):
 			e.position = (x, y, z)
 	return region
 
-def min_clearance_x(reg1, reg2, axis=0, clearance=1):
+def min_clearance_x(reg1, reg2, axis=0, clearance=1, y_offset=0, z_offset=0):
 	A = reg1._Region__blocks
 	B = reg2._Region__blocks
+	if y_offset > 0:
+		A = A[:, 1:, :]
+	elif y_offset < 0:
+		B = B[:, 1:, :]
+	if z_offset > 0:
+		A = A[:, :, 1:]
+	elif z_offset < 0:
+		B = B[:, :, 1:]
 	Y, Z = A.shape[1:]
 	min_shift = 0
 	for y in range(Y):
@@ -659,13 +667,19 @@ def flip_palette(palette, axis=2):
 	for i, block in enumerate(palette):
 		properties = {}
 		for k, v in block._BlockState__properties.items():
-			properties[k] = v
 			for x, y in flip.items():
+				if k == x:
+					k = y
+					break
+				elif k == y:
+					k = x
+					break
 				if x in v:
 					if y in v:
 						break
-					properties[k] = v.replace(x, y)
+					v = v.replace(x, y)
 					break
+			properties[k] = v
 		palette[i] = litemapy.BlockState(block.id, **properties)
 	return palette
 
@@ -727,9 +741,6 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	total_duration = len(transport)
 	total_segments = ceil(total_duration / ticks_per_segment)
 	half_segments = ceil(total_segments / 2)
-	# attenuation_distance_limit = max(3, int(ctx.max_distance / 3) * 3)
-	# tile_width = attenuation_distance_limit * 2 + 3
-	first_half = None
 	yc = 14
 	schem = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Header.litematic")
 	header, = schem.regions.values()
@@ -751,8 +762,9 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	looping, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Looping.litematic").regions.values()
 	start = header.z + header.length - 2
 
-	end = half_segments * skeleton.length + 10
+	end = half_segments * skeleton.length + 9
 	master = litemapy.Region(0, 0, -3, 1, 1, end)
+	first_half = None
 
 	# redstone_dot = litemapy.BlockState("minecraft:redstone_wire", east="none", north="none", west="none", south="none")
 	waxed_oxidized_copper_bulb = litemapy.BlockState("minecraft:waxed_oxidized_copper_bulb", lit="false", powered="false")
@@ -1016,6 +1028,8 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				if panning == 0:
 					panning = 1 if note_hash & 1 else -1
 				base, pitch = get_note_mat(note, odd=tick & 1)
+				if base == "PLACEHOLDER":
+					return
 				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
 				x = round(max(0, 1 - log2lin(volume * 1.28)) * (attenuation_multiplier / 3 - 1)) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
@@ -1116,6 +1130,8 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				note = NoteSegment(2, 0, midi_instrument_selection[ins], ins, pitch, velocity, panning, 0)
 				volume = velocity * 127
 				base, pitch = get_note_mat(note, odd=half)
+				if base == "PLACEHOLDER":
+					return
 				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
 				y = yc - 14 if half else yc + 2
 				swapped = False
@@ -1182,7 +1198,6 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 						target = litemapy.BlockState(f"minecraft:{block}", **{k: str(v) for k, v in kwargs[0].items()})
 					else:
 						target = static_blocks.get(block) or static_blocks.setdefault(block, litemapy.BlockState(f"minecraft:{block}"))
-					# for z2 in range(2):
 					coords2 = (coords[0] + x - main.x, coords[1] - main.y + 1, coords[2] + z - main.z + 4)
 					main = setblock(main, coords2, target, tile_entity=tile_entity)
 
@@ -1447,11 +1462,12 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 		main = shrink_wrap(main)
 		if backwards:
 			main = flip_region(main)
-			tile_width = min_clearance_x(first_half, main)
+			tile_width = min_clearance_x(first_half, main, z_offset=1)
 			main._Region__x -= tile_width
+			main._Region__z = start + 1
 		else:
 			first_half = main
-		main._Region__z = start + backwards
+			main._Region__z = start
 		master = paste_region(master, main, ignore_src_air=True, ignore_dst_non_air=True)
 	end = half_segments * skeleton.length + 4
 
