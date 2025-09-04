@@ -614,6 +614,21 @@ def flip_region(region, axes=2):
 			e.position = (x, y, z)
 	return region
 
+def min_clearance_x(reg1, reg2, axis=0, clearance=1):
+	A = reg1._Region__blocks
+	B = reg2._Region__blocks
+	Y, Z = A.shape[1:]
+	min_shift = 0
+	for y in range(Y):
+		for z in range(Z):
+			xs_A = np.where(A[:, y, z])[0]
+			xs_B = np.where(B[:, y, z])[0]
+			if xs_A.size > 0 and xs_B.size > 0:
+				# required shift so B is at least clearance away from A
+				shift = max(xs_A) - min(xs_B) + clearance + 1
+				min_shift = max(min_shift, shift)
+	return min_shift if isinstance(min_shift, int) else min_shift.item()
+
 def shrink_wrap(region):
 	a = region._Region__blocks
 	mask = a != 0
@@ -712,10 +727,9 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	total_duration = len(transport)
 	total_segments = ceil(total_duration / ticks_per_segment)
 	half_segments = ceil(total_segments / 2)
-	attenuation_distance_limit = max(3, int(ctx.max_distance / 3) * 3)
-	tile_width = attenuation_distance_limit * 2 + 3
-	primary_width = 0
-	secondary_width = 0
+	# attenuation_distance_limit = max(3, int(ctx.max_distance / 3) * 3)
+	# tile_width = attenuation_distance_limit * 2 + 3
+	first_half = None
 	yc = 14
 	schem = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Header.litematic")
 	header, = schem.regions.values()
@@ -1432,12 +1446,11 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 		main = paste_region(main, track1, ignore_src_air=True)
 		main = shrink_wrap(main)
 		if backwards:
-			secondary_width = main.max_x() + main.x
-			tile_width = primary_width + secondary_width
 			main = flip_region(main)
+			tile_width = min_clearance_x(first_half, main)
 			main._Region__x -= tile_width
 		else:
-			primary_width = main.min_x() - main.x + 1
+			first_half = main
 		main._Region__z = start + backwards
 		master = paste_region(master, main, ignore_src_air=True, ignore_dst_non_air=True)
 	end = half_segments * skeleton.length + 4
