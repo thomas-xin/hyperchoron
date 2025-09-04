@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hyperchoron"
 readme = "README.md"
-version = "1.1.3"
+version = "1.1.4"
 authors = [
 	{name = "Thomas Xin", email = "thomasxin@gmail.com"},
 ]
@@ -20,10 +20,12 @@ dependencies = [
 	"litemapy>=0.11.0b0",
 	"mcschematic>=11.4.3",
 	"nbtlib>=2.0.4",
+	"numpy>=2.2.6",
 	"orjson>=3.11.2",
 	"py_midicsv>=4.1.2",
 	"py7zr>=1.0.0",
 	"pynbs>=1.1.0",
+	"scipy>=1.16.1",
 	"tqdm>=4.67.1",
 ]
 classifiers = [

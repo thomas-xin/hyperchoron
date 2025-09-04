@@ -225,7 +225,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 	step_ms = orig_step_ms
 	modality, midi_events, note_lengths, max_vol, last_timestamp = preprocess(midi_events)
 	speed_ratio = real_ms_per_clock / scale / _orig_ms_per_clock
-	wait = orig_step_ms / speed_ratio
+	wait = round_min(orig_step_ms / speed_ratio)
 	print("Tick delay:", wait)
 	played_notes = Transport(tick_delay=fractions.Fraction(wait) / 1000)
 	instrument_ids = {}

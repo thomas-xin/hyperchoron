@@ -495,7 +495,11 @@ class NoteSegment:
 	timing: int
 
 	def __hash__(self):
-		return sum(round(getattr(self, k) * 7 ** i) for i, k in enumerate(reversed(self.__slots__)))
+		n = 0
+		for k in reversed(self.__slots__):
+			n += getattr(self, k)
+			n *= 7
+		return round(n)
 
 	def __lt__(self, other):
 		return (self.pitch, self.velocity, abs(self.panning)) < (other.pitch, other.velocity, abs(other.panning))

@@ -614,26 +614,35 @@ def flip_region(region, axes=2):
 			e.position = (x, y, z)
 	return region
 
-def min_clearance_x(reg1, reg2, axis=0, clearance=1, y_offset=0, z_offset=0):
+def min_clearance_x(reg1, reg2, clearance=1, y_offset=0, z_offset=0):
 	A = reg1._Region__blocks
 	B = reg2._Region__blocks
 	if y_offset > 0:
-		A = A[:, 1:, :]
+		A = A[:, z_offset:, :]
 	elif y_offset < 0:
-		B = B[:, 1:, :]
+		B = B[:, -z_offset:, :]
 	if z_offset > 0:
-		A = A[:, :, 1:]
+		A = A[:, :, z_offset:]
 	elif z_offset < 0:
-		B = B[:, :, 1:]
-	Y, Z = A.shape[1:]
+		B = B[:, :, -z_offset:]
+	B = np.pad(
+		np.asanyarray(B, dtype=bool),
+		pad_width=((1, 0), (0, 0), (0, 0)),
+		mode="constant",
+		constant_values=False,
+	)
+	from scipy.ndimage import binary_dilation
+	B = binary_dilation(B, iterations=clearance)
+	Y, Z = np.minimum(A.shape[1:], B.shape[1:])
 	min_shift = 0
-	for y in range(Y):
-		for z in range(Z):
+	for z in range(Z):
+		for y in range(Y):
 			xs_A = np.where(A[:, y, z])[0]
 			xs_B = np.where(B[:, y, z])[0]
 			if xs_A.size > 0 and xs_B.size > 0:
-				# required shift so B is at least clearance away from A
-				shift = max(xs_A) - min(xs_B) + clearance + 1
+				mA = np.max(xs_A)
+				mB = np.min(xs_B)
+				shift = mA - mB + 1 + 1
 				min_shift = max(min_shift, shift)
 	return min_shift if isinstance(min_shift, int) else min_shift.item()
 
@@ -1041,25 +1050,26 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					if x >= primary_width / 2:
 						x = -x
 					x = round(x / 3 + min(primary_width / 2 / 3, ((1 - segment) * 32 + (32 - tick)) / 2 / 3)) * 3
-				if x > attenuation_distance_limit - 3:
-					x = attenuation_distance_limit - 3
-				if x < -attenuation_distance_limit + 3:
-					x = -attenuation_distance_limit + 3
 				delay = 0
 				z2 = z
-				for n in range(3):
-					if z2 >= skeleton.length and abs(x) >= 18 and skeleton_counts.get(z2 - skeleton.length, 0) < 48:
-						if x > 0:
-							x -= 12
-							delay += 16
-							z2 -= skeleton.length
+				if abs(x) >= 18:
+					for n in range(3):
+						if z2 >= skeleton.length and abs(x) >= 15 and skeleton_counts.get(z2 - skeleton.length, 0) < (48 - n * 16):
+							if x > 0:
+								x -= 12
+								delay += 16
+								z2 -= skeleton.length
+							else:
+								x += 12
+								delay += 16
+								z2 -= skeleton.length
 						else:
-							x += 12
-							delay += 16
-							z2 -= skeleton.length
-					else:
-						break
-				if delay == 32 and abs(x) > 18:
+							break
+				if x > attenuation_distance_limit - 3:
+					x = attenuation_distance_limit - 3
+				elif x < -attenuation_distance_limit + 3:
+					x = -attenuation_distance_limit + 3
+				elif delay == 32 and abs(x) > 18:
 					x = -18 if x < 0 else 18
 				y = (not tick & 1) * 16 + yc - 8
 				swapped = False
@@ -1153,7 +1163,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					x = round(x / 3 + min(primary_width / 2 / 3, ((1 - segment) * 32 + (32 - tick)) / 2 / 3)) * 3
 				if x > attenuation_distance_limit - 3:
 					x = attenuation_distance_limit - 3
-				if x < -attenuation_distance_limit + 3:
+				elif x < -attenuation_distance_limit + 3:
 					x = -attenuation_distance_limit + 3
 				if x == 0 and not half:
 					x += 3 if panning > 0 else -3
@@ -1299,7 +1309,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 							thresh = mx + 8
 							offset = x - thresh
 							phase = offset % 9 if x <= -9 or offset < 9 else -1
-							if extra_n and x == mx:
+							if extra_n and (x == mx or x == 0):
 								phase = -1
 							if phase == 1 or x == 0:
 								main[x - main.x, y - 2, z] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="west")
@@ -1329,7 +1339,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 							thresh = Mx - 6
 							offset = thresh - x
 							phase = offset % 9 if x >= 11 or offset < 9 else -1
-							if extra_n and x == Mx + 2:
+							if extra_p and (x == Mx + 2 or x == 2):
 								phase = -1
 							if phase == 1 or x == 2:
 								main[x - main.x, y - 2, z] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="east")
@@ -1462,12 +1472,12 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 		main = shrink_wrap(main)
 		if backwards:
 			main = flip_region(main)
-			tile_width = min_clearance_x(first_half, main, z_offset=1)
-			main._Region__x -= tile_width
 			main._Region__z = start + 1
+			tile_width = min_clearance_x(main, first_half, z_offset=-1) + main.x - first_half.x
+			main._Region__x -= tile_width
 		else:
-			first_half = main
 			main._Region__z = start
+			first_half = main
 		master = paste_region(master, main, ignore_src_air=True, ignore_dst_non_air=True)
 	end = half_segments * skeleton.length + 4
 
