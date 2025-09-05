@@ -259,7 +259,7 @@ def load_org(file):
 				e.panning = read(offsets + j, 1)
 			offsets += len(ins.events)
 	events = [
-		[0, 0, event_types.HEADER, 1, len(instruments) + 1, 1, 0, 2],
+		[0, 0, event_types.HEADER, 1, len(instruments) + 1, 1, 0, 16],
 		[1, 0, event_types.TEMPO, wait * 1000],
 	]
 	for i, ins in enumerate(instruments):

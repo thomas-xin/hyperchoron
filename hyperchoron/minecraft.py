@@ -771,7 +771,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	looping, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Looping.litematic").regions.values()
 	start = header.z + header.length - 2
 
-	end = half_segments * skeleton.length + 9
+	end = half_segments * skeleton.length + 10
 	master = litemapy.Region(0, 0, -3, 1, 1, end)
 	first_half = None
 
@@ -845,7 +845,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					note,
 					pos,
 					None,
-					odd=tick & 1,
+					odd=tick & note.timing & 1,
 					ctx=ctx,
 				)
 				for coords, block, *kwargs in blocks:
@@ -1036,7 +1036,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					volume *= 0.9
 				if panning == 0:
 					panning = 1 if note_hash & 1 else -1
-				base, pitch = get_note_mat(note, odd=tick & 1)
+				base, pitch = get_note_mat(note, odd=tick & note.timing & 1)
 				if base == "PLACEHOLDER":
 					return
 				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
@@ -1105,7 +1105,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					note,
 					pos,
 					None,
-					odd=tick & 1,
+					odd=tick & note.timing & 1,
 					ctx=ctx,
 				)
 				for coords, block, *kwargs in blocks:
@@ -1131,7 +1131,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					no_replace = ("minecraft:observer", "minecraft:repeater", "minecraft:wall_torch") if block == "tripwire" else ()
 					main = setblock(main, coords, target, tile_entity=tile_entity, no_replace=no_replace)
 
-			def add_recurring(half, ins, pitch, velocity, panning):
+			def add_recurring(half, ins, pitch, velocity, panning, offset=0):
 				nonlocal main, nc
 				attenuation_distance_limit = max(3, int(min(18, ctx.max_distance) / 3) * 3)
 				note_hash = ins ^ round(pitch) // 36
@@ -1139,7 +1139,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					panning = 1 if note_hash & 1 else -1
 				note = NoteSegment(2, 0, midi_instrument_selection[ins], ins, pitch, velocity, panning, 0)
 				volume = velocity * 127
-				base, pitch = get_note_mat(note, odd=half)
+				base, pitch = get_note_mat(note, odd=half & offset)
 				if base == "PLACEHOLDER":
 					return
 				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
@@ -1276,7 +1276,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 			if any(held_notes):
 				for half, held in enumerate(held_notes):
 					for k, v in tuple(held.items()):
-						add_recurring(half, *k, *v[1:3])
+						add_recurring(half, *k, *v[1:3], tick // 3 & 1)
 
 		for z in range(0, half_segments * skeleton.length, skeleton.length):
 			# Connect all modules in each segment
@@ -1668,7 +1668,7 @@ def save_nbs(transport, output, ctx, **void):
 	nbs.header.song_author=DEFAULT_NAME
 	nbs.header.description=DEFAULT_DESCRIPTION
 	layer_poly = {}
-	for i, beat in enumerate(transport):
+	for tick, beat in enumerate(transport):
 		current_poly = {}
 		beat.sort(key=lambda note: (note.priority, note.pitch), reverse=True)
 		for note in beat:
@@ -1681,7 +1681,7 @@ def save_nbs(transport, output, ctx, **void):
 				instrument = nbs_values[nbi]
 				pitch = note.pitch - pitches[instrument] - fs1
 			else:
-				base, pitch = get_note_mat(note, odd=i & 1)
+				base, pitch = get_note_mat(note, odd=tick & note.timing & 1)
 				if base == "PLACEHOLDER":
 					continue
 				instrument = instrument_names[base]
@@ -1708,11 +1708,11 @@ def save_nbs(transport, output, ctx, **void):
 				volume *= min(1, 0.9 ** (tempo / 20))
 			if volume != 100:
 				kwargs["velocity"] = round(log2lin(volume / 100) * 100)
-			panning = int(note.panning * 49) * 2 + (0 if note.priority > 0 else 1 if i & 1 else -1)
+			panning = int(note.panning * 49) * 2 + (0 if note.priority > 0 else 1 if tick & 1 else -1)
 			if panning != 0:
 				kwargs["panning"] = panning
 			rendered = pynbs.Note(
-				tick=i,
+				tick=tick,
 				layer=ins,
 				key=raw_key + 33,
 				instrument=nbi,

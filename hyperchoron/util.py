@@ -25,9 +25,6 @@ base_path = __file__.replace("\\", "/").rsplit("/", 1)[0] + "/"
 temp_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/temp/"
 binary_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/binaries/"
 csv_reader = type(csv.reader([]))
-http_headers = {
-	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
-}
 
 if not hasattr(time, "time_ns"):
 	time.time_ns = lambda: int(time.time() * 1e9)
@@ -41,7 +38,11 @@ def ts_us():
 
 synth_dir = os.path.abspath(binary_dir + "fluidsynth") + "/"
 fluidsynth = synth_dir + "fluidsynth"
-orgexport = synth_dir + "orgexport202"
+orgexport = synth_dir + "orgexport"
+
+http_headers = {
+	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+}
 
 def ensure_synths():
 	if not os.path.exists(binary_dir):
@@ -52,10 +53,11 @@ def ensure_synths():
 		if os.name != "nt":
 			raise NotImplementedError("No current synthesizer has been assigned for this platform. Please open an issue on the GitHub repo if you would like this added!")
 		import urllib.request
-		req = urllib.request.Request("https://mizabot.xyz/u/3tCcoP9QGJ_wH43x-H33BAGwLQE1/fluidsynth.7z", headers=http_headers)
+		req = urllib.request.Request("https://mizabot.xyz/u/ntbXvoMpGJ_wH-HxOB3H3A2272gz/fluidsynth.7z", headers=http_headers)
 		f7z = os.path.abspath(temp_dir + "fluidsynth.7z")
+		import ssl
 		with open(f7z, "wb") as f:
-			f.write(urllib.request.urlopen(req).read())
+			f.write(urllib.request.urlopen(req, context=ssl._create_unverified_context()).read())
 		import py7zr
 		with py7zr.SevenZipFile(f7z, mode="r") as z:
 			z.extractall(synth_dir)
@@ -68,16 +70,16 @@ def get_sf2():
 		sf2 = binary_dir + "soundfont.sf2"
 		if not os.path.exists(sf2) or not os.path.getsize(sf2):
 			s7z = os.path.abspath(temp_dir + "soundfont.7z")
-			if not os.path.exists(s7z):
-				import urllib.request
-				req = urllib.request.Request("https://mizabot.xyz/u/iO-ouosmGJ_wB-xHIHx3H2wypUmn/soundfont.7z", headers=http_headers)
-				with open(s7z, "wb") as f:
-					f.write(urllib.request.urlopen(req).read())
+			import urllib.request
+			req = urllib.request.Request("https://mizabot.xyz/u/iO-ouosmGJ_wB-xHIHx3H2wypUmn/soundfont.7z", headers=http_headers)
+			import ssl
+			with open(s7z, "wb") as f:
+				f.write(urllib.request.urlopen(req, context=ssl._create_unverified_context()).read())
 			import py7zr
 			with py7zr.SevenZipFile(s7z, mode="r") as z:
 				z.extractall(temp_dir)
 			import subprocess
-			sf2convert = os.path.abspath(base_path + "/fluidsynth/sf2convert")
+			sf2convert = os.path.abspath(synth_dir + "sf2convert")
 			sf3 = os.path.abspath(temp_dir + "soundfont.sf3")
 			subprocess.run([sf2convert, "-x", sf3, sf2])
 		fut.result()
@@ -278,15 +280,12 @@ def approximate_gcd(arr, min_value=8):
 	divisors = set()
 	for x in np.unique(np.abs(non_zero)):
 		# Find all divisors of x
-		for i in range(1, int(isqrt(x)) + 1):
+		for i in range(1, int(min(isqrt(x), min_value * 4)) + 1):
 			if x in divisors:
 				continue
 			if x % i == 0:
 				if i >= min_value:
 					divisors.add(i)
-				counterpart = x // i
-				if counterpart >= min_value:
-					divisors.add(counterpart)
 
 	# If there are no divisors >= min_value, return the GCD of all elements
 	if not divisors:
@@ -300,7 +299,7 @@ def approximate_gcd(arr, min_value=8):
 
 	# Find the divisor(s) with the maximum count of divisible elements
 	for d in sorted_divisors:
-		count = np.sum(arr % d == 0)
+		count = np.bincount(arr % d, minlength=d).max()
 		if count > max_count:
 			max_count = count
 			candidates = [d]
@@ -372,7 +371,7 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 		real_ms_per_clock = milliseconds_per_clock
 	else:
 		real_ms_per_clock = round(milliseconds_per_clock * min_value / step_ms) * step_ms
-	print("Detected speed scale:", milliseconds_per_clock, real_ms_per_clock, speed, step_ms, orig_tempo)
+	print("Detected speed scale:", min_value, speed, milliseconds_per_clock, real_ms_per_clock, step_ms, orig_tempo)
 	return milliseconds_per_clock, real_ms_per_clock, speed, step_ms, orig_tempo
 
 def estimate_filesize(file):
@@ -481,7 +480,7 @@ event_types = MIDIEvents(*event_dict.values())
 # Modalities:
 # 0: MIDI
 # 1: NBS
-# 2: ORG
+# 16: ORG
 
 @dataclass(slots=True)
 class NoteSegment:
@@ -602,7 +601,7 @@ class TransportSection(collections.abc.MutableSequence):
 			data = deque()
 			for beat in self.data:
 				modality = beat[0].modality if beat else 0
-				if not beat or all(note.is_compressible(modality) for note in beat):
+				if modality >= 16 or not beat or all(note.is_compressible(modality) for note in beat):
 					header = leb128(len(beat))
 					header.append(modality & 255)
 					block = [header]

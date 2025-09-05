@@ -179,7 +179,7 @@ If you are looking to read/write Hyperchoron's compact memory format for any rea
       - LEB128-encoded note count
         - Contains an additional condition that if this number is artificially extended to end in a `0x00` byte (does not normally occur with LEB128 encoding), the column is in "full" mode rather than "compact" mode, allowing out-of-range notes, finetunes, extremely high or low volumes, or chords with mixed modality, at the cost of slight compression efficiency. All notes encoded inside this column, defined below, will follow this mode.
       - Modality (Optional, only included in "compact" mode): 1 byte, unsigned integer, representing what format the note(s) originated from. Used for rendering raw audio.
-        - Currently `0` for MIDI, `1` for NBS, `2` for ORG (other formats are not yet implemented, and will be interpreted as one of the aforementioned modalities).
+        - Currently `0` for MIDI, `1` for NBS, `16` for ORG (other formats are not yet implemented, and will be interpreted as one of the aforementioned modalities).
       - Notes (Possibly multiple):
         - Full Note (9 bytes each):
           - Priority: 0.5 bytes, signed integer:

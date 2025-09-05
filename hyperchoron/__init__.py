@@ -231,7 +231,7 @@ def convert_files(**kwargs) -> list:
 			ofi = ".flac" if ofmt != "wav" else "." + ofmt
 			match fi.rsplit(".", 1)[-1]:
 				case "mid" | "midi":
-					tmpl = temp_dir + str(ts_us()) + "1"
+					tmpl = temp_dir + str(ts_us()) + "0"
 					out = tmpl + ofi
 					pcm.render_midi([fi], [out], fmt=ofi[1:])
 					pcm.mix_raw([out], fo)
@@ -243,7 +243,7 @@ def convert_files(**kwargs) -> list:
 					pcm.mix_raw([out], fo)
 					removed.add(i)
 				case "org":
-					tmpl = temp_dir + str(ts_us()) + "2"
+					tmpl = temp_dir + str(ts_us()) + "16"
 					if ofi == ".flac":
 						ofi = ".wav"
 					out = tmpl + ofi
@@ -251,7 +251,7 @@ def convert_files(**kwargs) -> list:
 					pcm.mix_raw([out], fo)
 					removed.add(i)
 				case "xm":
-					tmpl = temp_dir + str(ts_us()) + "99"
+					tmpl = temp_dir + str(ts_us()) + "256"
 					out = tmpl + ofi
 					pcm.render_xm([fi], [out], fmt=ofi[1:])
 					pcm.mix_raw([out], fo)
@@ -274,9 +274,6 @@ def convert_files(**kwargs) -> list:
 			outputs = [fut.result() for fut in futures]
 		finally:
 			executor.shutdown(cancel_futures=True, wait=False)
-			import psutil
-			for child in psutil.Process().children(recursive=True):
-				child.terminate()
 	if archive_path:
 		outputs = [create_archive(ctx.output[0], archive_path)]
 	return outputs

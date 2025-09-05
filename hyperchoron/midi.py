@@ -259,10 +259,9 @@ def deconstruct(midi_events, speed_info, ctx=None):
 		priority = 2
 		offset = 0
 		instrument_id = None
-		if instrument in (-1,):
-			sustain = 0
-		else:
-			sustain = sustain_map[instrument] or 2
+		sustain = sustain_map[instrument]
+		if instrument not in (-1, 6):
+			sustain = sustain or 2
 		_modality = modality
 		length = 0
 		if len(event) > 6:
@@ -366,7 +365,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 					try:
 						temp = ticked[bucket]
 					except KeyError:
-						temp = ticked[bucket] = [priority, log2lin(volume / 127), panning, note.modality, note.instrument_id, note.offset or round((timestamp_approx - note.start) / sms)]
+						temp = ticked[bucket] = [priority, log2lin(volume / 127), panning, note.modality, note.instrument_id, note.offset or len(ticked)]
 					else:
 						v = log2lin(volume / 127)
 						temp[0] = max(temp[0], priority)
@@ -374,6 +373,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						temp[1] = temp[1] + v if abs(timestamp_approx - time) < 1 / 24000 else hypot(temp[1], v)
 					long_notes += long
 				if timestamp_approx >= end or len(notes) >= 64 and not needs_sustain:
+					note.priority = -1
 					notes.pop(i)
 					active_nc -= 1
 				else:
@@ -500,7 +500,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						value = as_int(event[5])
 						volume = value / 127
 						orig_volume = channel_stats[channel].volume
-						if volume >= orig_volume * 1.1:
+						if volume >= orig_volume * 1.1 and instrument_map.get(channel) != -1:
 							if note_candidates:
 								note_candidates += 1
 							if channel in instrument_map:

@@ -477,9 +477,9 @@ def save_raw(transport, output, ctx, speed_info, instrument_activities, **void):
 		nc += minecraft.save_nbs(m_transport, m_out, speed_info=speed_info, instrument_activities=instrument_activities, ctx=ctx)
 		render_nbs([m_out], [m_out_f], fmt=ofi[1:])
 		outputs.append(m_out_f)
-	if 2 in modalities:
-		m_transport = modalities.pop(2)
-		tmpl = temp_dir + str(ts_us()) + "2"
+	if 16 in modalities:
+		m_transport = modalities.pop(16)
+		tmpl = temp_dir + str(ts_us()) + "16"
 		m_out = tmpl + ".org"
 		from . import tracker
 		m_out_f = tmpl + ofi
