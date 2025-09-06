@@ -9,7 +9,8 @@ from .mappings import (
 	nbs2thirtydollar, thirtydollar_unmap, thirtydollar_drums,
 	percussion_mats, material_map, pitches, default_instruments,
 	nbs_names, fixed_instruments,
-	specy_map, specy_percussion_mats, genshin_mapping, white_keys, note_names_ex,
+	specy_map, specy_percussion_mats, genshin_mapping, specy_instruments, specy_percussions,
+	major_scale, white_keys, note_names, note_names_ex,
 	c1, c3, fs1, fs4,
 )
 from .util import ts_us, round_min, log2lin, lin2log, temp_dir, event_types, DEFAULT_DESCRIPTION
@@ -343,6 +344,89 @@ def save_moai(transport, output, ctx, **void):
 	with open(output, "w", encoding="utf-8") as thirtydollar:
 		thirtydollar.write("|".join(events))
 	return nc
+
+
+def load_json(file):
+	fmt = file.rsplit(".", 1)[-1]
+	print(f"Importing {fmt}...")
+	with open(file, "rb") as f:
+		b = f.read()
+	import orjson
+	song = orjson.loads(b)
+	data = song.get("data")
+	assert data and isinstance(data, dict), "Song type currently unsupported!"
+	app = data.get("appName")
+	assert app, "Song type currently unsupported!"
+	match app:
+		case "Sky":
+			bpm = float(song.get("bpm", 120))
+			wait = 60 * 1000 / bpm
+			events = [
+				[0, 0, event_types.HEADER, 1, 9 + 1, 1, 0],
+				[1, 0, event_types.TEMPO, wait * 1000]
+			]
+			instrument_map = {}
+			for i, instrument in enumerate(song.get("instruments", ())):
+				try:
+					ins, p = specy_instruments[instrument["name"]]
+				except KeyError:
+					try:
+						mapping = specy_percussions[instrument["name"]]
+					except KeyError:
+						print(f"Unknown instrument {instrument['name']}")
+						continue
+					ins = -1
+					instrument = dict(
+						type=ins,
+						pitch=mapping,
+						volume=instrument["volume"] / 100,
+						channel=9,
+					)
+				else:
+					pitch = instrument.get("pitch") or song.get("pitch", "C")
+					try:
+						pitch_offset = note_names_ex.index(pitch)
+					except IndexError:
+						pitch_offset = note_names.index(pitch)
+					instrument = dict(
+						type=ins,
+						pitch=p + pitch_offset,
+						volume=instrument["volume"] / 100,
+						channel=i + 10,
+					)
+				instrument_map[i] = instrument
+				events.append([1, 0, event_types.PROGRAM_C, instrument["channel"], midi_instrument_selection[ins]])
+			ticked = {}
+			for tick, col in enumerate(song.get("columns", [])):
+				for nkey, s in col[1]:
+					bits = int(s, 16)
+					for i in range(256):
+						n = bits >> i
+						if not n:
+							break
+						if not n & 1:
+							continue
+						instrument = instrument_map.get(i, {})
+						volume = instrument.get("volume", 1) * 127
+						pitch_system = instrument.get("pitch", 24)
+						if type(pitch_system) in (list, tuple):
+							pitch = pitch_system[nkey]
+						else:
+							pitch = major_scale[nkey] + pitch_system + c1
+						bucket = (i, pitch)
+						if bucket in ticked and instrument.get("type", 0) != -1:
+							prev = ticked[bucket]
+							if prev[5] == volume and tick - prev[1] < bpm / 240:
+								prev[7] = max(prev[7], 1 + tick - prev[1])
+								continue
+						note_event = [1, tick, event_types.NOTE_ON_C, instrument.get("channel", 0), pitch, volume, 1, 1]
+						events.append(note_event)
+						ticked[bucket] = note_event
+		case "Genshin":
+			raise
+		case _:
+			raise NotImplementedError(app)
+	return events
 
 
 def save_skysheet(transport, output, key_info, ctx, **void):

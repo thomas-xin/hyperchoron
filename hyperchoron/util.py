@@ -1,7 +1,6 @@
 import collections
 from collections import deque, namedtuple
 import concurrent.futures
-import csv
 from dataclasses import dataclass
 import datetime
 import fractions
@@ -24,7 +23,6 @@ DEFAULT_DESCRIPTION = f"Exported by Hyperchoron on {datetime.datetime.now().date
 base_path = __file__.replace("\\", "/").rsplit("/", 1)[0] + "/"
 temp_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/temp/"
 binary_dir = os.path.abspath(base_path.rsplit("/", 2)[0]).replace("\\", "/").rstrip("/") + "/binaries/"
-csv_reader = type(csv.reader([]))
 
 if not hasattr(time, "time_ns"):
 	time.time_ns = lambda: int(time.time() * 1e9)

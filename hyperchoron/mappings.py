@@ -260,6 +260,37 @@ specy_map = [
 	["Contrabass", "Horn", "LightGuitar", "LightGuitar+", "WinterPiano", "WinterPiano+"],
 	None
 ]
+specy_instruments = dict(
+	Aurora=(9, 36),
+	Bugle=(10, 36),
+	Cello=(7, 12),
+	Contrabass=(10, 0),
+	DuetsCello=(7, 12),
+	ElectricGuitar=(13, 24),
+	FledgelingHarp=(0, 24),
+	Flute=(2, 36),
+	GrandPiano=(1, 36),
+	Guitar=(0, 24),
+	Harmonica=(10, 36),
+	Harp=(0, 24),
+	Horn=(10, 12),
+	Kalimba=(5, 36),
+	LightGuitar=(13, 24),
+	Lute=(0, 24),
+	MantaOcarina=(2, 36),
+	Panflute=(2, 36),
+	Piano=(1, 36),
+	Pipa=(8, 24),
+	RhythmGuitar=(0, 24),
+	ToyUkulele=(0, 24),
+	TriumphSaxophone=(10, 24),
+	TriumphViolin=(7, 36),
+	Ukulele=(0, 24),
+	VesselFlute=(2, 36),
+	Violin=(7, 36),
+	WinterPiano=(1, 48),
+	Xylophone=(4, 48),
+)
 nbs2thirtydollar = dict(
 	u1="noteblock_banjo",
 	u2="fnf_up",
@@ -524,6 +555,10 @@ specy_percussion_mats = {int((data := line.split("#", 1)[0].strip().split("\t"))
 86	Drum	2	# Mute Surdo
 87	DunDun	2	# Open Surdo
 """.strip().splitlines()}
+specy_percussions = dict(
+	Drum=[47, 35, 37, 42, 33, 69, 49, 38],
+	DunDun=[41, 87, 60, 65, 48, 82, 81, 50],
+)
 non_note_blocks = {
 	"warped_trapdoor",
 	"bamboo_trapdoor",
@@ -573,6 +608,9 @@ white_keys = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6, 7]
 white_keys += [i + 7 for i in white_keys[1:]]
 white_keys += [i + 14 for i in white_keys[1:]]
 genshin_mapping = [14, 15, 16, 17, 18, 19, 20, 7, 8, 9, 10, 11, 12, 13, 0, 1, 2, 3, 4, 5, 6]
+major_scale = [0, 2, 4, 5, 7, 9, 11, 12]
+major_scale += [i + 12 for i in major_scale[1:]]
+major_scale += [i + 24 for i in major_scale[1:]]
 
 harmonics = dict(
 	default=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17)][1:],

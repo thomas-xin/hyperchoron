@@ -781,13 +781,13 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	scaffolding = litemapy.BlockState("minecraft:scaffolding", distance="0")
 	bamboo_trapdoor = litemapy.BlockState("minecraft:bamboo_trapdoor", facing="north", half="top")
 
-	def get_skeleton(x, y, z, delta=False):
+	def get_skeleton(x, y, z, delta=0):
 		nonlocal main
 		try:
 			return skeletons[x, y, z]
 		except KeyError:
 			pass
-		if not delta and abs(x) < 15 or edge:
+		if np.hypot(x, delta) < 15 or edge:
 			target = skeleton if x >= 0 else skeletonf
 		else:
 			target = skeleton2 if x >= 0 else skeletonf2
@@ -1016,8 +1016,8 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 			main[1 - main.x, yc + 7, (half_segments - 1) * skeleton.length] = litemapy.BlockState("minecraft:powered_rail", shape="east_west")
 		for segment in range(half_segments):
 			edge = segment in range(3) or half_segments - segment - 1 in range(3)
-			if not backwards and segment == half_segments - 2:
-				primary_width = main.min_x() - main.x + 1
+			# if not backwards and segment == half_segments - 2:
+			# 	primary_width = main.min_x() - main.x + 1
 			z = segment * skeleton.length
 
 			if backwards and segment == 1:
@@ -1029,12 +1029,12 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				nonlocal main, nc
 				attenuation_distance_limit = max(3, int(min(18, ctx.max_distance) / 3) * 3) if edge else max(3, int(ctx.max_distance / 3) * 3)
 				pitch = note.pitch
-				note_hash = note.instrument_class ^ round(pitch) // 36
+				note_hash = note.timing ^ note.instrument_class ^ round(pitch) // 36
 				panning = note.panning
 				volume = note.velocity
 				if note.priority <= 0:
 					volume *= 0.9
-				if panning == 0:
+				if abs(panning) < 1 / 32:
 					panning = 1 if note_hash & 1 else -1
 				base, pitch = get_note_mat(note, odd=tick & note.timing & 1)
 				if base == "PLACEHOLDER":
@@ -1042,14 +1042,14 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
 				x = round(max(0, 1 - log2lin(volume * 1.28)) * (attenuation_multiplier / 3 - 1)) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
-				if not backwards and segment >= half_segments - 2 and primary_width >= 12:
-					if x <= -primary_width / 2:
-						x = -x
-					x = round(x / 3 - min(primary_width / 2 / 3, ((segment - half_segments + 2) * 32 + tick) / 2 / 3)) * 3
-				elif backwards and segment < 2 and primary_width >= 12:
-					if x >= primary_width / 2:
-						x = -x
-					x = round(x / 3 + min(primary_width / 2 / 3, ((1 - segment) * 32 + (32 - tick)) / 2 / 3)) * 3
+				# if not backwards and segment >= half_segments - 2 and primary_width >= 12:
+				# 	if x <= -primary_width / 2:
+				# 		x = -x
+				# 	x = round(x / 3 - min(primary_width / 2 / 3, ((segment - half_segments + 2) * 32 + tick) / 2 / 3)) * 3
+				# elif backwards and segment < 2 and primary_width >= 12:
+				# 	if x >= primary_width / 2:
+				# 		x = -x
+				# 	x = round(x / 3 + min(primary_width / 2 / 3, ((1 - segment) * 32 + (32 - tick)) / 2 / 3)) * 3
 				delay = 0
 				z2 = z
 				if abs(x) >= 18:
@@ -1077,7 +1077,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				try:
 					ordering = (1, 0, 2) if x > 0 else (1, 2, 0)
 					while True:
-						taken = get_skeleton(x, y, z2, bool(delay))
+						taken = get_skeleton(x, y, z2, delay * 0.75)
 						if delay == 0 or x and (not taken or taken.get(None) == delay):
 							if delay:
 								taken[None] = delay
@@ -1153,14 +1153,14 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					volume *= 0.92
 				x = round(max(0, 1 - log2lin(volume / 127)) * (attenuation_multiplier / 3 - 1)) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
-				if not backwards and segment >= half_segments - 2 and primary_width >= 12:
-					if x <= -primary_width / 2:
-						x = -x
-					x = round(x / 3 - min(primary_width / 2 / 3, ((segment - half_segments + 2) * 32 + tick) / 2 / 3)) * 3
-				elif backwards and segment < 2 and primary_width >= 12:
-					if x >= primary_width / 2:
-						x = -x
-					x = round(x / 3 + min(primary_width / 2 / 3, ((1 - segment) * 32 + (32 - tick)) / 2 / 3)) * 3
+				# if not backwards and segment >= half_segments - 2 and primary_width >= 12:
+				# 	if x <= -primary_width / 2:
+				# 		x = -x
+				# 	x = round(x / 3 - min(primary_width / 2 / 3, ((segment - half_segments + 2) * 32 + tick) / 2 / 3)) * 3
+				# elif backwards and segment < 2 and primary_width >= 12:
+				# 	if x >= primary_width / 2:
+				# 		x = -x
+				# 	x = round(x / 3 + min(primary_width / 2 / 3, ((1 - segment) * 32 + (32 - tick)) / 2 / 3)) * 3
 				if x > attenuation_distance_limit - 3:
 					x = attenuation_distance_limit - 3
 				elif x < -attenuation_distance_limit + 3:
@@ -1644,7 +1644,7 @@ def load_nbs(file):
 				pitch = note.key + round_min(note.pitch / 100) - 33 + fs1 + pitches[note_instrument]
 				bucket = (note.layer, pitch)
 				volume = round(lin2log(note.velocity * 1.28))
-				if note.panning & 1:
+				if note.panning & 1 and ins != -1:
 					if bucket in ticked:
 						prev = ticked[bucket]
 						if prev[5] == volume and tick - prev[1] < tempo / 2:
@@ -1678,7 +1678,10 @@ def save_nbs(transport, output, ctx, **void):
 			kwargs = {}
 			if note.modality == 1 and note.instrument_class != -1:
 				nbi = note.instrument_id
-				instrument = nbs_values[nbi]
+				try:
+					instrument = nbs_values[nbi]
+				except KeyError:
+					continue
 				pitch = note.pitch - pitches[instrument] - fs1
 			else:
 				base, pitch = get_note_mat(note, odd=tick & note.timing & 1)

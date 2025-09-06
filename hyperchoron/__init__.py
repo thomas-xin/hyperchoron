@@ -21,6 +21,7 @@ csv : midi.load_csv
 org : tracker.load_org
 xm : tracker.load_xm
 🗿 | moai : text.load_moai
+skysheet | genshinsheet | json : text.load_json
 wav | flac | mp3 | aac | ogg | opus | m4a | weba | webm : pcm.load_raw
 _ : dawvert.load_arbitrary
 """.splitlines() if line for exts, v in [line.rsplit(" : ", 1)] for k in exts.split(" | "))
