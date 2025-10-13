@@ -1053,7 +1053,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				delay = 0
 				z2 = z
 				if abs(x) >= 18:
-					for n in range(3):
+					for n in range(2):
 						if z2 >= skeleton.length and abs(x) >= 15 and skeleton_counts.get(z2 - skeleton.length, 0) < (48 - n * 16):
 							if x > 0:
 								x -= 12
