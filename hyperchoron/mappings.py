@@ -1,4 +1,4 @@
-import math
+# TODO: Organise the mappings for each input/output format to be more readable
 
 
 # Remapping of midi note range to note block note range
@@ -10,6 +10,7 @@ c1 = c4 - 36
 c0 = c4 - 48
 c_1 = 0
 
+# Names of all musical notes, both in sharp and flat form
 note_names = [
 	"C",
 	"C#",
@@ -38,6 +39,7 @@ note_names_ex = [
 	"Bb",
 	"B",
 ]
+# Define list of white piano notes for operations on key signature
 white_keys = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6, 7]
 white_keys += [i + 7 for i in white_keys[1:]]
 white_keys += [i + 14 for i in white_keys[1:]]
@@ -46,15 +48,17 @@ major_scale = [0, 2, 4, 5, 7, 9, 11, 12]
 major_scale += [i + 12 for i in major_scale[1:]]
 major_scale += [i + 24 for i in major_scale[1:]]
 
-harmonics = dict(
-	default=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17)][1:],
-	triangle=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17, 2)][1:],
-	square=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17, 2)][1:],
-	saw=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17)][1:],
-)
+# Unused
+# harmonics = dict(
+# 	default=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17)][1:],
+# 	triangle=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17, 2)][1:],
+# 	square=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17, 2)][1:],
+# 	saw=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17)][1:],
+# )
 
 falling_blocks = ("sand", "red_sand", "black_concrete_powder", "gravel")
-# Predefined list attempting to match instruments across pitch ranges
+# Predefined list for Minecraft, attempting to match instruments across pitch ranges
+# Each instrument class is given the full 6-octave range, and a block is assigned that would map to an appropriate note block instrument
 material_map = [
 	["bamboo_planks", "black_wool", "black_wool+", "amethyst_block+", "gold_block", "gold_block+"],
 	["bamboo_planks", "bamboo_planks+", "glowstone", "glowstone+", "gold_block", "gold_block+"],
@@ -72,6 +76,9 @@ material_map = [
 	["bamboo_planks", "black_wool", "emerald_block", "emerald_block+", "gold_block", "gold_block+"],
 	None
 ]
+# Names of each defined instrument class, alongside their internal IDs
+# Used for most conversions where certain instruments don't exist, and so a similar one is chosen based on class
+# Possible TODO: expand on this
 default_instruments = dict(
 	harp="Plucked",						# 0
 	pling="Piano",						# 1
@@ -212,6 +219,7 @@ pitches = dict(
 	u4=24,
 	u5=12,
 )
+# Define whether each instrument class sustains its notes by default
 sustain_map = [
 	0,
 	0,
@@ -229,6 +237,7 @@ sustain_map = [
 	1,
 	0,
 ]
+# Mapping of each MIDI instrument to its designated class
 instrument_mapping = [
 	 1, 1, 1, 4, 3, 3, 0, 3, # Piano
 	 5, 5, 5, 4, 4, 5, 5, 1, # CP
@@ -247,6 +256,7 @@ instrument_mapping = [
 	 0, 6, 6, 6, 6, 6, 6, 6, # Percussive
 	 6, 2, 6, 6, 6, 6, 6, 6, # Percussive
 ]
+# Mapping of each instrument class to an appropriate MIDI instrument
 midi_instrument_selection = [
 	46,
 	0,
