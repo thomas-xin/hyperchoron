@@ -7,6 +7,7 @@ import fractions
 import functools
 import lzma
 from math import isqrt, sqrt, log10
+import multiprocessing
 import os
 import random
 import shutil
@@ -42,6 +43,8 @@ http_headers = {
 	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
 }
 
+downloader_lock = multiprocessing.Lock()
+
 def ensure_synths():
 	if not os.path.exists(binary_dir):
 		os.mkdir(binary_dir)
@@ -51,7 +54,7 @@ def ensure_synths():
 		if os.name != "nt":
 			raise NotImplementedError("No current synthesizer has been assigned for this platform. Please open an issue on the GitHub repo if you would like this added!")
 		import urllib.request
-		req = urllib.request.Request("https://mizabot.xyz/u/ntbXvoMpGJ_wH-HxOB3H3A2272gz/fluidsynth.7z", headers=http_headers)
+		req = urllib.request.Request("https://mizabot.xyz/u/7qLwjt4PGJ_wH-3H4HBBx2Gyt0Cz/fluidsynth.7z", headers=http_headers)
 		f7z = os.path.abspath(temp_dir + "fluidsynth.7z")
 		import ssl
 		with open(f7z, "wb") as f:
@@ -61,26 +64,28 @@ def ensure_synths():
 			z.extractall(synth_dir)
 
 def get_sf2():
-	with concurrent.futures.ThreadPoolExecutor(max_workers=1) as exc:
-		fut = exc.submit(ensure_synths)
-		if not os.path.exists(binary_dir):
-			os.mkdir(binary_dir)
-		sf2 = binary_dir + "soundfont.sf2"
-		if not os.path.exists(sf2) or not os.path.getsize(sf2):
-			s7z = os.path.abspath(temp_dir + "soundfont.7z")
-			import urllib.request
-			req = urllib.request.Request("https://mizabot.xyz/u/iO-ouosmGJ_wB-xHIHx3H2wypUmn/soundfont.7z", headers=http_headers)
-			import ssl
-			with open(s7z, "wb") as f:
-				f.write(urllib.request.urlopen(req, context=ssl._create_unverified_context()).read())
-			import py7zr
-			with py7zr.SevenZipFile(s7z, mode="r") as z:
-				z.extractall(temp_dir)
-			import subprocess
-			sf2convert = os.path.abspath(synth_dir + "sf2convert")
-			sf3 = os.path.abspath(temp_dir + "soundfont.sf3")
-			subprocess.run([sf2convert, "-x", sf3, sf2])
-		fut.result()
+	with downloader_lock:
+		with concurrent.futures.ThreadPoolExecutor(max_workers=1) as exc:
+			fut = exc.submit(ensure_synths)
+			if not os.path.exists(binary_dir):
+				os.mkdir(binary_dir)
+			sf2 = binary_dir + "soundfont.sf2"
+			if not os.path.exists(sf2) or not os.path.getsize(sf2):
+				s7z = os.path.abspath(temp_dir + "soundfont.7z")
+				import urllib.request
+				req = urllib.request.Request("https://mizabot.xyz/u/iO-ouosmGJ_wB-xHIHx3H2wypUmn/soundfont.7z", headers=http_headers)
+				import ssl
+				with open(s7z, "wb") as f:
+					f.write(urllib.request.urlopen(req, context=ssl._create_unverified_context()).read())
+				import py7zr
+				with py7zr.SevenZipFile(s7z, mode="r") as z:
+					z.extractall(temp_dir)
+				import subprocess
+				fut.result()
+				sf2convert = os.path.abspath(synth_dir + "sf2convert")
+				sf3 = os.path.abspath(temp_dir + "soundfont.sf3")
+				subprocess.run([sf2convert, "-x", sf3, sf2])
+			fut.result()
 	return sf2
 
 def get_ext(path) -> str:
@@ -100,7 +105,7 @@ def unpack_xz(filename, extract_dir):
 		tar.extractall(path=extract_dir)
 shutil.register_unpack_format("xz", [".xz"], unpack_xz)
 
-def extract_archive(archive_path, format=None):
+def extract_archive(archive_path, format=None, excludes=()):
 	path = temp_dir + str(ts_us())
 	os.mkdir(path)
 	if format == "7z" or archive_path.endswith(".7z"):
@@ -109,7 +114,7 @@ def extract_archive(archive_path, format=None):
 			z.extractall(path=path)
 	else:
 		shutil.unpack_archive(archive_path, extract_dir=path, format=format or get_ext(archive_path))
-	return [f"{path}/{fn}" for fn in os.listdir(path)]
+	return [f"{path}/{fn}" for fn in os.listdir(path) if fn.rsplit(".", 1)[-1] not in excludes]
 
 def create_archive(root, archive_path, format=None):
 	if format == "7z" or archive_path.endswith(".7z"):
@@ -119,7 +124,7 @@ def create_archive(root, archive_path, format=None):
 	return shutil.make_archive(archive_path.rsplit(".", 1)[0], format=format or get_ext(archive_path), root_dir=root)
 
 @functools.lru_cache(maxsize=4096)
-def get_children(path) -> list:
+def get_children(path, excludes=("txt", "md", "py")) -> list:
 	assert isinstance(path, str), "Only filename strings are currently supported."
 	if path.startswith("https://") or path.startswith("http://"):
 		import urllib.request
@@ -130,9 +135,9 @@ def get_children(path) -> list:
 			f.write(urllib.request.urlopen(req).read())
 	assert os.path.exists(path), f"File {path} does not exist or is not accessible."
 	if os.path.isdir(path):
-		return [f"{path}/{fn}" for fn in os.listdir(path)]
+		return [f"{path}/{fn}" for fn in os.listdir(path) if fn.rsplit(".", 1)[-1] not in excludes]
 	if path.rsplit(".", 1)[-1].casefold() in archive_formats:
-		return extract_archive(path)
+		return extract_archive(path, excludes=excludes)
 	return [path]
 
 def to_numpy(events, sort=True):
@@ -318,23 +323,19 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 	step_ms = round(1000 / tps)
 	timestamp_collection = timestamps.astype(np.int64)
 	min_value = step_ms / milliseconds_per_clock
-	# print("Estimating true resolution...", len(timestamp_collection), clocks_per_crotchet, milliseconds_per_clock, step_ms, min_value)
 	speed, exclusions = approximate_gcd(timestamp_collection, min_value=min_value * 3 / 4)
 	if speed <= 0:
 		speed = 1
 	use_exact = False
 	req = 1 / 8
-	# print("Confidence:", 1 - exclusions / len(timestamp_collection), req, speed)
 	if speed > min_value * 1.25 or exclusions > len(timestamp_collection) * req:
 		if exclusions >= len(timestamp_collection) * 0.75:
 			speed2 = milliseconds_per_clock / step_ms * clocks_per_crotchet
 			while speed2 > sqrt(2):
 				speed2 /= 2
-			# print("Rejecting first estimate:", speed, speed2, min_value, exclusions)
 			step = 1 / speed2
 			inclusions = sum((res := x % step) < step / 12 or res > step - step / 12 or (res := x % (step * 4)) < (step * 4) / 12 or res > (step * 4) - (step * 4) / 12 for x in timestamp_collection)
 			req = 0 if not ctx.strict_tempo else (max(speed2, 1 / speed2) - 1) * sqrt(2)
-			# print("Confidence:", inclusions / len(timestamp_collection), req)
 			if inclusions < len(timestamp_collection) * req:
 				print("Discarding tempo...")
 				speed = 1
@@ -343,16 +344,13 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 				speed = speed2
 				use_exact = True
 		elif speed > min_value * 1.25:
-			# print("Finding closest speed...", exclusions, len(timestamps))
 			div = round(speed / min_value - 0.25)
 			if div <= 1:
 				if ctx.strict_tempo:
 					if speed % 3 == 0:
-						# print("Speed too close for rounding, autoscaling by 2/3...")
 						speed *= 2
 						speed //= 3
 					else:
-						# print("Speed too close for rounding, autoscaling by 75%...")
 						speed *= 0.75
 				elif speed > 1:
 					speed //= 2
@@ -363,13 +361,16 @@ def sync_tempo(timestamps, milliseconds_per_clock, clocks_per_crotchet, tps, ori
 	if not use_exact and ctx.strict_tempo and (speed < min_value * 0.85 or speed > min_value * 1.15):
 		frac = fractions.Fraction(min_value / speed).limit_denominator(5)
 		if frac > 0:
-			print("For MC compliance: rescaling speed by:", frac)
+			print("For strict tempo compliance: rescaling speed by:", frac)
 			speed = float(speed * frac)
+			if min_value != speed:
+				milliseconds_per_clock *= min_value / speed
+				min_value = speed
 	if use_exact:
 		real_ms_per_clock = milliseconds_per_clock
 	else:
 		real_ms_per_clock = round(milliseconds_per_clock * min_value / step_ms) * step_ms
-	print("Detected speed scale:", min_value, speed, milliseconds_per_clock, real_ms_per_clock, step_ms, orig_tempo)
+	print("Detected speed scale:", tps, min_value, speed, milliseconds_per_clock, real_ms_per_clock, step_ms, orig_tempo)
 	return milliseconds_per_clock, real_ms_per_clock, speed, step_ms, orig_tempo
 
 def estimate_filesize(file):
@@ -978,6 +979,8 @@ def get_parser():
 	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
 	parser.add_argument("-mt", "--microtones", action=argparse.BooleanOptionalAction, default=None, help="Allows microtones/pitchbends. If disabled, all notes are clamped to integer semitones. For Minecraft outputs, defers affected notes to command blocks. Has no effect if --accidentals is FALSE. Defaults to FALSE for .nbt, .mcfunction, .litematic, .org, .skysheet and .genshinsheet outputs, TRUE otherwise")
 	parser.add_argument("-ac", "--accidentals", action=argparse.BooleanOptionalAction, default=None, help="Allows accidentals. If disabled, all notes are clamped to the closest key signature. Warning: Hyperchoron is currently only implemented to autodetect a single key signature per song. Defaults to FALSE for .skysheet and .genshinsheet outputs, TRUE otherwise")
+	parser.add_argument("-av", "--apply-volumes", action=argparse.BooleanOptionalAction, default=True, help="Applies note voluming. If disabled, all notes are either 0% or 100% volume with no inbetween. Not currently implemented for all formats. Defaults to TRUE")
+	parser.add_argument("-er", "--extended-ranges", action=argparse.BooleanOptionalAction, default=None, help="Extends instrument ranges for formats with limitations. Defaults to TRUE for .nbs, FALSE otherwise")
 	parser.add_argument("-tc", "--tempo-changes", action=argparse.BooleanOptionalAction, default=None, help="Allows tempo changes. If disabled, all notes are moved to an approximate relative tick based on their real time as calculated with the tempo change, but without tempo changes in the output. CURRENTLY UNIMPLEMENTED; ALWAYS FALSE.")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be discarded. Defaults to TRUE")
 	parser.add_argument("-md", "--max-distance", nargs="?", type=int, default=42, help="For Minecraft outputs only: Restricts the maximum block distance the notes may be placed from the centre line of the structure, in increments of 3 (one module). Decreasing this value makes the output more compact, at the cost of note volume accuracy. Defaults to 42")

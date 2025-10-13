@@ -778,7 +778,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	# redstone_dot = litemapy.BlockState("minecraft:redstone_wire", east="none", north="none", west="none", south="none")
 	waxed_oxidized_copper_bulb = litemapy.BlockState("minecraft:waxed_oxidized_copper_bulb", lit="false", powered="false")
 	shroomlight = litemapy.BlockState("minecraft:shroomlight")
-	scaffolding = litemapy.BlockState("minecraft:scaffolding", distance="0")
+	# scaffolding = litemapy.BlockState("minecraft:scaffolding", distance="0")
 	bamboo_trapdoor = litemapy.BlockState("minecraft:bamboo_trapdoor", facing="north", half="top")
 
 	def get_skeleton(x, y, z, delta=0):
@@ -787,7 +787,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 			return skeletons[x, y, z]
 		except KeyError:
 			pass
-		if np.hypot(x, delta) < 15 or edge:
+		if np.hypot(x, delta) < 18 or edge:
 			target = skeleton if x >= 0 else skeletonf
 		else:
 			target = skeleton2 if x >= 0 else skeletonf2
@@ -1027,7 +1027,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 
 			def add_note(note, tick):
 				nonlocal main, nc
-				attenuation_distance_limit = max(3, int(min(18, ctx.max_distance) / 3) * 3) if edge else max(3, int(ctx.max_distance / 3) * 3)
+				attenuation_distance_limit = max(3, int(ctx.max_distance / 3) * 3)
 				pitch = note.pitch
 				note_hash = note.timing ^ note.instrument_class ^ round(pitch) // 36
 				panning = note.panning
@@ -1363,37 +1363,26 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				case None | 0:
 					pass
 				case _ if x > 0:
-					offs = (predelay // 16 - 1) * 2
-					is_early = main[x - main.x, y - 2, z].id == "minecraft:activator_rail"
+					offs = (predelay // 16) * 2 - 1
 					main[x + 1 - main.x, y, z] = air
-					main[x + 1 - main.x, y + 1, z] = litemapy.BlockState("minecraft:observer", facing="west")
-					main[x - main.x, y + 1, z] = litemapy.BlockState("minecraft:observer", facing="south")
-					if is_early:
-						main[x - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
-						main[x - main.x, y, z + 1] = scaffolding
-						main[x - main.x, y - 1, z + 1] = scaffolding
-						main[x - main.x, y - 2, z + 1] = bamboo_trapdoor
-						main[x + 1 - main.x, y - 1, z + 1] = scaffolding
-						main[x + 1 - main.x, y - 2, z + 1] = bamboo_trapdoor
-						main[x - main.x, y - 2, z + 2] = shroomlight
-						main[x - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:redstone_wire", north="side", south="side")
-					elif abs(x) < 12:
-						main[x - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:redstone_wire")
-						main[x - main.x, y, z + 1] = sculk
-						main[x - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
-						main[x - main.x, y - 2, z + 2] = litemapy.BlockState("minecraft:piston", facing="north")
-					else:
-						main[x - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:bamboo_door", facing="east", half="upper", hinge="right")
-						main[x - main.x, y, z + 1] = litemapy.BlockState("minecraft:bamboo_door", facing="east", half="lower", hinge="right")
-						main[x - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
-						main[x - main.x, y - 2, z + 2] = litemapy.BlockState("minecraft:piston", facing="north")
-					for zi in range(offs):
+					main[x + 1 - main.x, y + 1, z] = air
+					main[x - main.x, y + 1, z + 1] = air
+					main[x + 2 - main.x, y + 1, z + 1] = air
+					main[x + 1 - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:redstone_wire", east="side", north="side", west="side", south="side")
+					main[x + 1 - main.x, y, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
+					main[x + 1 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:hopper", facing="south")
+					main[x + 1 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:target")
+					main[x - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:redstone_wire", east="side", south="side")
+					main[x - main.x, y - 2, z + 2] = slab
+					main[x - main.x, y - 1, z + 3] = sculk
+					for zi in range(1, offs):
 						main[x - main.x, y - 1, z + 3 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="south")
-						main[x - main.x, y - 2, z + 3 + zi] = slab if not zi and is_early else bamboo_trapdoor
-					main[x - main.x, y - 2, z + 3 + offs] = slab if not offs and is_early else bamboo_trapdoor
+						main[x - main.x, y - 2, z + 3 + zi] = bamboo_trapdoor
+					main[x - main.x, y - 2, z + 3 + offs] = bamboo_trapdoor
 					main[x - main.x, y - 1, z + 3 + offs] = litemapy.BlockState("minecraft:comparator", facing="south")
+					main[x - main.x, y, z + 4 + offs] = black_carpet
 					main[x - main.x, y - 1, z + 4 + offs] = waxed_oxidized_copper_bulb
-					main[x + 1 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:repeater", delay="3" if is_early else "4", facing="east")
+					main[x + 1 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:repeater", delay="3", facing="east")
 					main[x + 1 - main.x, y - 2, z + 4 + offs] = bamboo_trapdoor
 					main[x + 2 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:redstone_wire", west="side", north="side")
 					main[x + 2 - main.x, y - 2, z + 4 + offs] = slab
@@ -1404,39 +1393,29 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					main[x + 2 - main.x, y - 2, z + 3] = slab
 					main[x + 2 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
 					main[x + 2 - main.x, y - 2, z + 2] = slab
+					main[x + 2 - main.x, y, z + 1] = black_carpet
 					main[x + 2 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="north")
 				case _ if x < 0:
-					offs = (predelay // 16 - 1) * 2
-					is_early = main[x + 2 - main.x, y - 2, z].id == "minecraft:activator_rail"
+					offs = (predelay // 16) * 2 - 1
 					main[x + 1 - main.x, y, z] = air
-					main[x + 1 - main.x, y + 1, z] = litemapy.BlockState("minecraft:observer", facing="east")
-					main[x + 2 - main.x, y + 1, z] = litemapy.BlockState("minecraft:observer", facing="south")
-					if is_early:
-						main[x + 2 - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
-						main[x + 2 - main.x, y, z + 1] = scaffolding
-						main[x + 2 - main.x, y - 1, z + 1] = scaffolding
-						main[x + 2 - main.x, y - 2, z + 1] = bamboo_trapdoor
-						main[x + 1 - main.x, y - 1, z + 1] = scaffolding
-						main[x + 1 - main.x, y - 2, z + 1] = bamboo_trapdoor
-						main[x + 2 - main.x, y - 2, z + 2] = shroomlight
-						main[x + 2 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:redstone_wire", north="side", south="side")
-					elif abs(x) < 12:
-						main[x + 2 - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:redstone_wire")
-						main[x + 2 - main.x, y, z + 1] = sculk
-						main[x + 2 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
-						main[x + 2 - main.x, y - 2, z + 2] = litemapy.BlockState("minecraft:piston", facing="north")
-					else:
-						main[x + 2 - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:bamboo_door", facing="west", half="upper", hinge="left")
-						main[x + 2 - main.x, y, z + 1] = litemapy.BlockState("minecraft:bamboo_door", facing="west", half="lower", hinge="left")
-						main[x + 2 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
-						main[x + 2 - main.x, y - 2, z + 2] = litemapy.BlockState("minecraft:piston", facing="north")
-					for zi in range(offs):
+					main[x + 1 - main.x, y + 1, z] = air
+					main[x - main.x, y + 1, z + 1] = air
+					main[x + 2 - main.x, y + 1, z + 1] = air
+					main[x + 1 - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:redstone_wire", east="side", north="side", west="side", south="side")
+					main[x + 1 - main.x, y, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
+					main[x + 1 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:hopper", facing="south")
+					main[x + 1 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:target")
+					main[x + 2 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:redstone_wire", west="side", south="side")
+					main[x + 2 - main.x, y - 2, z + 2] = slab
+					main[x + 2 - main.x, y - 1, z + 3] = sculk
+					for zi in range(1, offs):
 						main[x + 2 - main.x, y - 1, z + 3 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="south")
-						main[x + 2 - main.x, y - 2, z + 3 + zi] = slab if not zi and is_early else bamboo_trapdoor
-					main[x + 2 - main.x, y - 2, z + 3 + offs] = slab if not offs and is_early else bamboo_trapdoor
+						main[x + 2 - main.x, y - 2, z + 3 + zi] = bamboo_trapdoor
+					main[x + 2 - main.x, y - 2, z + 3 + offs] = bamboo_trapdoor
 					main[x + 2 - main.x, y - 1, z + 3 + offs] = litemapy.BlockState("minecraft:comparator", facing="south")
+					main[x + 2 - main.x, y, z + 4 + offs] = black_carpet
 					main[x + 2 - main.x, y - 1, z + 4 + offs] = waxed_oxidized_copper_bulb
-					main[x + 1 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:repeater", delay="3" if is_early else "4", facing="west")
+					main[x + 1 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:repeater", delay="3", facing="west")
 					main[x + 1 - main.x, y - 2, z + 4 + offs] = bamboo_trapdoor
 					main[x - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:redstone_wire", east="side", north="side")
 					main[x - main.x, y - 2, z + 4 + offs] = slab
@@ -1447,6 +1426,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					main[x - main.x, y - 2, z + 3] = slab
 					main[x - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
 					main[x - main.x, y - 2, z + 2] = slab
+					main[x - main.x, y, z + 1] = black_carpet
 					main[x - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="north")
 				case _:
 					raise NotImplementedError(x, y, z, predelay)
@@ -1688,7 +1668,7 @@ def save_nbs(transport, output, ctx, **void):
 				if base == "PLACEHOLDER":
 					continue
 				instrument = instrument_names[base]
-				if ins != -1:
+				if ctx.extended_ranges and ins != -1:
 					instrument2 = fixed_instruments[instrument_codelist[ins]]
 					pitch2 = note.pitch - pitches[instrument2] - fs1
 					if 0 <= pitch2 < 24:
@@ -1710,7 +1690,11 @@ def save_nbs(transport, output, ctx, **void):
 			if note.priority <= 0:
 				volume *= min(1, 0.9 ** (tempo / 20))
 			if volume != 100:
-				kwargs["velocity"] = round(log2lin(volume / 100) * 100)
+				if ctx.apply_volumes:
+					kwargs["velocity"] = round(log2lin(volume / 100) * 100)
+				elif volume < 100 and (note.priority <= 0 or note.instrument_class < 0):
+					if (tick + note.timing) / 2 % 1 > volume / 100:
+						continue
 			panning = int(note.panning * 49) * 2 + (0 if note.priority > 0 else 1 if tick & 1 else -1)
 			if panning != 0:
 				kwargs["panning"] = panning

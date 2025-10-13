@@ -125,6 +125,8 @@ def fix_args(ctx) -> ContextArgs:
 		ctx.invert_key = False
 	if ctx.get("microtones") is None:
 		ctx.microtones = ctx.format not in ("nbt", "mcfunction", "litematic", "schem", "schematic", "org", "skysheet", "genshinsheet")
+	if ctx.get("extended_ranges") is None:
+		ctx.extended_ranges = ctx.format == "nbs"
 	if ctx.get("accidentals") is None:
 		ctx.accidentals = ctx.format not in ("skysheet", "genshinsheet")
 	if not ctx.accidentals:
@@ -224,39 +226,60 @@ def convert_files(**kwargs) -> list:
 	filecount = count_leaves(inputs)
 	print(f"Total input files: {filecount}, total inputs: {len(inputs)}, total outputs: {len(output_files)}")
 	ctx.one_to_one = filecount == len(inputs)
-	if ctx.one_to_one and len(inputs) == len(output_files) and all(fo.rsplit(".", 1)[-1] in "wav | flac | mp3 | aac | ogg | opus | m4a | weba | webm".split(" | ") for fo in output_files):
+	if len(inputs) == len(output_files) and all(fo.rsplit(".", 1)[-1] in "wav | flac | mp3 | aac | ogg | opus | m4a | weba | webm".split(" | ") for fo in output_files):
 		from . import pcm
 		removed = set()
-		for i, (fi, fo) in enumerate(zip(inputs, output_files)):
-			ofmt = fo.rsplit(".", 1)[-1]
-			ofi = ".flac" if ofmt != "wav" else "." + ofmt
-			match fi.rsplit(".", 1)[-1]:
-				case "mid" | "midi":
-					tmpl = temp_dir + str(ts_us()) + "0"
-					out = tmpl + ofi
-					pcm.render_midi([fi], [out], fmt=ofi[1:])
-					pcm.mix_raw([out], fo)
-					removed.add(i)
-				case "nbs":
-					tmpl = temp_dir + str(ts_us()) + "1"
-					out = tmpl + ofi
-					pcm.render_nbs([fi], [out], fmt=ofi[1:])
-					pcm.mix_raw([out], fo)
-					removed.add(i)
-				case "org":
-					tmpl = temp_dir + str(ts_us()) + "16"
-					if ofi == ".flac":
-						ofi = ".wav"
-					out = tmpl + ofi
-					pcm.render_org([fi], [out], fmt=ofi[1:])
-					pcm.mix_raw([out], fo)
-					removed.add(i)
-				case "xm":
-					tmpl = temp_dir + str(ts_us()) + "256"
-					out = tmpl + ofi
-					pcm.render_xm([fi], [out], fmt=ofi[1:])
-					pcm.mix_raw([out], fo)
-					removed.add(i)
+		try:
+			thread_count = 8
+			executor = concurrent.futures.ProcessPoolExecutor(max_workers=thread_count)
+			futures = []
+			for i, (fi, fo) in enumerate(zip(inputs, output_files)):
+				if not isinstance(fi, str) or os.path.getsize(fi) > 16 * 1048576:
+					continue
+				ofmt = fo.rsplit(".", 1)[-1]
+				ofi = ".flac" if ofmt != "wav" else "." + ofmt
+				match fi.rsplit(".", 1)[-1]:
+					case "mid" | "midi":
+						tmpl = temp_dir + str(ts_us()) + "0"
+						out = tmpl + ofi
+						fut = executor.submit(pcm.render_midi, [fi], [out], fmt=ofi[1:])
+						fut.out = out
+						fut.fo = fo
+						futures.append(fut)
+						removed.add(i)
+					case "nbs":
+						tmpl = temp_dir + str(ts_us()) + "1"
+						out = tmpl + ofi
+						fut = executor.submit(pcm.render_nbs, [fi], [out], fmt=ofi[1:])
+						fut.out = out
+						fut.fo = fo
+						futures.append(fut)
+						removed.add(i)
+					case "org":
+						tmpl = temp_dir + str(ts_us()) + "16"
+						if ofi == ".flac":
+							ofi = ".wav"
+						out = tmpl + ofi
+						fut = executor.submit(pcm.render_org, [fi], [out], fmt=ofi[1:])
+						fut.out = out
+						fut.fo = fo
+						futures.append(fut)
+						removed.add(i)
+					case "xm":
+						tmpl = temp_dir + str(ts_us()) + "256"
+						out = tmpl + ofi
+						fut = executor.submit(pcm.render_xm, [fi], [out], fmt=ofi[1:])
+						fut.out = out
+						fut.fo = fo
+						futures.append(fut)
+						removed.add(i)
+			for fut in concurrent.futures.as_completed(futures):
+				fut.result()
+				out = fut.out
+				fo = fut.fo
+				pcm.mix_raw([out], fo)
+		finally:
+			executor.shutdown(cancel_futures=True, wait=False)
 		inputs = [fi for i, fi in enumerate(inputs) if i not in removed]
 		output_files = [fo for i, fo in enumerate(output_files) if i not in removed]
 	if len(inputs) == len(output_files) == 1:

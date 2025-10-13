@@ -220,6 +220,9 @@ Odds are, most people finding their way to this repository will be mainly intere
 - If exporting to `.mcfunction`, you will need to make some sort of template datapack to be able to load it in. When pasting for the first time, it is recommended to perform the `/gamerule maxCommandChainLength 2147483647` command prior to pasting the note blocks to avoid longer songs being cut off. Alternatively, you may run the mcfunction twice, which will do this automatically.
 - As of 2025/05, the structure has been redesigned to enable support for note volume and panning, alongside a new `--max-distance` parameter; this controls the maximum distance notes may be placed from the centreline where the player will travel. If the size of the output is too large for your use case, you may decrease this for a more compact structure. However, this comes at the cost of decreasing volume accuracy.
 
+### MAESTRO support
+- Hyperchoron supports exporting to `.nbs` files that are playable in [MAESTRO](https://www.youtube.com/watch?v=G78AnHpIw5w). For best results, include the arguments `-r 20 -st --no-extended-ranges --no-apply-volumes`, which will restrict the output to be survival-legal.
+
 ### What is the purpose of another Minecraft exporter like this?
 - Converting music to Minecraft note blocks programmatically has been a thing for a long time, the most popular program being Note Block Studio. This program is not intended to entirely replace them, and is meant to be a standalone feature.
 - Hyperchoron's intent is to expand on the exporting capabilities of note block programs, using a more adaptable algorithm to produce more accurate recreations of songs while still staying within the boundaries of vanilla Minecraft.

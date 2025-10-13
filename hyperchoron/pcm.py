@@ -227,7 +227,7 @@ def ffmpeg_output(fo):
 			extra = ["-c:a", "libmp3lame"]
 		case _:
 			return [fo]
-	return extra + ["-b:a", ba, fo]
+	return extra + ["-b:a", ba, "-vbr", "on", fo]
 
 
 def render_midi(inputs, outputs, fmt="flac"):
@@ -239,7 +239,7 @@ def render_midi(inputs, outputs, fmt="flac"):
 		intermediate = outputs
 	procs = []
 	for fi, fo in zip(inputs, intermediate):
-		args = [fluidsynth, "-g", "0.5" if convert else "1", "-F", fo, "-c", "64", "-o", "synth.polyphony=32767", "-r", str(writer_sr), "-n", sf2, fi]
+		args = [fluidsynth, "-g", "0.5" if convert else "1", "-F", fo, "-c", "64", "-o", "synth.polyphony=32767", "-r", str(writer_sr if convert else out_sample_rate), "-n", sf2, fi]
 		proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)
 		procs.append(proc)
 	for proc in procs:

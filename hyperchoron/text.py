@@ -9,7 +9,7 @@ from .mappings import (
 	nbs2thirtydollar, thirtydollar_unmap, thirtydollar_drums,
 	percussion_mats, material_map, pitches, default_instruments,
 	nbs_names, fixed_instruments,
-	specy_map, specy_percussion_mats, genshin_mapping, specy_instruments, specy_percussions,
+	specy_map, specy_percussion_mats, genshin_mapping, specy_instruments,
 	major_scale, white_keys, note_names, note_names_ex,
 	c1, c3, fs1, fs4,
 )
@@ -370,18 +370,65 @@ def load_json(file):
 				try:
 					ins, p = specy_instruments[instrument["name"]]
 				except KeyError:
+					print(f"Unknown instrument {instrument['name']}")
+					continue
+				else:
+					pitch = instrument.get("pitch") or song.get("pitch", "C")
 					try:
-						mapping = specy_percussions[instrument["name"]]
-					except KeyError:
-						print(f"Unknown instrument {instrument['name']}")
-						continue
-					ins = -1
+						pitch_offset = note_names_ex.index(pitch)
+					except IndexError:
+						pitch_offset = note_names.index(pitch)
 					instrument = dict(
 						type=ins,
-						pitch=mapping,
+						pitch=p,
+						pitch_offset=pitch_offset,
 						volume=instrument["volume"] / 100,
-						channel=9,
+						channel=i + 10,
 					)
+				instrument_map[i] = instrument
+				events.append([1, 0, event_types.PROGRAM_C, instrument["channel"], midi_instrument_selection[ins]])
+			ticked = {}
+			for tick, col in enumerate(song.get("columns", [])):
+				for nkey, s in col[1]:
+					bits = int(s, 16)
+					for i in range(256):
+						n = bits >> i
+						if not n:
+							break
+						if not n & 1:
+							continue
+						instrument = instrument_map.get(i, {})
+						volume = instrument.get("volume", 1) * 127
+						pitch_system = instrument.get("pitch", 24)
+						if type(pitch_system) in (list, tuple):
+							pitch = pitch_system[nkey]
+							if instrument.get("type", 0) >= 0:
+								pitch += instrument.get("pitch_offset", 0) + c1
+						else:
+							pitch = major_scale[nkey] + instrument.get("pitch_offset", 0) + pitch_system + c1
+						bucket = (i, pitch)
+						if bucket in ticked and instrument.get("type", 0) != -1:
+							prev = ticked[bucket]
+							if prev[5] == volume and tick - prev[1] < bpm / 240:
+								prev[7] = max(prev[7], 1 + tick - prev[1])
+								continue
+						note_event = [1, tick, event_types.NOTE_ON_C, instrument.get("channel", 0), pitch, volume, 1, 1]
+						events.append(note_event)
+						ticked[bucket] = note_event
+		case "Genshin":
+			bpm = float(song.get("bpm", 120))
+			wait = 60 * 1000 / bpm
+			events = [
+				[0, 0, event_types.HEADER, 1, 9 + 1, 1, 0],
+				[1, 0, event_types.TEMPO, wait * 1000]
+			]
+			instrument_map = {}
+			for i, instrument in enumerate(song.get("instruments", ())):
+				try:
+					ins, p = specy_instruments[instrument["name"]]
+				except KeyError:
+					print(f"Unknown instrument {instrument['name']}")
+					continue
 				else:
 					pitch = instrument.get("pitch") or song.get("pitch", "C")
 					try:
@@ -422,8 +469,6 @@ def load_json(file):
 						note_event = [1, tick, event_types.NOTE_ON_C, instrument.get("channel", 0), pitch, volume, 1, 1]
 						events.append(note_event)
 						ticked[bucket] = note_event
-		case "Genshin":
-			raise
 		case _:
 			raise NotImplementedError(app)
 	return events
@@ -488,14 +533,25 @@ def save_skysheet(transport, output, key_info, ctx, **void):
 				is_inv = True
 			nkey = white_keys[mod]
 			vel = note.velocity
+			if vel <= 0:
+				continue
 			if note.priority == 0:
-				if note.timing % recur != 0:
+				if note.timing % round(recur * max(1, 1 / vel / 16)) != 0:
 					continue
-				vel /= 4
+				vel /= 2
 			vol = get_volume(vel)
 			if not vol:
 				continue
+			if mat == "LightGuitar":
+				vol *= 0.67
+			elif mat == "Aurora":
+				vol *= 1.25
+			elif mat == "Horn":
+				vol *= 1.15
+			elif mat in ("Flute", "Panflute"):
+				vol *= 1.1
 			tup = (mat, vol, is_inv)
+			v = None
 			try:
 				v = instrument_map[tup]
 			except KeyError:
@@ -503,18 +559,18 @@ def save_skysheet(transport, output, key_info, ctx, **void):
 					new_tups = sorted((tup for tup in instrument_map if tup[0] == mat and tup[2] == is_inv), key=lambda t: abs(t[1] - vol))
 					if new_tups:
 						v = instrument_map[new_tups[0]]
-				else:
-					v = instrument_map[tup] = 2 ** len(instrument_map)
-					instruments.append(dict(
-						name=mat,
-						volume=vol,
-						pitch=note_names_ex[inv] if is_inv else "",
-						visible=True,
-						icon="circle" if mat in ("Drum", "DunDun") else "line" if vol <= 50 else "border",
-						alias="",
-						muted=False,
-						reverbOverride=None,
-					))
+			if not v:
+				v = instrument_map[tup] = 2 ** len(instrument_map)
+				instruments.append(dict(
+					name=mat,
+					volume=vol,
+					pitch=note_names_ex[inv] if is_inv else "",
+					visible=True,
+					icon="circle" if mat in ("Drum", "DunDun") else "line" if vol < 65 else "border",
+					alias="",
+					muted=False,
+					reverbOverride=None,
+				))
 			for t in notes:
 				if t[0] == nkey:
 					w = int(t[1], 16)

@@ -1,6 +1,58 @@
 import math
 
 
+# Remapping of midi note range to note block note range
+c4 = 60
+c3 = c4 - 12
+fs4 = c4 + 6
+fs1 = fs4 - 36
+c1 = c4 - 36
+c0 = c4 - 48
+c_1 = 0
+
+note_names = [
+	"C",
+	"C#",
+	"D",
+	"D#",
+	"E",
+	"F",
+	"F#",
+	"G",
+	"G#",
+	"A",
+	"A#",
+	"B",
+]
+note_names_ex = [
+	"C",
+	"Db",
+	"D",
+	"Eb",
+	"E",
+	"F",
+	"Gb",
+	"G",
+	"Ab",
+	"A",
+	"Bb",
+	"B",
+]
+white_keys = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6, 7]
+white_keys += [i + 7 for i in white_keys[1:]]
+white_keys += [i + 14 for i in white_keys[1:]]
+genshin_mapping = [14, 15, 16, 17, 18, 19, 20, 7, 8, 9, 10, 11, 12, 13, 0, 1, 2, 3, 4, 5, 6]
+major_scale = [0, 2, 4, 5, 7, 9, 11, 12]
+major_scale += [i + 12 for i in major_scale[1:]]
+major_scale += [i + 24 for i in major_scale[1:]]
+
+harmonics = dict(
+	default=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17)][1:],
+	triangle=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17, 2)][1:],
+	square=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17, 2)][1:],
+	saw=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17)][1:],
+)
+
 falling_blocks = ("sand", "red_sand", "black_concrete_powder", "gravel")
 # Predefined list attempting to match instruments across pitch ranges
 material_map = [
@@ -243,12 +295,12 @@ org_instrument_selection = [
 ]
 org_octave = 60
 specy_map = [
-	["Contrabass", "Contrabass+", "Harp", "Harp+", "WinterPiano", "WinterPiano+"],
-	["Contrabass", "Contrabass+", "ToyUkulele", "GrandPiano", "GrandPiano+", "WinterPiano+"],
+	["Contrabass", "Contrabass+", "Guitar", "Harp+", "WinterPiano", "WinterPiano+"],
+	["Contrabass", "Contrabass+", "Harp", "GrandPiano", "GrandPiano+", "WinterPiano+"],
 	["Contrabass", "Horn", "Horn+", "Flute", "Flute+", "Xylophone+"],
 	["Contrabass", "Horn", "LightGuitar", "LightGuitar+", "WinterPiano", "WinterPiano+"],
-	["Contrabass", "Contrabass+", "Harp", "Kalimba", "Xylophone", "Xylophone+"],
-	["Contrabass", "Contrabass+", "Harp", "Kalimba", "Xylophone", "Xylophone+"],
+	["Contrabass", "Contrabass+", "Guitar", "Kalimba", "Xylophone", "Xylophone+"],
+	["Contrabass", "Contrabass+", "Guitar", "Kalimba", "Xylophone", "Xylophone+"],
 	["Contrabass", "Contrabass+", "Harp", "Kalimba", "Xylophone", "Xylophone+"],
 	# ["Contrabass", "Cello", "Cello+", "TriumphViolin", "TriumphViolin+", "Xylophone+"],
 	["Contrabass", "Horn", "Horn+", "Panflute", "Panflute+", "Xylophone+"],
@@ -290,6 +342,10 @@ specy_instruments = dict(
 	Violin=(7, 36),
 	WinterPiano=(1, 48),
 	Xylophone=(4, 48),
+	Drum=(-1, [47, 35, 37, 42, 33, 69, 49, 38]),
+	DunDun=(-1, [41, 87, 60, 65, 48, 82, 81, 50]),
+	Lyre=(0, [white_keys[genshin_mapping.index(i)] + 24 for i in range(21)]),
+	VintageLyre=(0, [white_keys[genshin_mapping.index(i)] + 24 for i in range(21)]),
 )
 nbs2thirtydollar = dict(
 	u1="noteblock_banjo",
@@ -555,10 +611,6 @@ specy_percussion_mats = {int((data := line.split("#", 1)[0].strip().split("\t"))
 86	Drum	2	# Mute Surdo
 87	DunDun	2	# Open Surdo
 """.strip().splitlines()}
-specy_percussions = dict(
-	Drum=[47, 35, 37, 42, 33, 69, 49, 38],
-	DunDun=[41, 87, 60, 65, 48, 82, 81, 50],
-)
 non_note_blocks = {
 	"warped_trapdoor",
 	"bamboo_trapdoor",
@@ -566,58 +618,6 @@ non_note_blocks = {
 	"bamboo_fence_gate",
 	"dropper",
 }
-
-# Remapping of midi note range to note block note range
-c4 = 60
-c3 = c4 - 12
-fs4 = c4 + 6
-fs1 = fs4 - 36
-c1 = c4 - 36
-c0 = c4 - 48
-c_1 = 0
-
-note_names = [
-	"C",
-	"C#",
-	"D",
-	"D#",
-	"E",
-	"F",
-	"F#",
-	"G",
-	"G#",
-	"A",
-	"A#",
-	"B",
-]
-note_names_ex = [
-	"C",
-	"Db",
-	"D",
-	"Eb",
-	"E",
-	"F",
-	"Gb",
-	"G",
-	"Ab",
-	"A",
-	"Bb",
-	"B",
-]
-white_keys = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6, 7]
-white_keys += [i + 7 for i in white_keys[1:]]
-white_keys += [i + 14 for i in white_keys[1:]]
-genshin_mapping = [14, 15, 16, 17, 18, 19, 20, 7, 8, 9, 10, 11, 12, 13, 0, 1, 2, 3, 4, 5, 6]
-major_scale = [0, 2, 4, 5, 7, 9, 11, 12]
-major_scale += [i + 12 for i in major_scale[1:]]
-major_scale += [i + 24 for i in major_scale[1:]]
-
-harmonics = dict(
-	default=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17)][1:],
-	triangle=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17, 2)][1:],
-	square=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17, 2)][1:],
-	saw=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17)][1:],
-)
 
 dawvert_inputs = dict(
 	mid="midi",

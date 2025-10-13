@@ -213,7 +213,7 @@ class ChannelStats:
 
 def deconstruct(midi_events, speed_info, ctx=None):
 	max_pitch = 101
-	allow_stacks = ctx.strict_tempo
+	allow_stacks = ctx.strict_tempo or not ctx.apply_volumes
 	active_notes = {i: [] for i in range(len(material_map))}
 	active_notes[-1] = []
 	active_nc = 0
@@ -225,7 +225,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 	step_ms = orig_step_ms
 	modality, midi_events, note_lengths, max_vol, last_timestamp = preprocess(midi_events)
 	speed_ratio = real_ms_per_clock / scale / _orig_ms_per_clock
-	wait = round_min(orig_step_ms / speed_ratio)
+	wait = round(orig_step_ms / speed_ratio, 9)
 	print("Tick delay:", wait)
 	played_notes = Transport(tick_delay=fractions.Fraction(wait) / 1000)
 	instrument_ids = {}
@@ -237,8 +237,9 @@ def deconstruct(midi_events, speed_info, ctx=None):
 	progress = tqdm.tqdm(total=ceil(last_timestamp * timescale / 1000), bar_format=bar_format) if tqdm else contextlib.nullcontext()
 	global_index = 0
 	curr_frac = round(step_ms)
+	tempo = orig_tempo
 	leaked_notes = 0
-	allowed_leakage = 0
+	allowed_leakage = 8
 	low_precision = len(midi_events) > 262144
 	early_triggers = (event_types.PITCH_BEND_C, event_types.CONTROL_C)
 	min_duration = 75
@@ -417,7 +418,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 			curr_step = step_ms
 			time = event_timestamp * timescale
 			mode = event[2]
-			if mode in early_triggers:
+			if mode in early_triggers or tempo == orig_tempo:
 				condition = latest_timestamp - time >= -curr_step / 2
 			else:
 				condition = latest_timestamp - time >= curr_step / 3 * (leaked_notes >= allowed_leakage) - curr_step / 3
@@ -466,7 +467,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 										new_length = float(timestamp_approx + curr_frac * 1.5 - note.start)
 										if new_length <= note.length:
 											found.append(note)
-										if not note.sustain and note.instrument_id != -1:
+										if note.instrument_id != -1:
 											note.priority = max(note.priority, 1)
 											note.sustain = True
 								if not found and active_notes[instrument]:
@@ -891,7 +892,7 @@ def proceed_save_midi(output, out_name, is_csv, instruments, wait, resolution):
 				instrument.append([i, tick, "Control_c", c, mode_i, value])
 			end = max(end, note.tick + note.length)
 		rows.extend(instrument)
-	max_event = max(e[1] for e in rows)
+	max_event = max((e[1] for e in rows), default=1)
 	for i in range(1, highest_track):
 		rows.insert(0, [i + 1, 0, "Start_track"])
 	for i in range(highest_track):
