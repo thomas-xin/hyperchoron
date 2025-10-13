@@ -203,6 +203,7 @@ Odds are, most people finding their way to this repository will be mainly intere
 
 ### MAESTRO support
 - Hyperchoron supports exporting to `.nbs` files that are playable in [MAESTRO](https://www.youtube.com/watch?v=G78AnHpIw5w). For best results, include the arguments `-r 20 -st --no-extended-ranges --no-apply-volumes`, which will restrict the output to be survival-legal.
+  - e.g. `hyperchoron -i examples/input/bad_apple.7z -x L -r 20 -st --no-extended-ranges --no-apply-volumes -o bad_apple_maestro.nbs`
 
 ### What is the purpose of another Minecraft exporter like this?
 - Converting music to Minecraft note blocks programmatically has been a thing for a long time, the most popular program being Note Block Studio. This program is not intended to entirely replace them, and is meant to be a standalone feature.
