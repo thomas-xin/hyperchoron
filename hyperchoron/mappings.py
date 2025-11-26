@@ -239,7 +239,7 @@ sustain_map = [
 ]
 # Mapping of each MIDI instrument to its designated class
 instrument_mapping = [
-	 1, 1, 1, 4, 3, 3, 0, 3, # Piano
+	 1, 1, 1, 4, 3, 3, 8, 8, # Piano
 	 5, 5, 5, 4, 4, 5, 5, 1, # CP
 	10, 1,11,12,10,11, 7, 3, # Organ
 	 0, 0, 0, 1, 1,13,13, 7, # Guitar

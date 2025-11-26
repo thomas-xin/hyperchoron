@@ -19,7 +19,7 @@ from .mappings import (
 	fs1, c_1,
 )
 from .util import (
-	round_min, log2lin, lin2log, sync_tempo, transport_note_priority, as_int,
+	round_min, log2lin, lin2log, sync_tempo, transport_note_priority, is_int, as_int,
 	event_types, DEFAULT_NAME, DEFAULT_DESCRIPTION, NoteSegment, Transport
 )
 
@@ -198,6 +198,11 @@ class ChannelStats:
 		bend: float
 		pan: float
 		bend_range: float
+		fine_tune: float
+		coarse_tune: float
+		@property
+		def relative_pitch(self):
+			return self.bend + self.fine_tune + self.coarse_tune
 
 	def __init__(self):
 		self.c = []
@@ -208,12 +213,12 @@ class ChannelStats:
 		except IndexError:
 			pass
 		while len(self.c) <= i:
-			self.c.append(self.StatTypes(1, 0, 0, 2))
+			self.c.append(self.StatTypes(1, 0, 0, 2, 0, 0))
 		return self.c[i]
 
 def deconstruct(midi_events, speed_info, ctx=None):
 	max_pitch = 101
-	allow_stacks = ctx.strict_tempo or not ctx.apply_volumes
+	allow_stacks = ctx.allow_stacking
 	active_notes = {i: [] for i in range(len(material_map))}
 	active_notes[-1] = []
 	active_nc = 0
@@ -335,7 +340,7 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				needs_sustain = note.sustain
 				long = length >= sms * 2
 				if note.start + sms * 3 / 4 > timestamp_approx or needs_sustain and timestamp_approx + sms <= end:
-					pitch = channel_stats[note.channel].bend + note.pitch
+					pitch = channel_stats[note.channel].relative_pitch + note.pitch
 					normalised = pitch + ctx.transpose - fs1
 					if normalised > max_pitch:
 						pitch = max_pitch - ctx.transpose + fs1
@@ -392,8 +397,12 @@ def deconstruct(midi_events, speed_info, ctx=None):
 			instrument, pitch, *_ = k
 			priority, volume, pan, modality, i_id, timing = v
 			volume *= ctx.volume
-			count = max(1, int(volume))
-			vel = lin2log(volume / count)
+			if ctx.apply_volumes:
+				count = max(1, int(volume))
+				vel = lin2log(volume / count)
+			else:
+				count = 1
+				vel = min(1, lin2log(volume))
 			block = NoteSegment(priority, modality, i_id, instrument, pitch, vel, pan, timing)
 			for w in range(count):
 				beat.append(block)
@@ -411,9 +420,13 @@ def deconstruct(midi_events, speed_info, ctx=None):
 				instrument_activities[instrument] = [volume, poly[instrument]]
 		return beat
 
+	parameter_number = 0
 	with progress as bar:
-		while global_index < len(midi_events):
-			event = midi_events[global_index]
+		while global_index < len(midi_events) + 1:
+			try:
+				event = midi_events[global_index]
+			except IndexError:
+				event = [0, last_timestamp + step_ms * 2, event_types.END_OF_FILE]
 			event_timestamp = event[1]
 			curr_step = step_ms
 			time = event_timestamp * timescale
@@ -474,28 +487,48 @@ def deconstruct(midi_events, speed_info, ctx=None):
 									for note in active_notes[instrument]:
 										if note.channel == channel:
 											note.length = max(note.length, float(timestamp_approx + curr_frac - note.start))
+					case event_types.CONTROL_C if event[4] == 100:
+						parameter_number = as_int(event[5])
 					case event_types.CONTROL_C if event[4] == 6:
-						channel = event[3]
-						bend_range = as_int(event[5])
-						prev = channel_stats[channel].bend_range
-						if bend_range != prev:
-							note_candidates += 1
-							channel_stats[channel].bend_range = bend_range
-							if round(bend_range) != round(prev) and channel in instrument_map:
-								instrument = instrument_map[channel]
-								found = []
-								for note in active_notes[instrument]:
-									if note.channel == channel:
-										new_length = float(timestamp_approx + curr_frac * 1.5 - note.start)
-										if new_length <= note.length:
-											found.append(note)
-										if not note.sustain:
-											note.priority = max(note.priority, 1)
-											note.sustain = True
-								if not found and active_notes[instrument]:
-									for note in active_notes[instrument]:
-										if note.channel == channel:
-											note.length = max(note.length, float(timestamp_approx + curr_frac - note.start))
+						match parameter_number:
+							case 1:
+								channel = event[3]
+								fine_tune = (as_int(event[5]) - 64) / 63
+								channel_stats[channel].fine_tune = fine_tune
+							case 2:
+								channel = event[3]
+								coarse_tune = as_int(event[5]) - 64
+								channel_stats[channel].coarse_tune = coarse_tune
+							case 3:
+								pass
+							case 4:
+								pass
+							case 5:
+								pass
+							case 6:
+								pass
+							case _:
+								channel = event[3]
+								bend_range = as_int(event[5])
+								prev = channel_stats[channel].bend_range
+								if bend_range != prev:
+									note_candidates += 1
+									channel_stats[channel].bend_range = bend_range
+									if round(bend_range) != round(prev) and channel in instrument_map:
+										instrument = instrument_map[channel]
+										found = []
+										for note in active_notes[instrument]:
+											if note.channel == channel:
+												new_length = float(timestamp_approx + curr_frac * 1.5 - note.start)
+												if new_length <= note.length:
+													found.append(note)
+												if not note.sustain:
+													note.priority = max(note.priority, 1)
+													note.sustain = True
+										if not found and active_notes[instrument]:
+											for note in active_notes[instrument]:
+												if note.channel == channel:
+													note.length = max(note.length, float(timestamp_approx + curr_frac - note.start))
 					case event_types.CONTROL_C if event[4] == 7:
 						channel = event[3]
 						value = as_int(event[5])
@@ -531,20 +564,23 @@ def deconstruct(midi_events, speed_info, ctx=None):
 							temp = float(new_step)
 							if new_step == temp:
 								new_step = temp
-						if type(new_step) is float:
-							if new_step.is_integer():
-								new_step = int(new_step)
+						if is_int(new_step):
+							new_step = int(new_step)
 						step_ms = new_step
 						curr_frac = float(step_ms) if type(step_ms) is fractions.Fraction else step_ms
 						if not note_candidates:
 							timestamp_approx = timestamp = round(time)
+					case event_types.END_OF_FILE:
+						pass
+					case _:
+						print("Unknown event:", mode)
 				global_index += 1
 			else:
 				ticked, active_nc = tick_notes(active_nc)
 				beat = to_segments(ticked)
 				played_notes.append(beat)
 				timestamp += curr_step
-				if isinstance(timestamp, int) or timestamp.is_integer():
+				if is_int(timestamp):
 					timestamp_approx = timestamp = int(timestamp)
 				else:
 					timestamp_approx = float(timestamp)
@@ -741,7 +777,7 @@ def build_midi(notes, instrument_activities, ctx):
 				events=[],
 				aligned=tick + length,
 			)
-			if type(new_pitch) is not int and not new_pitch.is_integer() and not instrument.pitchbend_range:
+			if not is_int(new_pitch) and not instrument.pitchbend_range:
 				instrument.pitchbend_range = 1
 			instrument.notes.append(midi_note)
 			taken.append(instrument.index)

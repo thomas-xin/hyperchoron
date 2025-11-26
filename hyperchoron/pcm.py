@@ -6,7 +6,7 @@ import os
 import subprocess
 import numpy as np
 from .mappings import c1, nbs_raws
-from .util import base_path, temp_dir, ts_us, in_sample_rate, out_sample_rate, fluidsynth, orgexport, ensure_synths, get_sf2, round_random
+from .util import base_path, temp_dir, ts_us, in_sample_rate, out_sample_rate, fluidsynth, orgexport, ensure_synths, get_sf2, lin2log, round_random
 
 
 writer_sr = 32000
@@ -102,20 +102,17 @@ def load_raw(file):
 		events = [[ins, 0, "program_c", ins, instrument]]
 		song, *_ = librosa.load(temp_dir + fn + ".flac", sr=in_sample_rate, mono=False, dtype=np.float32)
 		mono = librosa.to_mono(song)
-		# volumes = np.array([np.mean(np.abs(mono[i:i + bufsize])) for i in range(0, len(mono), bufsize)])
 		volumes = librosa.feature.rms(y=mono, frame_length=bufsize * 4, hop_length=bufsize)[0]
 		max_volume = np.max(volumes)
 		if monophonic:
 			if pitch is not None:
 				for tick, v in enumerate(volumes):
-					# if tick <= 0:
-					# 	continue
 					if v < max_volume / tolerance:
 						continue
 					if volumes[tick - 1] < v * 1 / 2:
 						if tick < len(volumes) - 1 and volumes[tick + 1] >= v and volumes[tick + 1] < v * 2:
 							v = volumes[tick + 1]
-						v = min(1, v * mult)
+						v = lin2log(min(1, v * mult))
 						events.append([ins, tick, "note_on_c", ins, pitch, v * 127, 2, 1])
 				return events
 			left, right = song[0], song[1]
@@ -147,8 +144,8 @@ def load_raw(file):
 					priority = 1
 				else:
 					priority = 0
-				v = min(1, v * mult)
-				events.append([ins, tick, "note_on_c", ins, note, v, priority, 1, pannings[tick]])
+				v = lin2log(min(1, v * mult))
+				events.append([ins, tick, "note_on_c", ins, note, v * 127, priority, 1, pannings[tick]])
 			return events
 		c = librosa.hybrid_cqt(
 			mono,
@@ -187,6 +184,7 @@ def load_raw(file):
 					priority = 1
 				active_notes[i] = v
 				p = i / bps + c1
+				v = lin2log(min(1, v * mult))
 				events.append([ins, tick, "note_on_c", ins, p, v * 127, priority, 1])
 		return events
 
@@ -218,7 +216,7 @@ def ffmpeg_output(fo):
 	match ext:
 		case "ogg" | "opus":
 			ba = "160k"
-			extra = ["-c:a", "libopus"]
+			extra = ["-f", ext, "-c:a", "libopus"]
 		case "aac":
 			ba = "192k"
 			extra = ["-cutoff", "16000", "-c:a", "libfdk_aac"]

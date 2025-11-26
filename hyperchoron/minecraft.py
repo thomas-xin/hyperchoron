@@ -19,7 +19,7 @@ from .mappings import (
 	instrument_codelist, default_instruments, fixed_instruments,
 	fs1,
 )
-from .util import ts_us, temp_dir, round_min, log2lin, lin2log, base_path, transport_note_priority, event_types, NoteSegment, DEFAULT_NAME, DEFAULT_DESCRIPTION
+from .util import ts_us, is_int, temp_dir, round_min, log2lin, lin2log, base_path, transport_note_priority, event_types, quantise_note, NoteSegment, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 
 def nbt_from_dict(d):
@@ -170,7 +170,7 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, odd=False, ctx=Non
 		)
 		return
 	# assert isinstance(pitch, int), "Finetune not supported in vanilla!"
-	use_command_block = not isinstance(pitch, int) and not pitch.is_integer() and ctx and ctx.microtones
+	use_command_block = not is_int(pitch) and ctx and ctx.microtones
 	if use_command_block:
 		p = 2 ** max(-1, min(1, (pitch / 12 - 1)))
 		command = f"playsound minecraft:block.note_block.{instrument_names[base]} record @a[distance=..48] ~ ~ ~ 3 {p}"
@@ -592,6 +592,15 @@ def crop_region(region, size, optimise=True):
 	new_region._Region__palette = region._Region__palette.copy()
 	if optimise:
 		new_region._optimize_palette()
+	for e in region.tile_entities:
+		x1, y1, z1 = e.position
+		x1 -= x
+		y1 -= y
+		z1 -= z
+		if x1 >= 0 and y1 >= 0 and z1 >= 0 and x1 < width and y1 < height and z1 < length:
+			e = copy.copy(e)
+			e.position = (x1, y1, z1)
+			new_region.tile_entities.append(e)
 	return new_region
 
 def flip_region(region, axes=2):
@@ -718,7 +727,8 @@ def _optimize_palette(self) -> None:
 	# 	assert tid in self[pos].id, (self[pos], te.data["id"], pos)
 	tile_entity_map = {te.position: te for te in self.tile_entities}
 	if len(self.tile_entities) != len(tile_entity_map):
-		self.tile_entities = list(tile_entity_map.values())
+		self.tile_entities.clear()
+		self.tile_entities.extend(tile_entity_map.values())
 litemapy.schematic.Region._optimize_palette = _optimize_palette
 
 Region = namedtuple("Region", ("mx", "my", "mz", "Mx", "My", "Mz"))
@@ -830,16 +840,17 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 			set_across(1, 1, 0, litemapy.BlockState("minecraft:observer", facing="down"))
 			set_across(1, 2, 0, shroomlight)
 			tickdel, *_ = (v[0] for v in taken.values())
-			zi = 1
+			zr = 1
 			while tickdel > 0:
-				set_across(1, 2, zi, litemapy.BlockState("minecraft:repeater", facing="north", delay=str(min(4, tickdel))))
-				set_across(1, 1, zi, litemapy.BlockState("minecraft:prismarine_slab", type="top"))
+				set_across(1, 2, zr, litemapy.BlockState("minecraft:repeater", facing="north", delay=str(min(4, tickdel))))
+				set_across(1, 1, zr, litemapy.BlockState("minecraft:prismarine_slab", type="top"))
 				tickdel -= 4
-				zi += 1
-			set_across(1, 4, zi, shroomlight)
+				zr += 1
+			set_across(1, 4, zr, shroomlight)
 			chord = [v[1] for v in taken.values()]
 			ordering = ((1, 0, 2) if x > 0 else (1, 2, 0))[:len(chord)]
-			for xi, note in zip(ordering, chord):
+			sides = ((zr, zr, zr) if zr > 1 else (1, 0, 0))
+			for xi, zi, note in zip(ordering, sides, chord):
 				pos = (xi, 2, zi)
 				blocks = get_note_block(
 					note,
@@ -1031,30 +1042,24 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				pitch = note.pitch
 				note_hash = note.timing ^ note.instrument_class ^ round(pitch) // 36
 				panning = note.panning
-				volume = note.velocity
-				if note.priority <= 0:
-					volume *= 0.9
+				volume = min(1, quantise_note(note, tick, 20, ctx, decay=0.8) * 2)
+				if not volume:
+					return
 				if abs(panning) < 1 / 32:
 					panning = 1 if note_hash & 1 else -1
 				base, pitch = get_note_mat(note, odd=tick & note.timing & 1)
 				if base == "PLACEHOLDER":
 					return
 				attenuation_multiplier = 16 if base in ("warped_trapdoor", "bamboo_trapdoor", "oak_trapdoor", "bamboo_fence_gate", "dropper") else 48
-				x = round(max(0, 1 - log2lin(volume * 1.28)) * (attenuation_multiplier / 3 - 1)) * (3 if panning > 0 else -3)
+				x = round(max(0, 1 - volume) * (attenuation_multiplier / 3 - 1)) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
-				# if not backwards and segment >= half_segments - 2 and primary_width >= 12:
-				# 	if x <= -primary_width / 2:
-				# 		x = -x
-				# 	x = round(x / 3 - min(primary_width / 2 / 3, ((segment - half_segments + 2) * 32 + tick) / 2 / 3)) * 3
-				# elif backwards and segment < 2 and primary_width >= 12:
-				# 	if x >= primary_width / 2:
-				# 		x = -x
-				# 	x = round(x / 3 + min(primary_width / 2 / 3, ((1 - segment) * 32 + (32 - tick)) / 2 / 3)) * 3
 				delay = 0
 				z2 = z
 				if abs(x) >= 18:
 					for n in range(2):
-						if z2 >= skeleton.length and abs(x) >= 15 and skeleton_counts.get(z2 - skeleton.length, 0) < (48 - n * 16):
+						if abs(x) < 15:
+							break
+						if z2 >= skeleton.length and skeleton_counts.get(z2 - skeleton.length, 0) < (48 - n * 16):
 							if x > 0:
 								x -= 12
 								delay += 16
@@ -1063,7 +1068,8 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 								x += 12
 								delay += 16
 								z2 -= skeleton.length
-						else:
+						elif skeleton_counts.get(z2, 0) < 48:
+							x = 18 if x > 0 else -18
 							break
 				if x > attenuation_distance_limit - 3:
 					x = attenuation_distance_limit - 3
@@ -1153,14 +1159,6 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					volume *= 0.92
 				x = round(max(0, 1 - log2lin(volume / 127)) * (attenuation_multiplier / 3 - 1)) * (3 if panning > 0 else -3)
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
-				# if not backwards and segment >= half_segments - 2 and primary_width >= 12:
-				# 	if x <= -primary_width / 2:
-				# 		x = -x
-				# 	x = round(x / 3 - min(primary_width / 2 / 3, ((segment - half_segments + 2) * 32 + tick) / 2 / 3)) * 3
-				# elif backwards and segment < 2 and primary_width >= 12:
-				# 	if x >= primary_width / 2:
-				# 		x = -x
-				# 	x = round(x / 3 + min(primary_width / 2 / 3, ((1 - segment) * 32 + (32 - tick)) / 2 / 3)) * 3
 				if x > attenuation_distance_limit - 3:
 					x = attenuation_distance_limit - 3
 				elif x < -attenuation_distance_limit + 3:
@@ -1495,15 +1493,6 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 		master[locate((1 - tile_width, ym + 3, end))] = litemapy.BlockState("minecraft:observer", facing="south")
 		master[locate((1 - tile_width, ym + 4, end))] = black_carpet
 	x, y, z = 0, yc + 1, end - 22
-	turn1, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Turn 1.litematic").regions.values()
-	turn2, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Turn 2.litematic").regions.values()
-	turn3, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Turn 3.litematic").regions.values()
-	turn1 = move_region(turn1, x - 1, y, z)
-	master = paste_region(master, turn1, ignore_src_air=True)
-	turn2 = move_region(turn2, x - tile_width, y - 1, z - 1)
-	master = paste_region(master, turn2, ignore_src_air=True)
-	turn3 = move_region(turn3, x - tile_width, y, 2)
-	master = paste_region(master, turn3, ignore_src_air=True)
 	for i in range(1, tile_width - 5):
 		if i % 32 == 0:
 			master[locate((-i, y + 1, z + 1))] = litemapy.BlockState("minecraft:redstone_block")
@@ -1527,6 +1516,15 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	schem.description = DEFAULT_DESCRIPTION
 	schem.regions.clear()
 	schem.regions["Hyperchoron"] = master = paste_region(master, header, ignore_src_air=True)
+	turn1, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Turn 1.litematic").regions.values()
+	turn2, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Turn 2.litematic").regions.values()
+	turn3, = litemapy.Schematic.load(f"{base_path}minecraft_templates/Hyperchoron V2 Turn 3.litematic").regions.values()
+	turn1 = move_region(turn1, x - 1, y, z)
+	master = paste_region(master, turn1, ignore_src_air=True)
+	turn2 = move_region(turn2, x - tile_width, y - 1, z - 1)
+	master = paste_region(master, turn2, ignore_src_air=True)
+	turn3 = move_region(turn3, x - tile_width, y, 2)
+	master = paste_region(master, turn3, ignore_src_air=True)
 	master[locate((1, yc + 4, -3))] = litemapy.BlockState("minecraft:warped_sign", rotation="0")
 	x, y, z = locate((1, yc + 4, -3))
 	lines = []
@@ -1551,7 +1549,10 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	for line in lines[:4]:
 		texts = []
 		for i, c in enumerate(line):
-			r = i / (len(line) - 1)
+			try:
+				r = i / (len(line) - 1)
+			except ZeroDivisionError:
+				r = 0
 			R, G, B = round(255 * r), 255, round(255 * (1 - r))
 			colour = hex((R << 16) | (G << 8) | B)[2:].upper()
 			while len(colour) < 6:
@@ -1644,7 +1645,7 @@ def save_nbs(transport, output, ctx, **void):
 		song_name=out_name,
 		tempo=min(655, round(tempo, 3)),
 	)
-	nbs.header.song_origin = ctx.input[0].replace("\\", "/").rsplit("/", 1)[-1]
+	nbs.header.song_origin = ctx.input[0].split("?", 1)[0].replace("\\", "/").rsplit("/", 1)[-1]
 	nbs.header.song_author=DEFAULT_NAME
 	nbs.header.description=DEFAULT_DESCRIPTION
 	layer_poly = {}
@@ -1686,15 +1687,11 @@ def save_nbs(transport, output, ctx, **void):
 			raw_key = round(pitch)
 			if raw_key != pitch:
 				kwargs["pitch"] = round((pitch - raw_key) * 100)
-			volume = note.velocity * 100
-			if note.priority <= 0:
-				volume *= min(1, 0.9 ** (tempo / 20))
-			if volume != 100:
-				if ctx.apply_volumes:
-					kwargs["velocity"] = round(log2lin(volume / 100) * 100)
-				elif volume < 100 and (note.priority <= 0 or note.instrument_class < 0):
-					if (tick + note.timing) / 2 % 1 > volume / 100:
-						continue
+			volume = quantise_note(note, tick, tempo, ctx, decay=0.9)
+			if not volume:
+				continue
+			if volume != 1:
+				kwargs["velocity"] = round(volume * 100)
 			panning = int(note.panning * 49) * 2 + (0 if note.priority > 0 else 1 if tick & 1 else -1)
 			if panning != 0:
 				kwargs["panning"] = panning
@@ -1739,6 +1736,11 @@ def save_nbs(transport, output, ctx, **void):
 		used_layers[ins] += 1
 		note.layer = layer
 	nbs.notes.sort(key=lambda note: (note.tick, note.layer))
+	counts = {}
+	for note in nbs.notes:
+		k = (note.instrument, note.key)
+		counts.setdefault(k, []).append(note)
+	# print("\n".join(f"{k}: {len(v)}" for k, v in counts.items()))
 	nbs.save(output)
 	return len(nbs.notes)
 
@@ -1756,7 +1758,7 @@ def save_litematic(transport, output, ctx, **void):
 		case _:
 			raise NotImplementedError(fmt)
 	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	schem, ext, nc = build_minecraft(transport, ctx=ctx, name=ctx.input[0].replace("\\", "/").rsplit("/", 1)[-1])
+	schem, ext, nc = build_minecraft(transport, ctx=ctx, name=ctx.input[0].split("?", 1)[0].replace("\\", "/").rsplit("/", 1)[-1])
 	match fmt:
 		case "nbt":
 			reg = get_region(schem)

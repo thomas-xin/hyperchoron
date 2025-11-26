@@ -96,7 +96,7 @@ class ContextArgs:
 
 def fix_args(ctx) -> ContextArgs:
 	if not ctx.output:
-		ctx.output = [ctx.input[0].rsplit(".", 1)[0]]
+		ctx.output = [ctx.input[0].split("?", 1)[0].rsplit(".", 1)[0]]
 	formats = [get_ext(fo) if "." in fo else ctx.get("format", "nbs") for fo in ctx.output]
 	if not ctx.get("format"):
 		ctx.format = formats[0]
@@ -116,9 +116,11 @@ def fix_args(ctx) -> ContextArgs:
 	if ctx.get("speed") is None:
 		ctx.speed = 1
 	if ctx.get("resolution") is None:
-		ctx.resolution = 12 if ctx.format in ("🗿", "moai", "skysheet", "genshinsheet") else 20 if ctx.format in ("nbt", "mcfunction", "litematic", "schem", "schematic") else 40
+		ctx.resolution = 12 if ctx.format in ("🗿", "moai") else 20 if ctx.format in ("skysheet", "genshinsheet", "nbt", "mcfunction", "litematic", "schem", "schematic") else 40
 	if ctx.get("strict_tempo") is None:
 		ctx.strict_tempo = ctx.format in ("nbt", "mcfunction", "litematic", "schem", "schematic")
+	if ctx.get("allow_stacking") is None:
+		ctx.allow_stacking = ctx.strict_tempo or not ctx.apply_volumes or ctx.format in ("🗿", "moai", "skysheet", "genshinsheet", "nbt", "mcfunction", "litematic", "schem", "schematic")
 	if ctx.get("transpose") is None:
 		ctx.transpose = 0
 	if ctx.get("invert_key") is None:

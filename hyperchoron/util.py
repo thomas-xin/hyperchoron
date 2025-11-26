@@ -6,7 +6,7 @@ import datetime
 import fractions
 import functools
 import lzma
-from math import isqrt, sqrt, log10
+from math import isqrt, sqrt, log10, inf, isfinite
 import multiprocessing
 import os
 import random
@@ -197,17 +197,18 @@ def round_random(x) -> int:
 		y += 1
 	return y
 
+def is_int(x):
+	return type(x) is int or x.is_integer()
+
 def as_int(x):
-	try:
-		return x.item()
-	except AttributeError:
-		return int(x)
+	if isinstance(x, np.number):
+		x = x.item()
+	return int(x)
 
 def as_float(x):
-	try:
-		return x.item()
-	except AttributeError:
-		return float(x)
+	if isinstance(x, np.number):
+		x = x.item()
+	return float(x)
 
 def resolve(path, scope=None):
 	scope = scope or globals()
@@ -224,11 +225,16 @@ def resolve(path, scope=None):
 def log2lin(x, min_db=-40):
 	if x <= 0:
 		return 0
-	return 10 ** ((x - 1) * -min_db / 20)
+	try:
+		return 10.0 ** ((x - 1) * -min_db / 20)
+	except OverflowError:
+		return inf
 
 def lin2log(y, min_db=-40):
 	if y <= 0:
 		return 0
+	if not isfinite(y):
+		return 156
 	return 1 + 20 * log10(y) / (-min_db)
 
 def leb128(n):
@@ -434,6 +440,28 @@ def priority_ordering(beat, n_largest=100, active=(), lenient=False):
 			out.append(note)
 	return out
 
+def quantise_note(note, tick, tempo, ctx, decay=0.8, mode="linear"):
+	velocity = note.velocity
+	if velocity <= 0:
+		return 0
+	linvel = log2lin(velocity)
+	if note.priority <= 1:
+		linvel *= decay
+	if note.priority <= 0:
+		linvel *= min(1, 0.9 ** (tempo / 20))
+	if (linvel < 1 and not ctx.apply_volumes or linvel < 0.125) and (note.priority <= 0 or note.instrument_class < 0 and linvel < 0.25):
+		if (tick + note.timing) * velocity % 1 > velocity:
+			return 0
+		linvel = min(log2lin(note.velocity * decay), linvel / velocity)
+	if not ctx.apply_volumes:
+		return 1
+	match mode:
+		case "linear":
+			return linvel
+		case "log":
+			return lin2log(linvel)
+	raise NotImplementedError(mode)
+
 def merge_activities(a1, a2):
 	if not a1:
 		a1.update(a2)
@@ -459,6 +487,8 @@ PROGRAM_C = 0xC0
 CHANNEL_AFTERTOUCH_C = 0xD0
 PITCH_BEND_C = 0xE0
 
+END_OF_FILE = 0x0
+
 event_dict = dict(
 	header=HEADER,
 	tempo=TEMPO,
@@ -472,6 +502,8 @@ event_dict = dict(
 	program_c=PROGRAM_C,
 	channel_aftertouch_c=CHANNEL_AFTERTOUCH_C,
 	pitch_bend_c=PITCH_BEND_C,
+
+	END_OF_FILE=END_OF_FILE,
 )
 MIDIEvents = namedtuple("MIDIEvents", tuple(t.upper() for t in event_dict))
 event_types = MIDIEvents(*event_dict.values())
@@ -511,7 +543,7 @@ class NoteSegment:
 	def is_compressible(self, modality=0):
 		if modality != self.modality:
 			return False
-		if type(self.pitch) not in (int, np.integer) and not self.pitch.is_integer():
+		if is_int(self.pitch):
 			return False
 		if self.velocity and (self.velocity < 1 / 127 or self.velocity >= 256 / 127):
 			return False
@@ -881,7 +913,7 @@ def transpose(transport, ctx):
 	for beat in transport:
 		seen = np.zeros(12, dtype=np.float32)
 		for note in beat:
-			if note.instrument_class == -1 or not note.pitch.is_integer():
+			if note.instrument_class == -1 or not is_int(note.pitch):
 				continue
 			p = round(note.pitch % 12)
 			v = log2lin(note.velocity) * (0.5 if note.priority <= 0 else 1)
@@ -932,7 +964,7 @@ def transpose(transport, ctx):
 	if mapping or ctx.transpose:
 		for beat in transport:
 			for i, note in enumerate(beat):
-				if not note.pitch.is_integer():
+				if not is_int(note.pitch):
 					continue
 				pitch = note.pitch
 				p = pitch % 12
@@ -973,12 +1005,12 @@ def get_parser():
 	parser.add_argument("-x", "--mixing", nargs="?", default="IL", help='Behaviour when importing multiple files. "I" to process individually, "L" to layer/stack, "C" to concatenate. If multiple digits are inputted, this will be interpreted as a hierarchy. For example, for a 3-deep nested zip folder where pairs of midis at the bottom layer should be layered, then groups of those layers should be concatenated, and there are multiple of these groups to process independently, input "ICL". Defaults to "IL"')
 	parser.add_argument("-v", "--volume", nargs="?", type=float, default=1, help="Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1")
 	parser.add_argument("-s", "--speed", nargs="?", type=float, default=1, help="Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1")
-	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target time resolution of data, in hertz (per-second). Defaults to 12 for .🗿, .skysheet and .genshinsheet outputs, 20 for .nbt, .mcfunction and .litematic outputs, 40 otherwise")
-	parser.add_argument("-st", "--strict-tempo", action=argparse.BooleanOptionalAction, default=None, help="Snaps the song's tempo to the target specified by --resolution, being more lenient in allowing misaligned notes to compensate. Defaults to TRUE for .nbt, .mcfunction and .litematic outputs, FALSE otherwise")
+	parser.add_argument("-r", "--resolution", nargs="?", type=float, default=None, help="Target time resolution of data, in hertz (per-second). Defaults to 20 for .🗿, 20 for .skysheet, .genshinsheet, .nbt, .mcfunction, .litematic and .schem outputs, 40 otherwise")
+	parser.add_argument("-st", "--strict-tempo", action=argparse.BooleanOptionalAction, default=None, help="Snaps the song's tempo to the target specified by --resolution, being more lenient in allowing misaligned notes to compensate. Defaults to TRUE for .nbt, .mcfunction, .litematic and .schem outputs, FALSE otherwise")
 	parser.add_argument("-t", "--transpose", nargs="?", type=int, default=0, help="Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0")
 	parser.add_argument("-ik", "--invert-key", action=argparse.BooleanOptionalAction, default=False, help="Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE")
-	parser.add_argument("-mt", "--microtones", action=argparse.BooleanOptionalAction, default=None, help="Allows microtones/pitchbends. If disabled, all notes are clamped to integer semitones. For Minecraft outputs, defers affected notes to command blocks. Has no effect if --accidentals is FALSE. Defaults to FALSE for .nbt, .mcfunction, .litematic, .org, .skysheet and .genshinsheet outputs, TRUE otherwise")
-	parser.add_argument("-ac", "--accidentals", action=argparse.BooleanOptionalAction, default=None, help="Allows accidentals. If disabled, all notes are clamped to the closest key signature. Warning: Hyperchoron is currently only implemented to autodetect a single key signature per song. Defaults to FALSE for .skysheet and .genshinsheet outputs, TRUE otherwise")
+	parser.add_argument("-mt", "--microtones", action=argparse.BooleanOptionalAction, default=None, help="Allows microtones/pitchbends. If disabled, all notes are clamped to integer semitones. For Minecraft outputs, defers affected notes to command blocks. Has no effect if --accidentals is FALSE. Defaults to FALSE for .nbt, .mcfunction, .litematic, .schem, .org, .skysheet and .genshinsheet outputs, TRUE otherwise")
+	parser.add_argument("-ac", "--accidentals", action=argparse.BooleanOptionalAction, default=True, help="Allows accidentals. If disabled, all notes are clamped to the closest key signature. Warning: Hyperchoron is currently only implemented to autodetect a single key signature per song. Defaults to TRUE")
 	parser.add_argument("-av", "--apply-volumes", action=argparse.BooleanOptionalAction, default=True, help="Applies note voluming. If disabled, all notes are either 0%% or 100%% volume with no inbetween. Not currently implemented for all formats. Defaults to TRUE")
 	parser.add_argument("-er", "--extended-ranges", action=argparse.BooleanOptionalAction, default=None, help="Extends instrument ranges for formats with limitations. Defaults to TRUE for .nbs, FALSE otherwise")
 	parser.add_argument("-tc", "--tempo-changes", action=argparse.BooleanOptionalAction, default=None, help="Allows tempo changes. If disabled, all notes are moved to an approximate relative tick based on their real time as calculated with the tempo change, but without tempo changes in the output. CURRENTLY UNIMPLEMENTED; ALWAYS FALSE.")

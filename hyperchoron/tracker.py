@@ -35,7 +35,7 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 	while len(instruments) < 8:
 		activities.sort(key=lambda t: t[1][0], reverse=True)
 		curr = activities[0]
-		curr[1][0] /= 2
+		curr[1][0] /= 3
 		typeid = curr[0]
 		itype = org_instrument_selection[typeid]
 		if itype < 0:

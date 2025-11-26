@@ -1,6 +1,6 @@
 import bisect
 import functools
-from math import cbrt, erf, log2
+from math import cbrt, erf
 import numpy as np
 from .mappings import (
 	instrument_names, midi_instrument_selection,
@@ -13,7 +13,7 @@ from .mappings import (
 	major_scale, white_keys, note_names, note_names_ex,
 	c1, c3, fs1, fs4,
 )
-from .util import ts_us, round_min, log2lin, lin2log, temp_dir, event_types, DEFAULT_DESCRIPTION
+from .util import ts_us, round_min, log2lin, lin2log, temp_dir, event_types, quantise_note, DEFAULT_DESCRIPTION
 
 
 @functools.lru_cache(maxsize=256)
@@ -230,7 +230,7 @@ def save_moai(transport, output, ctx, **void):
 	nc = 0
 	events = [f"!speed@{round_min(round(bpm, 2))}"]
 	div = 0
-	for i, beat in enumerate(transport):
+	for tick, beat in enumerate(transport):
 		temp = []
 		for note in sorted(beat, key=lambda note: note.instrument_class):
 			if note.priority < 0:
@@ -238,7 +238,7 @@ def save_moai(transport, output, ctx, **void):
 			pitch = note.pitch
 			name = thirtydollar_names[note.instrument_class]
 			if name.startswith("noteblock_"):
-				mat, mod = get_note_mat_ex(note, odd=i & 1)
+				mat, mod = get_note_mat_ex(note, odd=tick & 1)
 				match mat:
 					case  "PLACEHOLDER":
 						continue
@@ -320,13 +320,15 @@ def save_moai(transport, output, ctx, **void):
 			text = name
 			if p != 0:
 				text += f"@{round_min(round(p, 2))}"
-			v = log2lin(note.velocity) * 100
-			if note.priority == 0:
-				v *= min(1, 0.8 ** (50 / wait))
+			v = quantise_note(note, tick, 1000 / wait, ctx, decay=0.85)
+			if not v:
+				continue
 			v *= thirtydollar_volumes.get(name, 1)
-			v = round(v)
+			v = round(v * 100)
 			if v != 0:
 				text += f"%{v}"
+			else:
+				continue
 			temp.append(text)
 		if temp:
 			events.append("|!combine|".join(temp))
@@ -337,7 +339,7 @@ def save_moai(transport, output, ctx, **void):
 			events[-1] = "!stop@2"
 		else:
 			events.append("_pause")
-		if i & 15 == 15 and i != len(transport) - 1:
+		if tick & 15 == 15 and tick != len(transport) - 1:
 			events[-1] += "|!divider\n"
 			div += 1
 		nc += len(temp)
@@ -508,55 +510,53 @@ def save_skysheet(transport, output, key_info, ctx, **void):
 	)
 	key = key_info["natural_key"]
 	inv = key + 1 if key < 6 else key - 1
-	recur = 2 ** round(log2(max(1, (1000 / wait) / 8)))
 	instrument_map = {}
 
 	@functools.lru_cache(maxsize=256)
 	def get_volume(vel):
 		vol = vel * 100
-		snap_volumes = (0, 5, 25, 100) if is_inv else (0, 1, 5, 13, 25, 50, 100)
+		snap_volumes = (0, 5, 25, 100) if is_inv else (-1.5, 2, 5, 13, 25, 50, 100)
 		return min((abs(vol - snap), snap) for snap in snap_volumes)[-1]
 
-	for i, beat in enumerate(transport):
+	for tick, beat in enumerate(transport):
 		notes = []
 		column = [0, notes]
 		for note in beat:
 			if note.priority < 0:
 				continue
 			note.pitch = round(note.pitch)
-			mat, mod = get_note_ins(note, odd=i & 1, key=key)
+			mat, mod = get_note_ins(note, odd=tick & 1, key=key)
 			if mat == "PLACEHOLDER":
 				continue
 			is_inv = False
 			if note_names_ex[mod % 12].endswith("b"):
-				mat, mod = get_note_ins(note, odd=i & 1, key=inv)
+				mat, mod = get_note_ins(note, odd=tick & 1, key=inv)
 				is_inv = True
 			nkey = white_keys[mod]
-			vel = note.velocity
-			if vel <= 0:
-				continue
-			if note.priority == 0:
-				if note.timing % round(recur * max(1, 1 / vel / 16)) != 0:
-					continue
-				vel /= 2
-			vol = get_volume(vel)
+			vol = quantise_note(note, tick, 1000 / wait, ctx, decay=0.75, mode="log") * 100
 			if not vol:
 				continue
 			if mat == "LightGuitar":
 				vol *= 0.67
+			elif mat == "Contrabass":
+				vol *= 0.875
 			elif mat == "Aurora":
 				vol *= 1.25
 			elif mat == "Horn":
-				vol *= 1.15
+				vol *= 1.25
 			elif mat in ("Flute", "Panflute"):
 				vol *= 1.1
-			tup = (mat, vol, is_inv)
+			tup = (mat, round(vol), is_inv)
 			v = None
 			try:
 				v = instrument_map[tup]
 			except KeyError:
-				if len(instrument_map) >= 48:
-					new_tups = sorted((tup for tup in instrument_map if tup[0] == mat and tup[2] == is_inv), key=lambda t: abs(t[1] - vol))
+				if len(instrument_map) >= 52:
+					new_tups = sorted((tup for tup in instrument_map if tup[2] == is_inv), key=lambda t: (tup[0] != mat, abs(t[1] - vol)))
+					if new_tups:
+						v = instrument_map[new_tups[0]]
+				elif len(instrument_map) >= 42:
+					new_tups = sorted((tup for tup in instrument_map if tup[0] == mat and tup[2] == is_inv and abs(tup[1] - vol) < 15), key=lambda t: abs(t[1] - vol))
 					if new_tups:
 						v = instrument_map[new_tups[0]]
 			if not v:
@@ -623,16 +623,15 @@ def save_genshinsheet(transport, output, key_info, ctx, **void):
 	inv = 1
 	sec = 10
 	top = 11
-	recur = 2 ** round(log2(max(1, (1000 / wait) / 8)))
 	instrument_map = {}
 
 	@functools.lru_cache(maxsize=256)
 	def get_volume(vel):
 		vol = vel * 100
-		snap_volumes = (0, 1, 5, 13, 25, 50, 100)
+		snap_volumes = (0, 1, 2, 5, 13, 25, 50, 100)
 		return min((abs(vol - snap), snap) for snap in snap_volumes)[-1]
 
-	for i, beat in enumerate(transport):
+	for tick, beat in enumerate(transport):
 		notes = []
 		column = [0, notes]
 		for note in beat:
@@ -660,12 +659,10 @@ def save_genshinsheet(transport, output, key_info, ctx, **void):
 			elif mod >= 36:
 				mod = 24 + mod % 12
 			nkey = genshin_mapping[white_keys[mod]]
-			vel = note.velocity
-			if note.priority == 0:
-				if note.timing % recur != 0:
-					continue
-				vel /= 4
-			vol = get_volume(vel)
+			vel = quantise_note(note, tick, 1000 / wait, ctx, decay=0.75) * 100
+			if not vel:
+				continue
+			vol = get_volume(lin2log(vel))
 			if not vol:
 				continue
 			tup = (mat, vol, offs)
