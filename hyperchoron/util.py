@@ -6,7 +6,7 @@ import datetime
 import fractions
 import functools
 import lzma
-from math import isqrt, sqrt, log10, inf, isfinite
+from math import floor, isqrt, sqrt, log10, inf, isfinite
 import multiprocessing
 import os
 import random
@@ -146,12 +146,14 @@ def to_numpy(events, sort=True):
 		padded = [row + [0] * (max_len - len(row)) for row in events]
 		data = np.array(padded, dtype=object)
 		assert len(data.shape) == 2, (data, data.shape)
-		data[:, 0] = np.int32(data[:, 0])
-		data[:, 1] = arround_min(data[:, 1])
+		data[:, 0] = np.int32(typecast(data[:, 0], int))
+		data[:, 1] = arround_min(typecast(data[:, 1], float))
 		if len(data) and isinstance(data[0][2], str):
 			data[:, 2] = [getattr(event_types, e.strip().upper(), 0) for e in data[:, 2]]
-		data[:, 3] = np.int32(data[:, 3])
-		data[:, 4] = np.float32(data[:, 4])
+		data[:, 3] = np.int32(typecast(data[:, 3], int))
+		data[:, 4] = np.float32(typecast(data[:, 4], float))
+		for i in range(5, data.shape[-1]):
+			data[:, i] = np.float32(typecast(data[:, i], float))
 		events = data
 	if sort:
 		timestamps = events[:, 1]
@@ -184,6 +186,17 @@ def arround_min(x, atol=1 / 4096):
 	except TypeError:
 		print(x.dtype)
 		raise
+
+def typecast(data, dtype, default=0):
+	for i, x in enumerate(data):
+		if type(x) == dtype:
+			continue
+		try:
+			x = dtype(x)
+		except (ValueError, TypeError):
+			x = default
+		data[i] = x
+	return data
 
 def round_random(x) -> int:
 	try:
@@ -400,6 +413,14 @@ def create_reader(file):
 		return int.from_bytes(b, "little")
 	return read
 
+def quantise_pitch(n, pitch, tick=0):
+	p2 = round(pitch)
+	if abs(pitch - p2) < 1 / 12 or n.priority >= 1:
+		return p2
+	low = floor(pitch)
+	frac = pitch - low
+	return low + (-frac * (low + tick + n.timing) % 1 >= frac)
+
 def transport_note_priority(n, sustained=False, multiplier=8):
 	return n.priority + round(n.velocity * 8) + round(n.pitch / 127) + sustained * multiplier / 8
 
@@ -450,7 +471,7 @@ def quantise_note(note, tick, tempo, ctx, decay=0.8, mode="linear"):
 	if note.priority <= 0:
 		linvel *= min(1, 0.9 ** (tempo / 20))
 	if (linvel < 1 and not ctx.apply_volumes or linvel < 0.125) and (note.priority <= 0 or note.instrument_class < 0 and linvel < 0.25):
-		if (tick + note.timing) * velocity % 1 > velocity:
+		if (floor(note.pitch) + tick + note.timing) * -velocity % 1 > max(0.25, velocity):
 			return 0
 		linvel = min(log2lin(note.velocity * decay), linvel / velocity)
 	if not ctx.apply_volumes:
@@ -905,9 +926,9 @@ def transpose(transport, ctx):
 	key_info = {}
 	mapping = {}
 	if not ctx.microtones:
-		for beat in transport:
+		for tick, beat in enumerate(transport):
 			for note in beat:
-				note.pitch = round(note.pitch)
+				note.pitch = quantise_pitch(note, note.pitch, tick)
 	# if ctx.invert_key or not ctx.accidentals:
 	notes = np.zeros(12, dtype=np.float32)
 	for beat in transport:
@@ -1015,6 +1036,7 @@ def get_parser():
 	parser.add_argument("-er", "--extended-ranges", action=argparse.BooleanOptionalAction, default=None, help="Extends instrument ranges for formats with limitations. Defaults to TRUE for .nbs, FALSE otherwise")
 	parser.add_argument("-tc", "--tempo-changes", action=argparse.BooleanOptionalAction, default=None, help="Allows tempo changes. If disabled, all notes are moved to an approximate relative tick based on their real time as calculated with the tempo change, but without tempo changes in the output. CURRENTLY UNIMPLEMENTED; ALWAYS FALSE.")
 	parser.add_argument("-d", "--drums", action=argparse.BooleanOptionalAction, default=True, help="Allows percussion channel. If disabled, percussion channels will be discarded. Defaults to TRUE")
+	parser.add_argument("-as", "--all-sustain", action=argparse.BooleanOptionalAction, default=False, help="Forces all instruments to have sustained notes, rather than only non-percussive ones. Defaults to FALSE")
 	parser.add_argument("-md", "--max-distance", nargs="?", type=int, default=42, help="For Minecraft outputs only: Restricts the maximum block distance the notes may be placed from the centre line of the structure, in increments of 3 (one module). Decreasing this value makes the output more compact, at the cost of note volume accuracy. Defaults to 42")
 	parser.add_argument("-mi", "--minecart-improvements", action=argparse.BooleanOptionalAction, default=False, help="For Minecraft outputs only: Assumes the server is running the [Minecart Improvements](https://minecraft.wiki/w/Minecart_Improvements) version(s). Less powered rails will be applied on the main track, to account for the increased deceleration. Currently only semi-functional; the rail section connecting the midway point may be too slow.")
 	return parser

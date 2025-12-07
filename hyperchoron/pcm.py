@@ -1,15 +1,18 @@
+import bisect
 import contextlib
 from dataclasses import dataclass
-from math import isfinite
+from math import ceil, isfinite
 import functools
 import os
+import shutil
 import subprocess
+from types import SimpleNamespace
 import numpy as np
-from .mappings import c1, nbs_raws
-from .util import base_path, temp_dir, ts_us, in_sample_rate, out_sample_rate, fluidsynth, orgexport, ensure_synths, get_sf2, lin2log, round_random
+from .mappings import c1, c4, a4, nbs_raws
+from .util import base_path, temp_dir, ts_us, in_sample_rate, out_sample_rate, fluidsynth, create_reader, orgexport, ensure_synths, get_sf2, lin2log, log2lin, round_random
 
 
-writer_sr = 32000
+writer_sr = 36000
 
 bps = 2
 bpo = bps * 12
@@ -224,8 +227,8 @@ def ffmpeg_output(fo):
 			ba = "224k"
 			extra = ["-c:a", "libmp3lame"]
 		case _:
-			return [fo]
-	return extra + ["-b:a", ba, "-vbr", "on", fo]
+			return ["-af", "alimiter", fo]
+	return extra + ["-b:a", ba, "-vbr", "on", "-af", "alimiter", fo]
 
 
 def render_midi(inputs, outputs, fmt="flac"):
@@ -237,7 +240,7 @@ def render_midi(inputs, outputs, fmt="flac"):
 		intermediate = outputs
 	procs = []
 	for fi, fo in zip(inputs, intermediate):
-		args = [fluidsynth, "-g", "0.5" if convert else "1", "-F", fo, "-c", "64", "-o", "synth.polyphony=32767", "-r", str(writer_sr if convert else out_sample_rate), "-n", sf2, fi]
+		args = [fluidsynth, "-g", "0.25" if convert else "1", "-F", fo, "-c", "64", "-o", "synth.polyphony=32767", "-r", str(writer_sr if convert else out_sample_rate), "-n", sf2, fi]
 		proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)
 		procs.append(proc)
 	for proc in procs:
@@ -249,7 +252,7 @@ def render_midi(inputs, outputs, fmt="flac"):
 	import imageio_ffmpeg as ii
 	ffmpeg = ii.get_ffmpeg_exe()
 	for fi, fo in zip(intermediate, outputs):
-		args = [ffmpeg, "-y", "-i", fi, "-af", "volume=2", *(ffmpeg_output(fo))]
+		args = [ffmpeg, "-y", "-i", fi, "-af", "volume=4", *ffmpeg_output(fo)]
 		proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)
 		procs.append(proc)
 	for proc in procs:
@@ -268,7 +271,7 @@ def render_nbs(inputs, outputs, fmt="flac"):
 	from .minecraft import segment_nbs
 	@functools.lru_cache(maxsize=192)
 	def load_audio(fn):
-		with zipfile.ZipFile(f"{base_path}minecraft_templates/Notes.zip", "r") as z:
+		with zipfile.ZipFile(f"{base_path}templates/Notes.zip", "r") as z:
 			with z.open(fn, "r") as f:
 				a = load(f, sr=writer_sr)[0]
 		# Cut silence at end of audio to minimise later processing
@@ -375,32 +378,140 @@ def render_nbs(inputs, outputs, fmt="flac"):
 
 
 def render_org(inputs, outputs, fmt="wav"):
-	ensure_synths()
-	convert = fmt != "wav"
-	intermediate = [temp_dir + str(ts_us()) + str(i) + ".wav" for i, fo in enumerate(outputs)]
-	temps = [fo.rsplit(".", 1)[0] + ".org" for i, fo in enumerate(intermediate)]
-	import shutil
-	for fi, fo in zip(inputs, temps):
-		shutil.copyfile(fi, fo)
-	cwd = orgexport.replace("\\", "/").rsplit("/", 1)[0]
+	from .tracker import read_org
+	from librosa import resample
+	drum_sr = 22050
+	WDB = None
+	def load_wdb():
+		nonlocal WDB
+		if WDB:
+			return WDB
+		nwaves = 100
+		wdb = dict(
+			wave100=np.empty((nwaves, 256), dtype=np.float32),
+			drums=[],
+		)
+		import struct
+		import zipfile
+		with zipfile.ZipFile(f"{base_path}templates/soundbank.zip", "r") as z:
+			with z.open(z.filelist[0], "r") as f:
+				data = memoryview(f.read())
+		for i in range(nwaves):
+			wdb["wave100"][i] = np.frombuffer(data[i * 256:(i + 1) * 256], dtype=np.int8)
+		wdb["wave100"] *= 1 / 127 / 4
+		data = data[nwaves * 256:]
+		while data:
+			length = struct.unpack("<L", data[:4])[0]
+			drumdata = data[4:4 + length]
+			data = data[4 + length:]
+			assert len(drumdata) == length, "Incomplete drum samples in wdb file!"
+			drumsample = (np.frombuffer(drumdata, dtype=np.int8) ^ 127).astype(np.float32) * (1 / 127 / 4)
+			wdb["drums"].append(drumsample)
+		WDB = wdb
+		return wdb
+	@functools.lru_cache(maxsize=1024)
+	def render_org_wave(iid, freq, length, target_length):
+		sample = WDB["wave100"][iid]
+		target_len = len(sample) * freq * length
+		wave = np.tile(sample, ceil(target_len / len(sample)))[:round(target_len)]
+		for idx in range(len(sample) // 2):
+			if wave[idx] in range(-1, 2):
+				break
+		declick_start = wave[:idx]
+		declick_start *= (1 + np.tanh(np.linspace(-np.pi, np.pi, num=len(declick_start), dtype=np.float32))) * 0.5
+		for idx in range(len(wave) - 1, len(wave) - 1 - len(sample) // 2, -1):
+			if wave[idx] in range(-1, 2):
+				break
+		declick_end = wave[idx:]
+		declick_end *= (1 - np.tanh(np.linspace(-np.pi, np.pi, num=len(declick_end), dtype=np.float32))) * 0.5
+		wave = resample(wave, orig_sr=len(wave), target_sr=target_length, res_type="soxr_hq", fix=False)
+		return wave.astype(np.float16)
+	@functools.lru_cache(maxsize=1024)
+	def render_org_drum(iid, freq, length, target_length):
+		wave = WDB["drums"][iid]
+		orig_sr = freq
+		# print(orig_sr, writer_sr)
+		wave = resample(wave, orig_sr=orig_sr, target_sr=writer_sr, res_type="soxr_hq", fix=False)
+		return wave.astype(np.float16)
+	volume_table = np.arange(256, dtype=np.float32)
+	volume_table *= 1 / 255
+	volume_table -= 1
+	np.power(10, volume_table, out=volume_table)
+	@functools.lru_cache(maxsize=1024)
+	def resamp_vols(volumes, target_length):
+		volumes = volume_table[np.uint8(volumes)]
+		x_old = np.linspace(0, 1, len(volumes))
+		x_new = np.linspace(0, 1, target_length)
+		return np.interp(x_new, x_old, volumes)
+	load_wdb()
 	procs = []
-	for fi, fo in zip(temps, intermediate):
-		args = [orgexport, fi, str(writer_sr), "0"]
-		proc = subprocess.Popen(args, cwd=cwd, stdin=subprocess.DEVNULL)
-		procs.append(proc)
-	for proc in procs:
-		proc.wait()
-	procs.clear()
-	if not convert:
-		for fi, fo in zip(intermediate, outputs):
-			os.replace(fi, fo)
-		assert all(os.path.exists(fo) and os.path.getsize(fo) for fo in outputs)
-		return outputs
-	import imageio_ffmpeg as ii
-	ffmpeg = ii.get_ffmpeg_exe()
-	for fi, fo in zip(intermediate, outputs):
-		args = [ffmpeg, "-y", "-i", fi, *(ffmpeg_output(fo))]
-		proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)
+	for fi, fo in zip(inputs, outputs):
+		orgfile = read_org(fi)
+		final_notes = []
+		active_notes = []
+		for ins in orgfile.instruments:
+			for j, e in enumerate(ins.events):
+				if e.pitch != 255:
+					if ins.drum:
+						e.freq = (e.pitch + ins.finetune / 1000) * 800 + 100
+						min_length = ceil(e.freq / writer_sr / orgfile.wait * 1000)
+					else:
+						e.freq = 1760 * 2 ** ((e.pitch + ins.finetune / 1000 - 1 - a4) / 12)
+						min_length = 1
+					e.length = max(e.length, min_length) if ins.sustain else 1
+					e.volumes = np.full(e.length, e.volume, dtype=np.uint8)
+					for k in range(len(active_notes)):
+						e2 = active_notes[-k - 1]
+						if e.tick >= e2.tick + e2.length:
+							final_notes.extend(active_notes[:-k - 1])
+							active_notes = active_notes[-k - 1:]
+							break
+					bisect.insort_right(active_notes, e, key=lambda ev: ev.tick + ev.length)
+					active_notes.append(e)
+				else:
+					if e.volume != 255:
+						for k in range(len(active_notes)):
+							e2 = active_notes[-k - 1]
+							if e.tick >= e2.tick + e2.length:
+								final_notes.extend(active_notes[:-k - 1])
+								active_notes = active_notes[-k - 1:]
+								break
+							if e.instrument != e2.instrument:
+								continue
+							diff = e.tick - e2.tick
+							e2.volumes[diff:] = e.volume
+		final_notes.extend(active_notes)
+		buffer = np.zeros((ceil(orgfile.end * orgfile.wait / 1000 * writer_sr), 2), dtype=np.float32)
+		stacks = np.zeros(len(buffer), dtype=np.uint8)
+		for e in final_notes:
+			pos = round(e.tick * orgfile.wait / 1000 * writer_sr)
+			stop = round((e.tick + e.length) * orgfile.wait / 1000 * writer_sr)
+			target_length = stop - pos
+			if target_length <= 0:
+				continue
+			ins = orgfile.instruments[e.instrument]
+			if ins.drum:
+				wave = render_org_drum(ins.id, e.freq, e.length * orgfile.wait / 1000, target_length)
+			else:
+				wave = render_org_wave(ins.id, e.freq, e.length * orgfile.wait / 1000, target_length)
+			stop = min(len(buffer), pos + len(wave))
+			if stop <= pos:
+				continue
+			wave = wave[:stop - pos]
+			vols = resamp_vols(tuple(e.volumes), target_length=target_length)[:len(wave)]
+			wave = wave.astype(np.float32)
+			wave[:len(vols)] *= vols
+			if len(vols) and vols[-1] != 1:
+				wave[len(vols):] *= vols[-1]
+			left = right = wave
+			buffer[pos:stop, 0] += left
+			buffer[pos:stop, 1] += right
+			stacks[pos:stop] += 1
+		import imageio_ffmpeg as ii
+		ffmpeg = ii.get_ffmpeg_exe()
+		args = [ffmpeg, "-y", "-f", "f32le", "-ar", str(writer_sr), "-ac", "2", "-i", "-", *ffmpeg_output(fo)]
+		proc = subprocess.Popen(args, stdin=subprocess.PIPE)
+		proc.communicate(buffer.data)
 		procs.append(proc)
 	for proc in procs:
 		proc.wait()
@@ -413,7 +524,7 @@ def render_xm(inputs, outputs, fmt="flac"):
 	ffmpeg = ii.get_ffmpeg_exe()
 	procs = []
 	for fi, fo in zip(inputs, outputs):
-		args = [ffmpeg, "-y", "-i", fi, *(ffmpeg_output(fo))]
+		args = [ffmpeg, "-y", "-i", fi, *ffmpeg_output(fo)]
 		proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)
 		procs.append(proc)
 	for proc in procs:
@@ -424,7 +535,10 @@ def render_xm(inputs, outputs, fmt="flac"):
 
 def mix_raw(inputs, output):
 	if len(inputs) == 1 and inputs[0].rsplit(".", 1)[-1] == output.rsplit(".", 1)[-1]:
-		os.replace(inputs[0], output)
+		try:
+			os.replace(inputs[0], output)
+		except (OSError, PermissionError):
+			shutil.copyfile(inputs[0], output)
 		return output
 	import imageio_ffmpeg as ii
 	ffmpeg = ii.get_ffmpeg_exe()

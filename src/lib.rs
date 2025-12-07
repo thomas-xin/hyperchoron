@@ -132,7 +132,6 @@ fn parse_midi_events<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, Py
 						_ => {}
 					}
 				}
-
 				// -----------------------------
 				// Meta Events
 				// -----------------------------
@@ -169,7 +168,6 @@ fn parse_midi_events<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, Py
 					}
 					_ => {}
 				},
-
 				_ => {}
 			}
 		}

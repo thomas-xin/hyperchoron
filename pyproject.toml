@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hyperchoron"
 readme = "README.md"
-version = "1.1.10"
+version = "1.1.11"
 authors = [
 	{name = "Thomas Xin", email = "thomasxin@gmail.com"},
 ]
@@ -51,7 +51,7 @@ Homepage = "https://github.com/thomas-xin/hyperchoron"
 Issues = "https://github.com/thomas-xin/hyperchoron/issues"
 
 [tool.setuptools]
-packages = ["hyperchoron", "hyperchoron.minecraft_templates"]
+packages = ["hyperchoron", "hyperchoron.templates"]
 include-package-data = true
 
 [[tool.setuptools-rust.ext-modules]]

@@ -3,6 +3,7 @@
 
 # Remapping of midi note range to note block note range
 c4 = 60
+a4 = c4 + 9
 c3 = c4 - 12
 fs4 = c4 + 6
 fs1 = fs4 - 36
@@ -43,20 +44,30 @@ note_names_ex = [
 white_keys = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6, 7]
 white_keys += [i + 7 for i in white_keys[1:]]
 white_keys += [i + 14 for i in white_keys[1:]]
-genshin_mapping = [14, 15, 16, 17, 18, 19, 20, 7, 8, 9, 10, 11, 12, 13, 0, 1, 2, 3, 4, 5, 6]
 major_scale = [0, 2, 4, 5, 7, 9, 11, 12]
 major_scale += [i + 12 for i in major_scale[1:]]
 major_scale += [i + 24 for i in major_scale[1:]]
 
-# Unused
-# harmonics = dict(
-# 	default=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17)][1:],
-# 	triangle=[(round(math.log(n, 2) * 12), 1 / n ** 2) for n in range(1, 17, 2)][1:],
-# 	square=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17, 2)][1:],
-# 	saw=[(round(math.log(n, 2) * 12), 1 / n) for n in range(1, 17)][1:],
-# )
+instrument_classes = {
+	0: "Plucked",
+	1: "Keyboard",
+	2: "Wind",
+	3: "Square Synth",
+	4: "Pitched Percussion",
+	5: "Bell",
+	6: "Unpitched Percussion",
+	7: "String",
+	8: "Banjo",
+	9: "Voice",
+	10:"Brass",
+	11:"Saw Synth",
+	12:"Organ",
+	13:"Overdrive Guitar",
+	-1:"Drumset",
+}
+genshin_mapping = [14, 15, 16, 17, 18, 19, 20, 7, 8, 9, 10, 11, 12, 13, 0, 1, 2, 3, 4, 5, 6]
 
-falling_blocks = ("sand", "red_sand", "black_concrete_powder", "gravel")
+# Minecraft
 # Predefined list for Minecraft, attempting to match instruments across pitch ranges
 # Each instrument class is given the full 6-octave range, and a block is assigned that would map to an appropriate note block instrument
 material_map = [

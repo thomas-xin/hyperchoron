@@ -13,6 +13,7 @@ The decoders are optimised to handle black MIDIs with up to hundreds of millions
 # Instructions for use
 ## Installation
 - Install [python](https://www.python.org) and [pip](https://pip.pypa.io/en/stable/)
+- (Optional) Install [rust](https://rust-lang.org/tools/install) for optimised conversion from MIDI files
 - Install Hyperchoron as a package:
 `pip install hyperchoron`
 - (Optional) Install dependencies for PCM-related music features (this takes much more disk space due to the use of neural networks and larger audio frameworks):<br />
@@ -21,9 +22,12 @@ The decoders are optimised to handle black MIDIs with up to hundreds of millions
 `git clone https://github.com/SatyrDiamond/DawVert`<br />
 ## Usage
 ```ini
-usage: hyperchoron [-h] [-V] -i INPUT [INPUT ...] -o OUTPUT [OUTPUT ...] [-f FORMAT] [-x [MIXING]] [-v [VOLUME]] [-s [SPEED]] [-r [RESOLUTION]] [-st | --strict-tempo | --no-strict-tempo] [-t [TRANSPOSE]] [-ik | --invert-key | --no-invert-key]
-                   [-mt | --microtones | --no-microtones] [-ac | --accidentals | --no-accidentals] [-av | --apply-volumes | --no-apply-volumes] [-er | --extended-ranges | --no-extended-ranges] [-tc | --tempo-changes | --no-tempo-changes]
-                   [-d | --drums | --no-drums] [-md [MAX_DISTANCE]] [-mi | --minecart-improvements | --no-minecart-improvements]
+usage: hyperchoron [-h] [-V] -i INPUT [INPUT ...] -o OUTPUT [OUTPUT ...] [-f FORMAT] [-x [MIXING]] [-v [VOLUME]] [-s [SPEED]]
+                   [-r [RESOLUTION]] [-st | --strict-tempo | --no-strict-tempo] [-t [TRANSPOSE]] [-ik | --invert-key | --no-invert-key]
+                   [-mt | --microtones | --no-microtones] [-ac | --accidentals | --no-accidentals]
+                   [-av | --apply-volumes | --no-apply-volumes] [-er | --extended-ranges | --no-extended-ranges]
+                   [-tc | --tempo-changes | --no-tempo-changes] [-d | --drums | --no-drums] [-as | --all-sustain | --no-all-sustain]
+                   [-md [MAX_DISTANCE]] [-mi | --minecart-improvements | --no-minecart-improvements]
 
 MIDI-Tracker-DAW converter and Minecraft Note Block exporter
 
@@ -33,43 +37,59 @@ options:
   -i, --input INPUT [INPUT ...]
                         Input file (.zip | .mid | .csv | .nbs | .org | *)
   -o, --output OUTPUT [OUTPUT ...]
-                        Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .schem | .schematic | .org | .skysheet | .genshinsheet | *)
-  -f, --format FORMAT   Output format (mid | csv | nbs | nbt | mcfunction | litematic | .schem | .schematic | org | skysheet | genshinsheet | deltarune | *)
+                        Output file (.mid | .csv | .nbs | .nbt | .mcfunction | .litematic | .schem | .schematic | .org | .skysheet |
+                        .genshinsheet | *)
+  -f, --format FORMAT   Output format (mid | csv | nbs | nbt | mcfunction | litematic | .schem | .schematic | org | skysheet |
+                        genshinsheet | deltarune | *)
   -x, --mixing [MIXING]
-                        Behaviour when importing multiple files. "I" to process individually, "L" to layer/stack, "C" to concatenate. If multiple digits are inputted, this will be interpreted as a hierarchy. For example, for a 3-deep nested zip
-                        folder where pairs of midis at the bottom layer should be layered, then groups of those layers should be concatenated, and there are multiple of these groups to process independently, input "ICL". Defaults to "IL"
+                        Behaviour when importing multiple files. "I" to process individually, "L" to layer/stack, "C" to concatenate. If
+                        multiple digits are inputted, this will be interpreted as a hierarchy. For example, for a 3-deep nested zip
+                        folder where pairs of midis at the bottom layer should be layered, then groups of those layers should be
+                        concatenated, and there are multiple of these groups to process independently, input "ICL". Defaults to "IL"
   -v, --volume [VOLUME]
                         Scales volume of all notes up/down as a multiplier, applied before note quantisation. Defaults to 1
   -s, --speed [SPEED]   Scales song speed up/down as a multiplier, applied before tempo sync; higher = faster. Defaults to 1
   -r, --resolution [RESOLUTION]
-                        Target time resolution of data, in hertz (per-second). Defaults to 12 for .🗿, .skysheet and .genshinsheet outputs, 20 for .nbt, .mcfunction and .litematic outputs, 40 otherwise
+                        Target time resolution of data, in hertz (per-second). Defaults to 20 for .🗿, 20 for .skysheet, .genshinsheet,
+                        .nbt, .mcfunction, .litematic and .schem outputs, 40 otherwise
   -st, --strict-tempo, --no-strict-tempo
-                        Snaps the song's tempo to the target specified by --resolution, being more lenient in allowing misaligned notes to compensate. Defaults to TRUE for .nbt, .mcfunction and .litematic outputs, FALSE otherwise
+                        Snaps the song's tempo to the target specified by --resolution, being more lenient in allowing misaligned notes
+                        to compensate. Defaults to TRUE for .nbt, .mcfunction, .litematic and .schem outputs, FALSE otherwise
   -t, --transpose [TRANSPOSE]
-                        Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher = higher pitched. Defaults to 0
+                        Transposes song up/down a certain amount of semitones, applied before instrument material mapping; higher =
+                        higher pitched. Defaults to 0
   -ik, --invert-key, --no-invert-key
-                        Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor). Defaults to FALSE
+                        Experimental: During transpose step, autodetects song key signature, then inverts it (e.g. C Major <=> C Minor).
+                        Defaults to FALSE
   -mt, --microtones, --no-microtones
-                        Allows microtones/pitchbends. If disabled, all notes are clamped to integer semitones. For Minecraft outputs, defers affected notes to command blocks. Has no effect if --accidentals is FALSE. Defaults to FALSE for .nbt,
-                        .mcfunction, .litematic, .org, .skysheet and .genshinsheet outputs, TRUE otherwise
+                        Allows microtones/pitchbends. If disabled, all notes are clamped to integer semitones. For Minecraft outputs,
+                        defers affected notes to command blocks. Has no effect if --accidentals is FALSE. Defaults to FALSE for .nbt,
+                        .mcfunction, .litematic, .schem, .org, .skysheet and .genshinsheet outputs, TRUE otherwise
   -ac, --accidentals, --no-accidentals
-                        Allows accidentals. If disabled, all notes are clamped to the closest key signature. Warning: Hyperchoron is currently only implemented to autodetect a single key signature per song. Defaults to FALSE for .skysheet and
-                        .genshinsheet outputs, TRUE otherwise
+                        Allows accidentals. If disabled, all notes are clamped to the closest key signature. Warning: Hyperchoron is
+                        currently only implemented to autodetect a single key signature per song. Defaults to TRUE
   -av, --apply-volumes, --no-apply-volumes
-                        Applies note voluming. If disabled, all notes are either 0% or 100% volume with no inbetween. Not currently implemented for all formats. Defaults to TRUE
+                        Applies note voluming. If disabled, all notes are either 0% or 100% volume with no inbetween. Not currently
+                        implemented for all formats. Defaults to TRUE
   -er, --extended-ranges, --no-extended-ranges
                         Extends instrument ranges for formats with limitations. Defaults to TRUE for .nbs, FALSE otherwise
   -tc, --tempo-changes, --no-tempo-changes
-                        Allows tempo changes. If disabled, all notes are moved to an approximate relative tick based on their real time as calculated with the tempo change, but without tempo changes in the output. CURRENTLY UNIMPLEMENTED; ALWAYS
+                        Allows tempo changes. If disabled, all notes are moved to an approximate relative tick based on their real time
+                        as calculated with the tempo change, but without tempo changes in the output. CURRENTLY UNIMPLEMENTED; ALWAYS
                         FALSE.
   -d, --drums, --no-drums
                         Allows percussion channel. If disabled, percussion channels will be discarded. Defaults to TRUE
+  -as, --all-sustain, --no-all-sustain
+                        Forces all instruments to have sustained notes, rather than only non-percussive ones. Defaults to FALSE
   -md, --max-distance [MAX_DISTANCE]
-                        For Minecraft outputs only: Restricts the maximum block distance the notes may be placed from the centre line of the structure, in increments of 3 (one module). Decreasing this value makes the output more compact, at the
-                        cost of note volume accuracy. Defaults to 42
+                        For Minecraft outputs only: Restricts the maximum block distance the notes may be placed from the centre line of
+                        the structure, in increments of 3 (one module). Decreasing this value makes the output more compact, at the cost
+                        of note volume accuracy. Defaults to 42
   -mi, --minecart-improvements, --no-minecart-improvements
-                        For Minecraft outputs only: Assumes the server is running the [Minecart Improvements](https://minecraft.wiki/w/Minecart_Improvements) version(s). Less powered rails will be applied on the main track, to account for the
-                        increased deceleration. Currently only semi-functional; the rail section connecting the midway point may be too slow.
+                        For Minecraft outputs only: Assumes the server is running the [Minecart
+                        Improvements](https://minecraft.wiki/w/Minecart_Improvements) version(s). Less powered rails will be applied on
+                        the main track, to account for the increased deceleration. Currently only semi-functional; the rail section
+                        connecting the midway point may be too slow.
 ```
 ### Examples
 Converting a MIDI file into a Minecraft Litematica schematic:
@@ -104,7 +124,7 @@ Hyperchoron can be imported as a Python library for integration with other tools
 - `hyperchoron.save_file(midi_events, fo, ctx) -> str`: Saves a list or numpy array of MIDI-like events to a single file from any of the encodable formats. Performs conversions as necessary.
 - `hyperchoron.util.get_children(path) -> list`: Retrieves the list of "children" of a path. This may contain only a single element for regular files or folders of a single element, but will additionally resolve URLs and compressed archives to their own temporary folders, returning the new path of each.
 - `hyperchoron.util.Transport(self, notes=None, tick_delay=0)`: The main class for temporary storage of music in the intermediate stage of conversion, also used for the `.hpc` extension. Intended to be serialisable, and auto-compressed in memory.
-- `hyperchoron.fastmidi.parse_midi_events(path)`: The main MIDI parser as a standalone tool, now rewritten in rust for blazing fast speeds!! 🦀 (Significantly faster than midicsv implementations, returns a 6-column numpy array of all MIDI events with track numbers removed, and each note event instead contains the note's duration in ticks as the last element.)
+- `hyperchoron.fastmidi.parse_midi_events(path)`: The main MIDI parser as a standalone tool, now rewritten in rust for blazing fast speeds!! 🦀 (Significantly faster than midicsv implementations, returns a 6-column numpy array of all MIDI events with track numbers removed, and each note event instead contains the note's duration in ticks as the last element. Requires the rust programming language as a dependency.)
 ### Input Formats
 - Native support:
   - .hpc: The program's own internal memory storage format. Useful if you want to "cut down" an input with hundreds of millions of notes into a cache, to postprocess into multiple formats with different settings later.

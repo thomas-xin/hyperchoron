@@ -533,7 +533,7 @@ def save_skysheet(transport, output, key_info, ctx, **void):
 				mat, mod = get_note_ins(note, odd=tick & 1, key=inv)
 				is_inv = True
 			nkey = white_keys[mod]
-			vol = quantise_note(note, tick, 1000 / wait, ctx, decay=0.75, mode="log") * 100
+			vol = quantise_note(note, tick, 1000 / wait, ctx, decay=0.5, mode="log") * 100
 			if not vol:
 				continue
 			if mat == "LightGuitar":
@@ -659,7 +659,7 @@ def save_genshinsheet(transport, output, key_info, ctx, **void):
 			elif mod >= 36:
 				mod = 24 + mod % 12
 			nkey = genshin_mapping[white_keys[mod]]
-			vel = quantise_note(note, tick, 1000 / wait, ctx, decay=0.75) * 100
+			vel = quantise_note(note, tick, 1000 / wait, ctx, decay=0.6) * 100
 			if not vel:
 				continue
 			vol = get_volume(lin2log(vel))

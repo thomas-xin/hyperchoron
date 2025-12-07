@@ -1,14 +1,14 @@
 from dataclasses import dataclass
 import functools
-from math import ceil, hypot
+from math import ceil, hypot, log10
 import os
 from types import SimpleNamespace
 from .mappings import (
 	org_instrument_selection, org_instrument_mapping,
 	instrument_names, midi_instrument_selection,
-	c4, c1, percussion_mats
+	c4, c1, percussion_mats,
 )
-from .util import create_reader, priority_ordering, temp_dir, in_sample_rate, event_types
+from .util import create_reader, log2lin, priority_ordering, temp_dir, in_sample_rate, event_types
 
 
 @dataclass(slots=True)
@@ -19,13 +19,17 @@ class OrgNote:
 	volume: int
 	panning: int
 
+	@property
+	def aligned(self):
+		return self.tick + self.length
+
 def build_org(notes, instrument_activities, speed_info, ctx):
 	orig_ms_per_clock, real_ms_per_clock, scale, orig_step_ms, _orig_tempo = speed_info
 	speed_ratio = real_ms_per_clock / scale / orig_ms_per_clock
 	wait = max(1, round(orig_step_ms / speed_ratio))
 	activities = list(map(list, instrument_activities.items()))
 	instruments = []
-	if sum(t[1][1] for t in activities) >= 12:
+	if not ctx.extended_ranges and sum(t[1][1] for t in activities) >= 12:
 		instruments.append(SimpleNamespace(
 			id=60,
 			index=0,
@@ -35,7 +39,10 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 	while len(instruments) < 8:
 		activities.sort(key=lambda t: t[1][0], reverse=True)
 		curr = activities[0]
-		curr[1][0] /= 3
+		if ctx.extended_ranges:
+			curr[1][0] /= 4096
+		else:
+			curr[1][0] /= 3
 		typeid = curr[0]
 		itype = org_instrument_selection[typeid]
 		if itype < 0:
@@ -55,20 +62,18 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 		))
 	note_count = sum(map(len, notes))
 	conservative = False
-	if note_count > 4096 * 8 * 4:
+	if note_count > (65536 * 8 * 4 if ctx.extended_ranges else 4096 * 8 * 4):
 		print(f"High note count {note_count} detected, using conservative note sustains...")
 		conservative = True
-	min_vol = 0.125
-	max_vol = 1 + min_vol
+	max_vol = 1
 	active = {}
 	for i, beat in enumerate(notes):
-		taken = []
+		taken = {}
 		next_active = {}
-		if beat and len(beat) > 1:
+		if beat and len(beat) > 1 and not ctx.extended_ranges:
 			for note in beat:
 				if note.priority < 0:
 					note.priority = 0
-			# ordered = [note for note in beat if note.instrument_class == -1] + priority_ordering([note for note in beat if note.instrument_class != -1], n_largest=12, active=active)
 			ordered = priority_ordering(beat, n_largest=12, active=active)
 			lowest = min((note.instrument_class == -1, note) for note in beat)[-1]
 			if sum(note.instrument_class != -1 for note in ordered) > 8 and org_instrument_selection[lowest.instrument_class] >= 0:
@@ -103,11 +108,17 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 					ordered.insert(0, lowest)
 		else:
 			ordered = list(beat)
+		loudest = hypot(*(log2lin(note.velocity) for note in beat))
 		for note in ordered:
-			itype, pitch, priority, vel, pan = note.instrument_class, note.pitch, note.priority, note.velocity, note.panning
+			itype, pitch, priority, pan = note.instrument_class, note.pitch, note.priority, note.panning
 			pitch = round(pitch)
-			vel -= min_vol
-			volume = max(0, min(254, round(vel * 4) * 64 if conservative else round(vel * 32) * 8))
+			vel = log2lin(note.velocity)
+			if vel < loudest * 0.01:
+				continue
+			vel = (round(vel * 4) * 64 if conservative else round(vel * 32) * 8) / 256
+			if vel > 0:
+				vel = 255 * (1 + log10(vel))
+			volume = max(0, min(254, round(vel)))
 			panning = round(pan * 6 + 6)
 			ins = org_instrument_selection[itype]
 			if ins < 0:
@@ -142,7 +153,7 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 					case _:
 						iid = 12
 						pitch = rpitch
-				if iid in taken:
+				if iid in taken and not ctx.extended_ranges:
 					continue
 				new_pitch = pitch + c4 - c1
 				note = OrgNote(
@@ -153,7 +164,7 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 					panning=panning,
 				)
 				instruments[iid].notes.append(note)
-				taken.append(iid)
+				taken[iid] = taken.get(iid, 0) + 1
 				continue
 			new_pitch = pitch - c1
 			if new_pitch < 0:
@@ -163,33 +174,39 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 			if (priority < 2 or conservative) and h in active:
 				try:
 					for iid in active[h]:
-						if iid in taken:
+						if iid in taken and not ctx.extended_ranges:
 							continue
 						instrument = instruments[iid]
-						last_vol, last_pan = instrument.notes[-1].volume, instrument.notes[-1].panning
-						idx = -1
-						while (last_note := instrument.notes[idx]) and last_note.pitch == 255:
-							idx -= 1
-						if last_note.length < 192:
-							if last_vol != volume or (last_pan != panning and not conservative):
+						for x in range(1, len(instrument.notes)):
+							target = instrument.notes[-x]
+							if target.pitch == 255:
+								continue
+							if target.aligned < i - 1:
+								break
+							if target.aligned != i:
+								continue
+							if target.length >= 192:
+								continue
+							if target.volume != volume or (target.panning != panning and not conservative):
 								instrument.notes.append(OrgNote(
 									tick=i,
 									pitch=255,
 									length=1,
 									volume=volume,
-									panning=last_pan if conservative else panning,
+									panning=target.panning if conservative else panning,
 								))
-							last_note.length += 1
-							taken.append(iid)
+							target.length += 1
+							taken[iid] = taken.get(iid, 0) + 1
 							next_active.setdefault(h, []).append(instrument.index)
 							raise StopIteration
 				except StopIteration:
 					continue
-			choices = sorted(instruments[:8], key=lambda instrument: (instrument.index not in taken, len(instrument.notes) < 3072, instrument.id == ins, instrument.id != 60, -(len(instrument.notes) // 1024)), reverse=True)
-			instrument = choices[0]
-			if instrument.index in taken:
-				# if len(taken) >= len(instruments):
-				# 	break
+			if ctx.extended_ranges:
+				instrument = max(instruments[:8], key=lambda instrument: (len(instrument.notes) < 65504, instrument.id == ins, -taken.get(instrument.index, 0), -(len(instrument.notes) // 4096)))
+			else:
+				instrument = max(instruments[:8], key=lambda instrument: (len(instrument.notes) < 65504, -taken.get(instrument.index, 0), len(instrument.notes) < 3072, instrument.id == ins, instrument.id != 60, -(len(instrument.notes) // 1024)))
+			iid = instrument.index
+			if iid in taken and not ctx.extended_ranges:
 				continue
 			if instrument.id == 60 and ins != 60 and pitch >= 12:
 				pitch -= 12
@@ -200,32 +217,31 @@ def build_org(notes, instrument_activities, speed_info, ctx):
 				volume=volume,
 				panning=panning,
 			))
-			taken.append(instrument.index)
+			taken[iid] = taken.get(iid, 0) + 1
 			try:
 				next_active[h].append(instrument.index)
 			except KeyError:
 				next_active[h] = [instrument.index]
 		active = next_active
-	if not conservative:
-		for instrument in instruments:
-			if len(instrument.notes) > 4096:
-				instrument.notes = [note for i, note in enumerate(instrument.notes) if note.pitch != 255 or note.volume in (0, 64, 128, 192, 254)]
+	for instrument in instruments:
+		if len(instrument.notes) > 4096:
+			instrument.notes = [note for i, note in enumerate(instrument.notes) if note.pitch != 255 or note.volume in (0, 64, 128, 192, 254)]
+		if len(instrument.notes) >= 65536:
+			instrument.notes = instrument.notes[:65535]
 	return instruments, wait
 
 
-def load_org(file):
-	print("Importing ORG...")
-	if isinstance(file, str):
-		file = open(file, "rb")
-	min_vol = 16
-	with file:
-		read = create_reader(file)
+def read_org(fi):
+	if isinstance(fi, str):
+		fi = open(fi, "rb")
+	with fi:
+		read = create_reader(fi)
 		wait = read(6, 2)
-		# end = read(14, 4)
+		end = read(14, 4)
 		instruments = []
-		total_count = 0
 		for i in range(16):
-			iid = read(18 + i * 6 + 2, 2)
+			finetune = read(18 + i * 6, 2)
+			iid = read(18 + i * 6 + 2, 1)
 			sus = i < 8 and not read(18 + i * 6 + 3, 1)
 			count = read(18 + i * 6 + 4, 2)
 			instruments.append(SimpleNamespace(
@@ -238,9 +254,10 @@ def load_org(file):
 					volume=0,
 					panning=0,
 				) for x in range(count)],
+				finetune=finetune,
 				sustain=sus,
+				drum=i >= 8,
 			))
-			total_count += count
 		offsets = 114
 		for i, ins in enumerate(instruments):
 			for j, e in enumerate(ins.events):
@@ -258,11 +275,23 @@ def load_org(file):
 			for j, e in enumerate(ins.events):
 				e.panning = read(offsets + j, 1)
 			offsets += len(ins.events)
+	for ins in instruments:
+		ins.events.sort(key=lambda e: (e.tick, e.volume == 255))
+	return SimpleNamespace(
+		wait=wait,
+		end=end,
+		instruments=instruments,
+	)
+
+def load_org(file):
+	print("Importing ORG...")
+	min_vol = 16
+	orgfile = read_org(file)
 	events = [
-		[0, 0, event_types.HEADER, 1, len(instruments) + 1, 1, 0, 16],
-		[1, 0, event_types.TEMPO, wait * 1000],
+		[0, 0, event_types.HEADER, 1, len(orgfile.instruments) + 1, 1, 0, 16],
+		[1, 0, event_types.TEMPO, orgfile.wait * 1000],
 	]
-	for i, ins in enumerate(instruments):
+	for i, ins in enumerate(orgfile.instruments):
 		if i not in range(8, 16):
 			events.append([i + 2, 0, event_types.PROGRAM_C, i, midi_instrument_selection[org_instrument_mapping[ins.id]], ins.id])
 			channel = i
@@ -576,6 +605,7 @@ def save_org(transport, output, instrument_activities, speed_info, ctx, **void):
 		org.write(b"\x04\x08" if wait >= 40 else b"\x08\x08")
 		org.write(struct.pack("<L", 0))
 		org.write(struct.pack("<L", ceil(len(transport) / 4) * 4))
+		print([len(ins.notes) for ins in instruments])
 		for i, ins in enumerate(instruments):
 			org.write(struct.pack("<H", 1000 + (i + 1 >> 1) * (70 if i & 1 else -70)))
 			org.write(struct.pack("B", ins.id))
