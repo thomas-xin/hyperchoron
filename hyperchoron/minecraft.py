@@ -1069,6 +1069,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					set_across(xi, yi, zi, end_rod)
 					break
 
+	largest_chord = max(map(len, transport))
 	notes = deque(transport)
 	nc = 0
 	buffer = 4
@@ -1122,8 +1123,6 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				xs = [(x, z2, delay)]
 				if abs(x) >= 18:
 					for n in range(2):
-						if abs(x) < 15:
-							break
 						if z2 >= skeleton.length:
 							if x > 0:
 								x -= 12
@@ -1134,9 +1133,13 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 								delay += 16
 								z2 -= skeleton.length
 						else:
-							x = 18 if x > 0 else -18
+							if largest_chord <= 48:
+								x = 18 if x > 0 else -18
+								xs.insert(0, (x, z2, delay))
 							break
 						xs.insert(0, (x, z2, delay))
+						if abs(x) < 15:
+							break
 				y = (not tick & 1) * 16 + yc - 8
 				for k, (x, z2, delay) in enumerate(xs):
 					if x > attenuation_distance_limit - 3:
@@ -1162,23 +1165,28 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 								panning = -panning
 								swapped += 1
 								continue
-							if k < len(xs) - 1 and swapped > 1:
-								# Continue
-								raise StopAsyncIteration
-							swapped = max(2, swapped)
-							x += 3 if panning > 0 else -3
-							if x > attenuation_distance_limit:
-								if swapped > 2 or (tick & 1 and vel < 0.25):
-									return
-								x = -attenuation_distance_limit
+							if k < len(xs) - 1 and attempt >= 4:
+								if swapped > 1:
+									# Continue
+									raise StopAsyncIteration
+								x = -x
 								panning = -panning
 								swapped += 1
-							elif x < -attenuation_distance_limit:
-								if swapped > 2 or (tick & 1 and vel < 0.25):
+								continue
+							x2 = x + (3 if panning > 0 else -3)
+							if x2 > attenuation_distance_limit:
+								if swapped > 1 or (tick & 1 and vel < 0.25):
 									return
-								x = attenuation_distance_limit
+								x2 = -x
 								panning = -panning
 								swapped += 1
+							elif x2 < -attenuation_distance_limit:
+								if swapped > 1 or (tick & 1 and vel < 0.25):
+									return
+								x2 = -x
+								panning = -panning
+								swapped += 1
+							x = x2
 					except StopIteration:
 						pass
 					except StopAsyncIteration:
@@ -1320,7 +1328,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 						if not target:
 							break
 					for k, v in tuple(held.items()):
-						if v[1] < 0.75 or (v[0] < ticks_per_half or v[1] > 0.9 and v[3] < 128):
+						if largest_chord > 48 and v[1] < 0.75 or (v[0] < ticks_per_half or v[1] > 0.9 and v[3] < 128):
 							held.pop(k)
 							continue
 						v[2] /= ticks_per_half
