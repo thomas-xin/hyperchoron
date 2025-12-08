@@ -19,7 +19,7 @@ from .mappings import (
 	instrument_codelist, default_instruments, fixed_instruments,
 	fs1,
 )
-from .util import ts_us, is_int, temp_dir, round_min, log2lin, lin2log, base_path, transport_note_priority, event_types, quantise_note, NoteSegment, DEFAULT_NAME, DEFAULT_DESCRIPTION
+from .util import ts_us, is_int, temp_dir, round_min, log2lin, lin2log, base_path, event_types, quantise_note, NoteSegment, DEFAULT_NAME, DEFAULT_DESCRIPTION
 
 
 def nbt_from_dict(d):
@@ -39,9 +39,9 @@ def nbt_to_str(d):
 	import json5
 	return json5.dumps(d, separators=(',', ':'))
 
-falling_blocks = ("sand", "red_sand", "black_concrete_powder", "gravel")
+falling_blocks = ("minecraft:sand", "minecraft:red_sand", "minecraft:black_concrete_powder", "minecraft:gravel")
 air = litemapy.BlockState("minecraft:air")
-note_block = litemapy.BlockState("minecraft:note_block", instrument="custom_head", note="0", powered="false")
+bedrock = litemapy.BlockState("minecraft:bedrock")
 sculk = litemapy.BlockState("minecraft:sculk")
 glass = litemapy.BlockState("minecraft:glass")
 activator_rail = litemapy.BlockState("minecraft:activator_rail", shape="north_south")
@@ -155,14 +155,12 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, tick=0, ctx=None):
 	if base in non_note_blocks:
 		if x == 1:
 			yield from (
-				(coords[0], base),
-				(coords[1], "sculk"),
-				(coords[2], "air"),
+				(coords[1], "note_block"),
+				(coords[2], base),
 			)
 		else:
 			yield from (
 				(coords[1], base),
-				(coords[2], "air"),
 			)
 		return
 	if base.endswith("_head") or base.endswith("_skull"):
@@ -179,21 +177,17 @@ def get_note_block(note, positioning=[0, 0, 0], replace=None, tick=0, ctx=None):
 		compound = Compound({'id': String('minecraft:command_block'), 'Command': String(command)})
 		if x == 1:
 			yield from (
-				(coords[1], "note_block", dict(note=0, instrument="custom_head")),
+				(coords[1], "bedrock"),
 				(coords[2], "command_block", dict(conditional="false", facing="up"), compound),
 			)
 		else:
 			yield from (
 				(coords[1], "command_block", dict(conditional="false", facing="up"), compound),
-				(coords[2], "air"),
 			)
 		return
-	if base in falling_blocks:
-		yield ((x, y - 2, z), "tripwire")
 	yield from (
 		(coords[0], base),
 		(coords[1], "note_block", dict(note=pitch, instrument=instrument_names[base])),
-		(coords[2], "air"),
 	)
 
 def map_palette(reg):
@@ -451,6 +445,23 @@ def setblock(dst, coords, block, no_replace=(), tile_entity=None):
 	palette[block] = dst._Region__blocks[coords]
 	return dst
 
+def cover_adjacent(region, roll, block, *targets):
+	blocks = region._Region__blocks
+	palette = region._Region__palette
+	for target in targets:
+		for idx, b in enumerate(palette):
+			if b.id == target:
+				break
+		else:
+			continue
+		palette.append(block)
+		found = blocks == idx
+		mask = np.roll(found, roll, axis=(0, 1, 2))
+		pockets = blocks[mask]
+		pockets[pockets == 0] = len(palette) - 1
+		blocks[mask] = pockets
+	return region
+
 def setblock_absolute(dst, coords, block, no_replace=()):
 	x, y, z = coords
 	return setblock(dst, (x - dst.x, y - dst.y, z - dst.z), block, no_replace=no_replace)
@@ -605,6 +616,22 @@ def crop_region(region, size, optimise=True):
 			new_region.tile_entities.append(e)
 	return new_region
 
+def pad_region(region, n=0):
+	assert isinstance(region, litemapy.Region), "Region must be a Litematic region."
+	new_blocks = np.pad(region._Region__blocks, n)
+	new_region = litemapy.Region(region.x - n, region.y - n, region.z - n, region.width + n * 2, region.height + n * 2, region.length + n * 2)
+	new_region._Region__blocks = new_blocks
+	new_region._Region__palette = region._Region__palette.copy()
+	for e in region.tile_entities:
+		x1, y1, z1 = e.position
+		x1 += n
+		y1 += n
+		z1 += n
+		e = copy.copy(e)
+		e.position = (x1, y1, z1)
+		new_region.tile_entities.append(e)
+	return new_region
+
 def flip_region(region, axes=2):
 	assert isinstance(region, litemapy.Region), "Region must be a Litematic region."
 	region._Region__blocks = np.flip(region._Region__blocks, axes)
@@ -657,7 +684,7 @@ def min_clearance_x(reg1, reg2, clearance=1, y_offset=0, z_offset=0):
 				min_shift = max(min_shift, shift)
 	return min_shift if isinstance(min_shift, int) else min_shift.item()
 
-def shrink_wrap(region):
+def shrink_wrap(region, clearance=0):
 	a = region._Region__blocks
 	mask = a != 0
 	idx = np.nonzero(mask)
@@ -666,7 +693,9 @@ def shrink_wrap(region):
 		region,
 		(
 			x, y, z,
-			(idx[0].max() - idx[0].min()).item() + 1, (idx[1].max() - idx[1].min()).item() + 1, (idx[2].max() - idx[2].min()).item() + 1,
+			(idx[0].max() - idx[0].min()).item() + 1,
+			(idx[1].max() - idx[1].min()).item() + 1,
+			(idx[2].max() - idx[2].min()).item() + 1,
 		),
 		optimise=False,
 	)
@@ -765,7 +794,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	yc = 14
 	schem = litemapy.Schematic.load(f"{base_path}templates/Hyperchoron V2 Header.litematic")
 	header, = schem.regions.values()
-	header = move_region(header, -8, yc - 14, -3)
+	header = move_region(header, -4, yc - 14, -3)
 	timer, = litemapy.Schematic.load(f"{base_path}templates/Hyperchoron V2 Timer.litematic").regions.values()
 	track, = litemapy.Schematic.load(f"{base_path}templates/Hyperchoron V2 Track.litematic").regions.values()
 	if ctx.minecart_improvements:
@@ -773,25 +802,25 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	skeleton, = litemapy.Schematic.load(f"{base_path}templates/Hyperchoron V2 Skeleton.litematic").regions.values()
 	# For faraway segments that do not need to be as quiet, we can allocate trapdoors to conserve survival mode resources
 	skeleton2 = clone_region(skeleton)
-	skeleton2.filter(lambda block: air if block.id == "minecraft:tripwire" else trapdoor if block.id in ("minecraft:note_block", "minecraft:waxed_oxidized_copper_bulb") else block)
+	froglight = litemapy.BlockState("minecraft:pearlescent_froglight", axis="y")
+	for y, z in note_locations:
+		if skeleton2[1, y, z] == bedrock:
+			skeleton2[1, y, z] = trapdoor if y > 1 else froglight
 	skeletonf = flip_region(clone_region(skeleton), axes=0)
 	skeletonf.filter(lambda block: litemapy.BlockState("minecraft:activator_rail", **dict(block.properties())) if block.id == "minecraft:powered_rail" else block)
 	skeletonf2 = flip_region(clone_region(skeleton2), axes=0)
 	skeletonf2.filter(lambda block: litemapy.BlockState("minecraft:activator_rail", **dict(block.properties())) if block.id == "minecraft:powered_rail" else block)
-	skeleton3 = clone_region(skeleton)
-	skeleton3 = fill_region(skeleton3, air)
+	skeleton3 = litemapy.Region(0, 0, 0, skeleton.width, skeleton.height, skeleton.length)
 	looping, = litemapy.Schematic.load(f"{base_path}templates/Hyperchoron V2 Looping.litematic").regions.values()
-	start = header.z + header.length - 2
+	start = header.z + header.length - 3
 
 	end = half_segments * skeleton.length + 10
 	master = litemapy.Region(0, 0, -3, 1, 1, end)
 	first_half = None
 
-	# redstone_dot = litemapy.BlockState("minecraft:redstone_wire", east="none", north="none", west="none", south="none")
+	redstone_block = litemapy.BlockState("minecraft:redstone_block")
 	waxed_oxidized_copper_bulb = litemapy.BlockState("minecraft:waxed_oxidized_copper_bulb", lit="false", powered="false")
 	shroomlight = litemapy.BlockState("minecraft:shroomlight")
-	# scaffolding = litemapy.BlockState("minecraft:scaffolding", distance="0")
-	bamboo_trapdoor = litemapy.BlockState("minecraft:bamboo_trapdoor", facing="north", half="top")
 
 	def get_skeleton(x, y, z, delta=0):
 		nonlocal main
@@ -838,6 +867,12 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 			# If the module is only playing one note/chord, wipe it and replace with a single-note module with regular repeater delays
 			skeleton3 = move_region(skeleton3, x, y, z)
 			main = paste_region(main, skeleton3)
+			yi = -1
+			for xi in range(3):
+				for zi in range(1, 10):
+					coords2 = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
+					if main[coords2].id == "minecraft:end_rod":
+						main[coords2] = air
 			set_across(1, 0, 0, litemapy.BlockState("minecraft:observer", facing="down"))
 			set_across(1, 1, 0, litemapy.BlockState("minecraft:observer", facing="down"))
 			set_across(1, 2, 0, shroomlight)
@@ -870,8 +905,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					else:
 						target = static_blocks.get(block) or static_blocks.setdefault(block, litemapy.BlockState(f"minecraft:{block}"))
 					coords = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z - main.z)
-					no_replace = ("minecraft:observer", "minecraft:repeater", "minecraft:wall_torch") if block == "tripwire" else ()
-					main = setblock(main, coords, target, tile_entity=tile_entity, no_replace=no_replace)
+					main = setblock(main, coords, target, tile_entity=tile_entity)
 			return
 
 		# Opportunistic optimisations; cut off all empty top layers, replace empty bottom layers with mostly activator rails, drop spawnproofing end rods onto topmost remaining observers
@@ -903,10 +937,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					yi = 1
 					for zi in (8, 6, 4, 2):
 						coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
-						if main[coords] in (sculk, trapdoor, note_block):
-							coords2 = (xi + x - main.x, yi + y - main.y + 1, zi + z - main.z)
-							if main[coords2].id == "minecraft:tripwire":
-								main[coords2] = air
+						if main[coords] in (sculk, trapdoor, bedrock):
 							main = setblock(main, coords, air)
 							zi -= 1
 							set_across(xi, yi, zi)
@@ -917,10 +948,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					yi = 3
 					for zi in (1, 3, 5, 7):
 						coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
-						if main[coords] in (sculk, trapdoor, note_block):
-							coords2 = (xi + x - main.x, yi + y - main.y + 1, zi + z - main.z)
-							if main[coords2].id == "minecraft:tripwire":
-								main[coords2] = air
+						if main[coords] in (sculk, trapdoor, bedrock):
 							main = setblock(main, coords, air)
 							zi += 1
 							set_across(xi, yi, zi)
@@ -931,10 +959,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				yi = 5
 				for zi in (8, 6, 4, 2):
 					coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
-					if main[coords] in (sculk, trapdoor, note_block):
-						coords2 = (xi + x - main.x, yi + y - main.y + 1, zi + z - main.z)
-						if main[coords2].id == "minecraft:tripwire":
-							main[coords2] = air
+					if main[coords] in (sculk, trapdoor, bedrock):
 						main = setblock(main, coords, air)
 						zi -= 1
 						set_across(xi, yi, zi)
@@ -945,10 +970,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 			yi = 7
 			for zi in (1, 3, 5, 7):
 				coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
-				if main[coords] in (sculk, trapdoor, note_block):
-					coords2 = (xi + x - main.x, yi + y - main.y + 1, zi + z - main.z)
-					if main[coords2].id == "minecraft:tripwire":
-						main[coords2] = air
+				if main[coords] in (sculk, trapdoor, bedrock):
 					main = setblock(main, coords, air)
 					zi += 1
 					set_across(xi, yi, zi)
@@ -965,11 +987,6 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				for yi in range(cur_y - 1, cur_y + 3):
 					for zi in range(2, 10):
 						set_across(xi, yi, zi)
-				yi = cur_y + 3
-				for zi in range(2, 9):
-					coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
-					if main[coords].id == "minecraft:tripwire":
-						main[coords] = air
 				if taken.get(None):
 					set_across(1, cur_y, 1, sculk)
 				set_across(1, cur_y - 1, 2, slab)
@@ -998,12 +1015,6 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					break
 			if cur_y in (1, 5):
 				# Standard case for empty forward rows
-				xi = 1
-				yi = cur_y + 1
-				for zi in range(2, 9):
-					coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
-					if main[coords].id == "minecraft:tripwire":
-						main[coords] = air
 				top = (sculk, litemapy.BlockState("minecraft:repeater", facing="north", delay="2"), sculk, activator_rail, activator_rail, activator_rail, activator_rail, activator_rail)
 				bottom = (air, utrapdoor, air, utrapdoor, utrapdoor, utrapdoor, utrapdoor, utrapdoor)
 				xi = 1
@@ -1028,12 +1039,6 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					break
 			if cur_y == 3:
 				# Standard case for empty backward rows
-				xi = 1
-				yi = cur_y + 1
-				for zi in range(2, 9):
-					coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
-					if main[coords].id == "minecraft:tripwire":
-						main[coords] = air
 				top = (activator_rail, activator_rail, activator_rail, activator_rail, activator_rail, sculk, litemapy.BlockState("minecraft:repeater", facing="south", delay="2"), sculk)
 				bottom = (utrapdoor, utrapdoor, utrapdoor, utrapdoor, utrapdoor, air, utrapdoor, air)
 				xi = 1
@@ -1105,7 +1110,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				if not volume:
 					return
 				if abs(panning) < 1 / 32:
-					panning = 1 if note_hash & 1 else -1
+					panning = 0.01 if note_hash & 1 else -0.01
 				base, pitch = get_note_mat(note, odd=tick & note.timing & 1)
 				if base == "PLACEHOLDER":
 					return
@@ -1114,11 +1119,12 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				vel = max(0, min(1, 1 - x / attenuation_distance_limit))
 				delay = 0
 				z2 = z
+				xs = [(x, z2, delay)]
 				if abs(x) >= 18:
 					for n in range(2):
 						if abs(x) < 15:
 							break
-						if z2 >= skeleton.length and skeleton_counts.get(z2 - skeleton.length, 0) < (48 - n * 16):
+						if z2 >= skeleton.length:
 							if x > 0:
 								x -= 12
 								delay += 16
@@ -1127,74 +1133,85 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 								x += 12
 								delay += 16
 								z2 -= skeleton.length
-						elif skeleton_counts.get(z2, 0) < 48:
+						else:
 							x = 18 if x > 0 else -18
 							break
-				if x > attenuation_distance_limit - 3:
-					x = attenuation_distance_limit - 3
-				elif x < -attenuation_distance_limit + 3:
-					x = -attenuation_distance_limit + 3
-				elif delay == 32 and abs(x) > 18:
-					x = -18 if x < 0 else 18
+					xs.insert(0, (x, z2, delay))
 				y = (not tick & 1) * 16 + yc - 8
-				swapped = False
+				for k, (x, z2, delay) in enumerate(xs):
+					if x > attenuation_distance_limit - 3:
+						x = attenuation_distance_limit - 3
+					elif x < -attenuation_distance_limit + 3:
+						x = -attenuation_distance_limit + 3
+					swapped = False
 
-				try:
-					ordering = (1, 0, 2) if x > 0 else (1, 2, 0)
-					while True:
-						taken = get_skeleton(x, y, z2, delay * 0.75)
-						if delay == 0 or x and (not taken or taken.get(None) == delay):
-							if delay:
-								taken[None] = delay
-							for xi in ordering:
-								pos = (xi, *note_locations[tick // 2])
-								if pos not in taken:
-									taken[pos] = (tick // 2, note)
-									raise StopIteration
-						x += 3 if panning > 0 else -3
-						if x > attenuation_distance_limit:
-							if swapped or (tick & 1 and vel < 0.25):
-								return
-							x = -attenuation_distance_limit
-							panning = -panning
-							swapped = True
-						elif x < -attenuation_distance_limit:
-							if swapped or (tick & 1 and vel < 0.25):
-								return
-							x = attenuation_distance_limit
-							panning = -panning
-							swapped = True
-				except StopIteration:
-					pass
-				blocks = get_note_block(
-					note,
-					pos,
-					None,
-					tick=tick,
-					ctx=ctx,
-				)
-				for coords, block, *kwargs in blocks:
-					tile_entity = None
-					if kwargs:
-						if len(kwargs) > 1:
-							tile_entity = kwargs[1]
-						target = litemapy.BlockState(f"minecraft:{block}", **{k: str(v) for k, v in kwargs[0].items()})
-					else:
-						target = static_blocks.get(block) or static_blocks.setdefault(block, litemapy.BlockState(f"minecraft:{block}"))
-					if target.id in ("minecraft:note_block", "minecraft:command_block"):
-						nc += 1
-						if xi != 1:
-							if tick & 8:
-								before = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z2 - main.z + 1)
-							else:
-								before = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z2 - main.z - 1)
-							if xi == 0:
-								main = setblock(main, before, litemapy.BlockState("minecraft:wall_torch", facing="west"))
-							elif xi == 2:
-								main = setblock(main, before, litemapy.BlockState("minecraft:wall_torch", facing="east"))
-					coords = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z2 - main.z)
-					no_replace = ("minecraft:observer", "minecraft:repeater", "minecraft:wall_torch") if block == "tripwire" else ()
-					main = setblock(main, coords, target, tile_entity=tile_entity, no_replace=no_replace)
+					try:
+						ordering = (1, 0, 2) if x > 0 else (1, 2, 0)
+						for attempt in range(96):
+							taken = get_skeleton(x, y, z2, delay * 0.75)
+							if delay == 0 or x and (not taken or taken.get(None) == delay):
+								if delay:
+									taken[None] = delay
+								for xi in ordering:
+									pos = (xi, *note_locations[tick // 2])
+									if pos not in taken:
+										taken[pos] = (tick // 2, note)
+										# Pass
+										raise StopIteration
+							if k < len(xs) - 1:
+								if swapped or abs(panning) > 1 / 32:
+									# Continue
+									raise StopAsyncIteration
+								x = -x
+								swapped = True
+								continue
+							x += 3 if panning > 0 else -3
+							if x > attenuation_distance_limit:
+								if swapped or (tick & 1 and vel < 0.25):
+									return
+								x = -attenuation_distance_limit
+								panning = -panning
+								swapped = True
+							elif x < -attenuation_distance_limit:
+								if swapped or (tick & 1 and vel < 0.25):
+									return
+								x = attenuation_distance_limit
+								panning = -panning
+								swapped = True
+					except StopIteration:
+						pass
+					except StopAsyncIteration:
+						continue
+					blocks = get_note_block(
+						note,
+						pos,
+						None,
+						tick=tick,
+						ctx=ctx,
+					)
+					for coords, block, *kwargs in blocks:
+						tile_entity = None
+						if kwargs:
+							if len(kwargs) > 1:
+								tile_entity = kwargs[1]
+							target = litemapy.BlockState(f"minecraft:{block}", **{k: str(v) for k, v in kwargs[0].items()})
+						else:
+							target = static_blocks.get(block) or static_blocks.setdefault(block, litemapy.BlockState(f"minecraft:{block}"))
+						if target.id in ("minecraft:note_block", "minecraft:command_block"):
+							nc += 1
+							if xi != 1:
+								if tick & 8:
+									before = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z2 - main.z + 1)
+								else:
+									before = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z2 - main.z - 1)
+								if pos[1] > 1:
+									if xi == 0:
+										main = setblock(main, before, litemapy.BlockState("minecraft:wall_torch", facing="west"))
+									elif xi == 2:
+										main = setblock(main, before, litemapy.BlockState("minecraft:wall_torch", facing="east"))
+						coords = (coords[0] + x - main.x, coords[1] + y - main.y, coords[2] + z2 - main.z)
+						main = setblock(main, coords, target, tile_entity=tile_entity)
+					break
 
 			def add_recurring(half, ins, pitch, velocity, panning, offset=0):
 				nonlocal main, nc
@@ -1275,7 +1292,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					indices = range(half, ticks_per_segment, 2)
 					target = None
 					for t in indices:
-						beat = notes[t] = sorted((note for note in notes[t] if note.priority >= 0), key=lambda note: transport_note_priority(note), reverse=True)
+						beat = notes[t] = [note for note in notes[t] if note.priority >= 0]
 						temp = {}
 						for note in beat[:192]:
 							ins, pitch, volume, panning = note.instrument_class, note.pitch, note.velocity, note.panning
@@ -1322,11 +1339,30 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 								removals = np.zeros(len(beat))
 								removals[removed] = True
 								notes[i] = [note for n, note in enumerate(beat) if not removals[n]]
+			max_concurrency = 256
+			prev = 0
 			for tick in range(ticks_per_segment):
 				if not notes:
 					break
+				cc = 0
+				for after in range(3):
+					if after >= len(notes):
+						break
+					cc += sum(n.velocity for n in notes[after])
 				beat = notes.popleft()
-				for note in beat[:96]:
+				if not ctx.extended_ranges:
+					prev = sum(n.velocity for n in beat)
+					if cc <= max_concurrency * 0.25 or prev >= max_concurrency / 2:
+						limit = 96
+					elif cc <= max_concurrency * 0.5 or prev >= max_concurrency / 3:
+						limit = 48
+					elif cc <= max_concurrency * 0.75 or prev >= max_concurrency / 4:
+						limit = 32
+					else:
+						limit = 24
+				else:
+					limit = 96
+				for note in beat[:limit]:
 					if note.priority < 0:
 						continue
 					add_note(note, tick)
@@ -1335,9 +1371,14 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					for k, v in tuple(held.items()):
 						add_recurring(half, *k, *v[1:3], tick // 3 & 1)
 
+		west_trapdoor = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="west")
+		east_trapdoor = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="east")
 		for z in range(0, half_segments * skeleton.length, skeleton.length):
 			# Connect all modules in each segment
-			layers = [[k for k in skeletons if k[2] == z and k[1] < 16], [k for k in skeletons if k[2] == z and k[1] >= 16]]
+			layers = [
+				[k for k in skeletons if k[2] == z and k[1] < 16],
+				[k for k in skeletons if k[2] == z and k[1] >= 16],
+			]
 			layers[0].extend(k for k in loops if k[2] == z and k[1] < 16)
 			layers[1].extend(k for k in loops if k[2] == z and k[1] >= 16)
 			layers[0].sort()
@@ -1349,69 +1390,73 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				y2 = y + 1
 				mx, Mx = indices[0][0], indices[-1][0]
 				extra_n = bool(skeletons.get(indices[0], {}).get(None))
+				if not extra_n and len(indices) > 1 and indices[1][0] == indices[0][0]:
+					extra_n = bool(skeletons.get(indices[1], {}).get(None))
 				extra_p = bool(skeletons.get(indices[-1], {}).get(None))
+				if not extra_p and len(indices) > 1 and indices[-2][0] == indices[-1][0]:
+					extra_p = bool(skeletons.get(indices[-2], {}).get(None))
+				# Use powered rails by default
+				# If long range necessary, use instant wire design by Kahyzen (https://youtu.be/nJx-o9fDVm4) for lag optimisation
 				if mx < 0:
-					if mx >= -7:
-						# No extended lines necessary for short distances; default to powered rail
-						for x in range(mx + 1 - extra_n, 1):
-							primary = (x - main.x, y2, z)
-							secondary = (x - main.x, y, z)
-							main = setblock(main, secondary, litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="west"), no_replace=["minecraft:observer"])
-							main[primary] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="false")
-					else:
-						# Long range necessary; use instant wire design by Kahyzen (https://youtu.be/nJx-o9fDVm4) for lag optimisation
-						for x in range(mx + 1 - extra_n, 1):
-							primary = (x - main.x, y2, z)
-							secondary = (x - main.x, y, z)
-							thresh = mx + 8
-							offset = x - thresh
-							phase = offset % 9 if x <= -9 or offset < 9 else -1
-							if extra_n and (x == mx or x == 0):
-								phase = -1
-							if phase == 1 or x == 0:
-								main[x - main.x, y - 2, z] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="west")
-								main[x - main.x, y - 1, z] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="false")
-								main[secondary] = litemapy.BlockState("minecraft:observer", facing="up")
-								main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
-								continue
-							if phase == 0 or x == -1:
-								main[x - main.x, y - 1, z] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="west")
-								main[secondary] = litemapy.BlockState("minecraft:activator_rail", shape="ascending_west", powered="true")
-								main[primary] = litemapy.BlockState("minecraft:observer", facing="east")
-								main[x - main.x, y + 2, z] = black_carpet
-								continue
-							main = setblock(main, secondary, litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="west"), no_replace=["minecraft:observer"])
+					leftmost = -mx + extra_n
+					powered_segment = leftmost
+					if powered_segment > 8:
+						powered_segment = max(0, min(powered_segment - 10, 8))
+					for i in range(1, powered_segment + 1):
+						x = 1 - i
+						primary = (x - main.x, y2, z)
+						secondary = (x - main.x, y, z)
+						main = setblock(main, secondary, west_trapdoor, no_replace=["minecraft:observer"])
+						main[primary] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="false")
+					for i in range(powered_segment + 1, leftmost + 1):
+						x = 1 - i
+						primary = (x - main.x, y2, z)
+						secondary = (x - main.x, y, z)
+						phase = i % 9
+						if phase == 1 and i < leftmost:
+							main[x - main.x, y - 2, z] = west_trapdoor
+							main[x - main.x, y - 1, z] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="false")
+							main[secondary] = litemapy.BlockState("minecraft:observer", facing="up")
 							main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
+							continue
+						if phase == 2:
+							main[x - main.x, y - 1, z] = west_trapdoor
+							main[secondary] = litemapy.BlockState("minecraft:activator_rail", shape="ascending_west", powered="true")
+							main[primary] = litemapy.BlockState("minecraft:observer", facing="east")
+							main[x - main.x, y + 2, z] = black_carpet
+							continue
+						main = setblock(main, secondary, west_trapdoor, no_replace=["minecraft:observer"])
+						main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
 				if Mx > 0:
-					if Mx <= 8:
-						for x in range(2, Mx + 2 + extra_p):
-							primary = (x - main.x, y2, z)
-							secondary = (x - main.x, y, z)
-							main = setblock(main, secondary, litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="east"), no_replace=["minecraft:observer"])
-							main[primary] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="false")
-					else:
-						for x in range(2, Mx + 2 + extra_p):
-							primary = (x - main.x, y2, z)
-							secondary = (x - main.x, y, z)
-							thresh = Mx - 6
-							offset = thresh - x
-							phase = offset % 9 if x >= 11 or offset < 9 else -1
-							if extra_p and (x == Mx + 2 or x == 2):
-								phase = -1
-							if phase == 1 or x == 2:
-								main[x - main.x, y - 2, z] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="east")
-								main[x - main.x, y - 1, z] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="false")
-								main[secondary] = litemapy.BlockState("minecraft:observer", facing="up")
-								main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
-								continue
-							if phase == 0 or x == 3:
-								main[x - main.x, y - 1, z] = litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="east")
-								main[secondary] = litemapy.BlockState("minecraft:activator_rail", shape="ascending_east", powered="true")
-								main[primary] = litemapy.BlockState("minecraft:observer", facing="west")
-								main[x - main.x, y + 2, z] = black_carpet
-								continue
-							main = setblock(main, secondary, litemapy.BlockState("minecraft:crimson_trapdoor", half="top", facing="east"), no_replace=["minecraft:observer"])
+					leftmost = Mx + extra_p
+					powered_segment = leftmost
+					if powered_segment > 8:
+						powered_segment = max(0, min(powered_segment - 10, 8))
+					for i in range(1, powered_segment + 1):
+						x = i + 1
+						primary = (x - main.x, y2, z)
+						secondary = (x - main.x, y, z)
+						main = setblock(main, secondary, east_trapdoor, no_replace=["minecraft:observer"])
+						main[primary] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="false")
+					for i in range(powered_segment + 1, leftmost + 1):
+						x = i + 1
+						primary = (x - main.x, y2, z)
+						secondary = (x - main.x, y, z)
+						phase = i % 9
+						if phase == 1 and i < leftmost:
+							main[x - main.x, y - 2, z] = east_trapdoor
+							main[x - main.x, y - 1, z] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="false")
+							main[secondary] = litemapy.BlockState("minecraft:observer", facing="up")
 							main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
+							continue
+						if phase == 2:
+							main[x - main.x, y - 1, z] = east_trapdoor
+							main[secondary] = litemapy.BlockState("minecraft:activator_rail", shape="ascending_east", powered="true")
+							main[primary] = litemapy.BlockState("minecraft:observer", facing="west")
+							main[x - main.x, y + 2, z] = black_carpet
+							continue
+						main = setblock(main, secondary, east_trapdoor, no_replace=["minecraft:observer"])
+						main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
 
 		for x, y, z in skeletons:
 			taken = skeletons[x, y, z]
@@ -1427,7 +1472,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					main[x + 2 - main.x, y + 1, z + 1] = air
 					main[x + 1 - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:redstone_wire", east="side", north="side", west="side", south="side")
 					main[x + 1 - main.x, y, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
-					if x >= 12:
+					if x >= 15:
 						main[x + 1 - main.x, y - 1, z + 1] = utrapdoor
 					else:
 						main[x + 1 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:hopper", facing="south")
@@ -1436,14 +1481,14 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					main[x - main.x, y - 2, z + 2] = slab
 					main[x - main.x, y - 1, z + 3] = shroomlight
 					for zi in range(1, offs):
+						main[x - main.x, y - 2, z + 3 + zi] = slab
 						main[x - main.x, y - 1, z + 3 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="south")
-						main[x - main.x, y - 2, z + 3 + zi] = bamboo_trapdoor
-					main[x - main.x, y - 2, z + 3 + offs] = bamboo_trapdoor
+					main[x - main.x, y - 2, z + 3 + offs] = slab
 					main[x - main.x, y - 1, z + 3 + offs] = litemapy.BlockState("minecraft:comparator", facing="south")
 					main[x - main.x, y, z + 4 + offs] = black_carpet
 					main[x - main.x, y - 1, z + 4 + offs] = waxed_oxidized_copper_bulb
 					main[x + 1 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:repeater", delay="3", facing="east")
-					main[x + 1 - main.x, y - 2, z + 4 + offs] = bamboo_trapdoor
+					main[x + 1 - main.x, y - 2, z + 4 + offs] = utrapdoor
 					main[x + 2 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:redstone_wire", west="side", north="side")
 					main[x + 2 - main.x, y - 2, z + 4 + offs] = slab
 					for zi in range(offs):
@@ -1472,14 +1517,14 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					main[x + 2 - main.x, y - 2, z + 2] = slab
 					main[x + 2 - main.x, y - 1, z + 3] = shroomlight
 					for zi in range(1, offs):
+						main[x + 2 - main.x, y - 2, z + 3 + zi] = slab
 						main[x + 2 - main.x, y - 1, z + 3 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="south")
-						main[x + 2 - main.x, y - 2, z + 3 + zi] = bamboo_trapdoor
-					main[x + 2 - main.x, y - 2, z + 3 + offs] = bamboo_trapdoor
+					main[x + 2 - main.x, y - 2, z + 3 + offs] = slab
 					main[x + 2 - main.x, y - 1, z + 3 + offs] = litemapy.BlockState("minecraft:comparator", facing="south")
 					main[x + 2 - main.x, y, z + 4 + offs] = black_carpet
 					main[x + 2 - main.x, y - 1, z + 4 + offs] = waxed_oxidized_copper_bulb
 					main[x + 1 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:repeater", delay="3", facing="west")
-					main[x + 1 - main.x, y - 2, z + 4 + offs] = bamboo_trapdoor
+					main[x + 1 - main.x, y - 2, z + 4 + offs] = utrapdoor
 					main[x - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:redstone_wire", east="side", north="side")
 					main[x - main.x, y - 2, z + 4 + offs] = slab
 					for zi in range(offs):
@@ -1495,7 +1540,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					raise NotImplementedError(x, y, z, predelay)
 			optimise_skeleton(x, y, z)
 			if not predelay and y >= yc and x in range(-3, 4):
-				if main[x + 1 - main.x, y + 1, z] != waxed_oxidized_copper_bulb:
+				if main[x + 1 - main.x, y + 1, z].id != "minecraft:waxed_copper_bulb":
 					continue
 				# We must get rid of copper bulbs too close to the player that would make a significant amount of sound. The new block needs to produce a shape update (trigger observers).
 				# This block *cannot* be replaced with a note block, crafter etc that would be more quiet, because it must not power adjacent dust when strongly powered (conductive), must not be a QC component (pistons) which would get re-powered by the lane above, and all except the centre one must not be any rail as it would silently bud the rail lines below causing a clock!
@@ -1512,7 +1557,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 			track1._Region__z = 2 * skeleton.length
 		track1._Region__y = yc
 		main = paste_region(main, track1, ignore_src_air=True)
-		main = shrink_wrap(main)
+		main = shrink_wrap(main, clearance=1)
 		if backwards:
 			main = flip_region(main)
 			main._Region__z = start + 1
@@ -1527,6 +1572,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	def locate(x, y, z):
 		return (x - master.x, y - master.y, z - master.z)
 
+	south_trapdoor = litemapy.BlockState("minecraft:warped_trapdoor", half="top", facing="south")
 	for yi in range(2):
 		ym = yc - 12 + yi * 16
 		master[locate(1, ym + 3, end - 2)] = litemapy.BlockState("minecraft:shroomlight")
@@ -1534,52 +1580,44 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 		master[locate(1, ym + 3, end - 1)] = litemapy.BlockState("minecraft:redstone_wire", north="side", south="side")
 		master[locate(1, ym + 3, end)] = litemapy.BlockState("minecraft:target")
 		master[locate(1, ym + 4, end)] = black_carpet
-		master[locate(1, ym + 3, end + 1)] = note_block
+		master[locate(1, ym + 3, end + 1)] = litemapy.BlockState("minecraft:note_block")
 		master[locate(1, ym + 4, end + 1)] = black_carpet
 		# Generate a new instant wire to connect ends
 		for j in range(tile_width):
 			phase = j % 9 if j < tile_width - 11 or tile_width < 9 else -1
 			x, y, z = -j, ym, end + 1
 			if phase == 1 or j == tile_width - 10:
-				master[locate(x, y + 1, z)] = litemapy.BlockState("minecraft:warped_trapdoor", half="top", facing="south")
+				master[locate(x, y + 1, z)] = south_trapdoor
 				master[locate(x, y + 2, z)] = litemapy.BlockState("minecraft:powered_rail", shape="ascending_west", powered="true")
 				master[locate(x, y + 3, z)] = litemapy.BlockState("minecraft:observer", facing="east")
 				master[locate(x, y + 4, z)] = black_carpet
 				continue
 			if phase == 0 or j == tile_width - 11:
-				master[locate(x, y, z)] = litemapy.BlockState("minecraft:warped_trapdoor", half="top", facing="south")
+				master[locate(x, y, z)] = south_trapdoor
 				master[locate(x, y + 1, z)] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="false")
 				master[locate(x, y + 2, z)] = litemapy.BlockState("minecraft:observer", facing="up")
 				master[locate(x, y + 3, z)] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="true")
 				continue
-			master[locate(x, y + 2, z)] = litemapy.BlockState("minecraft:warped_trapdoor", half="top", facing="south")
+			master[locate(x, y + 2, z)] = south_trapdoor
 			master[locate(x, y + 3, z)] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="true")
 		master[locate(1 - tile_width, ym + 3, end)] = litemapy.BlockState("minecraft:observer", facing="south")
 		master[locate(1 - tile_width, ym + 4, end)] = black_carpet
 	x, y, z = 0, yc + 1, end - 22
-	for i in range(1, tile_width - 6):
+	for i in range(1, tile_width - 4):
 		if i % 32 == 0:
-			master[locate(-i, y + 1, z + 1)] = litemapy.BlockState("minecraft:redstone_block")
-			master[locate(-i, y + 2, z + 1)] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="true")
-		elif i >= tile_width - 13:
-			master[locate(-i, y + 1, z + 1)] = litemapy.BlockState("minecraft:tinted_glass")
+			master[locate(-i, y + 1, z + 1)] = redstone_block
 			master[locate(-i, y + 2, z + 1)] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="true")
 		else:
 			master[locate(-i, y + 1, z + 1)] = litemapy.BlockState("minecraft:tinted_glass")
 			master[locate(-i, y + 2, z + 1)] = litemapy.BlockState("minecraft:rail", shape="south_west")
-	for i in range(tile_width - 3, 8, -1):
-		if i % 32 == 0 or i == 9:
-			master[locate(-i, y + 1, 3)] = litemapy.BlockState("minecraft:redstone_block")
+	for i in range(tile_width - 3, 4, -1):
+		if i % 32 == 0:
+			master[locate(-i, y + 1, 3)] = redstone_block
 			master[locate(-i, y + 2, 3)] = litemapy.BlockState("minecraft:powered_rail", shape="east_west", powered="true")
 		else:
 			master[locate(-i, y + 1, 3)] = litemapy.BlockState("minecraft:tinted_glass")
 			master[locate(-i, y + 2, 3)] = litemapy.BlockState("minecraft:rail", shape="south_east")
-	# Very hacky way to reinstantiate the schematic from the loaded one; litemapy *will not* produce the signs properly otherwise!
-	# I suspect this is due to litemapy exposing raw NBT data rather than parsing it to determine version, leading to exporting as an older schematic version and causing litematic to fallback to placing an empty sign.
-	schem.author = DEFAULT_NAME
-	schem.description = DEFAULT_DESCRIPTION
-	schem.regions.clear()
-	schem.regions["Hyperchoron"] = master = paste_region(master, header, ignore_src_air=True)
+	master = paste_region(master, header, ignore_src_air=True)
 	turn1, = litemapy.Schematic.load(f"{base_path}templates/Hyperchoron V2 Turn 1.litematic").regions.values()
 	turn2, = litemapy.Schematic.load(f"{base_path}templates/Hyperchoron V2 Turn 2.litematic").regions.values()
 	turn3, = litemapy.Schematic.load(f"{base_path}templates/Hyperchoron V2 Turn 3.litematic").regions.values()
@@ -1631,8 +1669,18 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 			Compound({'x': Int(x), 'y': Int(y), 'z': Int(z), 'is_waxed': Byte(1), 'id': String('minecraft:sign'), 'front_text': Compound({'color': String('black'), 'messages': List[Compound](messages), 'has_glowing_text': Byte(0)}), 'back_text': Compound({'color': String('black'), 'messages': List[String]([String(''), String(''), String(''), String('')]), 'has_glowing_text': Byte(0)})})
 		)
 	)
+	master = cover_adjacent(master, (0, 1, 0), litemapy.BlockState("minecraft:tripwire"), "minecraft:bedrock")
+	master = cover_adjacent(master, (0, -1, 0), litemapy.BlockState("minecraft:end_rod", facing="down"), *falling_blocks)
+	master.filter(lambda block: litemapy.BlockState("minecraft:note_block") if block == bedrock else block)
+	master = pad_region(master, 1)
 	extremities = get_bounding(master)
-	print(extremities)
+	print(master._Region__blocks.shape, extremities)
+	# Very hacky way to reinstantiate the schematic from the loaded one; litemapy *will not* produce the signs properly otherwise!
+	# I suspect this is due to litemapy exposing raw NBT data rather than parsing it to determine version, leading to exporting as an older schematic version and causing litematic to fallback to placing an empty sign.
+	schem.author = DEFAULT_NAME
+	schem.description = DEFAULT_DESCRIPTION
+	schem.regions.clear()
+	schem.regions["Hyperchoron"] = master
 	return schem, extremities, nc
 
 
@@ -1702,14 +1750,13 @@ def load_nbs(file):
 
 def save_nbs(transport, output, ctx, **void):
 	print("Exporting NBS...")
-	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 	tempo = 1 / transport.tick_delay
 	import pynbs
 	nbs = pynbs.new_file(
-		song_name=out_name,
+		song_name=ctx.song_name,
 		tempo=min(655, round(tempo, 3)),
 	)
-	nbs.header.song_origin = ctx.input[0].split("?", 1)[0].replace("\\", "/").rsplit("/", 1)[-1]
+	nbs.header.song_origin = ctx.src_name
 	nbs.header.song_author=DEFAULT_NAME
 	nbs.header.description=DEFAULT_DESCRIPTION
 	layer_poly = {}
@@ -1821,13 +1868,12 @@ def save_litematic(transport, output, ctx, **void):
 			print("Exporting Schematic...")
 		case _:
 			raise NotImplementedError(fmt)
-	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	schem, ext, nc = build_minecraft(transport, ctx=ctx, name=ctx.input[0].split("?", 1)[0].replace("\\", "/").rsplit("/", 1)[-1])
+	schem, ext, nc = build_minecraft(transport, ctx=ctx, name=ctx.src_name)
 	match fmt:
 		case "nbt":
 			reg = get_region(schem)
 			nbt = reg.to_structure_nbt(mc_version=4325)
-			nbt.filename = out_name
+			nbt.filename = ctx.song_name
 			with open(output, "wb") as f:
 				nbt.save(f)
 		case "mcfunction":
@@ -1868,10 +1914,10 @@ def save_litematic(transport, output, ctx, **void):
 							out.setBlock((x + reg.x, y + reg.y, z + reg.z), block)
 			folder = temp_dir + str(ts_us())
 			os.mkdir(folder)
-			out.save(folder, schemName=out_name, version=mcschematic.Version.JE_1_21)
+			out.save(folder, schemName=ctx.song_name, version=mcschematic.Version.JE_1_21)
 			assert len(files := os.listdir(folder)) == 1 and os.path.getsize(file := folder + "/" + files[0])
 			os.replace(file, output)
 		case _:
-			schem.name = out_name
+			schem.name = ctx.song_name
 			schem.save(output)
 	return nc

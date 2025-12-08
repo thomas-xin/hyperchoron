@@ -421,8 +421,8 @@ def quantise_pitch(n, pitch, tick=0):
 	frac = pitch - low
 	return low + (-frac * (low + tick + n.timing) % 1 >= frac)
 
-def transport_note_priority(n, sustained=False, multiplier=8):
-	return n.priority + round(n.velocity * 8) + round(n.pitch / 127) + sustained * multiplier / 8
+def transport_note_priority(n, sustained=False, multiplier=8, target=None):
+	return n.priority + round(n.velocity * 8) + (target is not None and n.pitch % 12 == target or round(n.pitch / 127)) + sustained * multiplier / 8
 
 def priority_ordering(beat, n_largest=100, active=(), lenient=False):
 	ins = list(beat)

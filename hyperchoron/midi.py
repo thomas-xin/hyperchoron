@@ -582,6 +582,8 @@ def deconstruct(midi_events, speed_info, ctx=None):
 			else:
 				ticked, active_nc = tick_notes(active_nc)
 				beat = to_segments(ticked)
+				target = min((n.pitch for n in beat), default=0) % 12
+				beat.sort(key=lambda note: transport_note_priority(note, target=target), reverse=True)
 				played_notes.append(beat)
 				timestamp += curr_step
 				if is_int(timestamp):
@@ -671,7 +673,8 @@ def build_midi(notes, instrument_activities, ctx):
 		last_notes, next_notes = next_notes, set()
 		last_drums, next_drums = next_drums, []
 		if beat:
-			ordered = sorted(beat, key=lambda note: (transport_note_priority(note, sustained=(note.instrument_class, note.pitch - c_1) in last_notes), note.instrument_class == -1), reverse=True)
+			target = min((n.pitch for n in beat), default=0) % 12
+			ordered = sorted(beat, key=lambda note: (transport_note_priority(note, sustained=(note.instrument_class, note.pitch - c_1) in last_notes, target=target), note.instrument_class == -1), reverse=True)
 		else:
 			ordered = list(beat)
 		for note in ordered:
@@ -1052,6 +1055,5 @@ def save_midi(transport, output, instrument_activities, ctx, **void):
 		print("Exporting CSV...")
 	else:
 		print("Exporting MIDI...")
-	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 	instruments, wait, resolution = list(build_midi(transport, instrument_activities, ctx=ctx))
-	return proceed_save_midi(output, out_name, is_csv, instruments, wait, resolution)
+	return proceed_save_midi(output, ctx.song_name, is_csv, instruments, wait, resolution)

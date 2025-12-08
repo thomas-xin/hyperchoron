@@ -478,14 +478,13 @@ def load_json(file):
 
 def save_skysheet(transport, output, key_info, ctx, **void):
 	print("Exporting skysheet...")
-	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 	wait = max(1, round(transport.tick_delay * 1000))
 	bpm = 60 * 1000 / wait
 	nc = 0
 	instruments = []
 	columns = []
 	song = dict(
-		name=out_name,
+		name=ctx.src_name,
 		description=DEFAULT_DESCRIPTION,
 		type="composed",
 		bpm=round_min(round(bpm, 2)),
@@ -589,14 +588,13 @@ def save_skysheet(transport, output, key_info, ctx, **void):
 
 def save_genshinsheet(transport, output, key_info, ctx, **void):
 	print("Exporting genshinsheet...")
-	out_name = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
 	wait = max(1, round(transport.tick_delay * 1000))
 	bpm = 60 * 1000 / wait
 	nc = 0
 	instruments = []
 	columns = []
 	song = dict(
-		name=out_name,
+		name=ctx.src_name,
 		description=DEFAULT_DESCRIPTION,
 		type="composed",
 		bpm=round_min(round(bpm, 2)),
@@ -723,8 +721,8 @@ def join_gml(lines):
 	return "".join(out)
 
 def save_deltarune(transport, output, instrument_activities, ctx, **void):
-	tmpl = output.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
-	outtmpl = output.rsplit(".", 1)[0]
+	tmpl = ctx.dest_name
+	outtmpl = ctx.song_name
 	from . import midi
 	instruments, wait, resolution = list(midi.build_midi(transport, instrument_activities, ctx=ctx))
 	full_midi = f"{temp_dir}{tmpl}-full.mid"

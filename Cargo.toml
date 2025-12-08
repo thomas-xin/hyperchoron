@@ -10,9 +10,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # Enable abi3 (stable Python C-API) from Python 3.10 upwards so one wheel works for 3.10+.
-pyo3 = { version = "0.25", features = ["extension-module", "abi3-py310"] }
-numpy = "0.25"
+pyo3 = { version = "0.27.2", features = ["extension-module", "abi3-py310"] }
+numpy = "0.27.1"
 midly = "0.5.3"
 
 [build-dependencies]
-pyo3-build-config = "0.25"
+pyo3-build-config = "0.27.2"

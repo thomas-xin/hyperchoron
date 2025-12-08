@@ -1,4 +1,5 @@
 import concurrent.futures
+import copy
 import itertools
 import os
 import numpy as np
@@ -143,6 +144,24 @@ def fix_args(ctx) -> ContextArgs:
 		ctx.one_to_one = False
 	return ctx
 
+class HyperchoronFolder(list):
+	"""A class implementing a mutable list attached to a path. May represent standard filesystem paths, archive folders, or HTTP URLs."""
+	__slots__ = ("path",)
+
+	def __str__(self):
+		return self.path
+
+	def __init__(self, path: str, children: list | tuple):
+		self.path = path
+		super().__init__(children)
+
+	@classmethod
+	def new(cls, path: str, children: str | list | tuple):
+		if isinstance(children, str):
+			return children
+		return cls(path, children)
+folder = HyperchoronFolder.new
+
 def probe_paths(path, modes, depth=0) -> tuple:
 	mode = modes[depth] if depth < len(modes) else modes[-1]
 	if mode == "I":
@@ -151,28 +170,28 @@ def probe_paths(path, modes, depth=0) -> tuple:
 			children = get_children(children[0])
 		if len(children) == 1:
 			if depth:
-				return children[0], [children[0]]
-			return [children[0]], [children[0]]
+				return folder(path, children[0]), [children[0]]
+			return folder(path, [children[0]]), [children[0]]
 		inputsi = []
 		flati = []
 		for c in children:
 			inputs, flat = probe_paths(c, modes, depth + 1)
 			inputsi.append(inputs)
 			flati.extend(flat)
-		return inputsi, flati
+		return folder(path, inputsi), flati
 	elif mode in ("L", "C"):
 		children = get_children(path)
 		while len(children) == 1 and os.path.isdir(children[0]):
 			children = get_children(children[0])
 		if len(children) == 1:
 			if depth:
-				return children[0], [children[0]]
-			return [children[0]], [children[0]]
+				return folder(path, children[0]), [children[0]]
+			return folder(path, [children[0]]), [children[0]]
 		inputsi = []
 		for c in children:
 			inputs, flat = probe_paths(c, modes, depth + 1)
 			inputsi.append(inputs)
-		return inputsi, [path]
+		return folder(path, inputsi), [path]
 	raise NotImplementedError(mode)
 
 def process_single(paths, ctx, depth=0) -> list:
@@ -182,7 +201,7 @@ def process_single(paths, ctx, depth=0) -> list:
 
 def process_level(paths, ctx, depth=0, executor=None) -> list:
 	mode = ctx.mixing[depth]
-	assert type(paths) is list, paths
+	assert isinstance(paths, list), paths
 	if len(paths) == 1:
 		children = process_single(paths[0], ctx, depth)
 	elif executor is not None:
@@ -289,7 +308,13 @@ def convert_files(**kwargs) -> list:
 		output_files = [fo for i, fo in enumerate(output_files) if i not in removed]
 	if len(inputs) == len(output_files) == 1:
 		results = process_level(inputs, ctx=ctx)
-		outputs = [save_file(results[0], output_files[0], ctx=ctx)]
+		ctx2 = copy.copy(ctx)
+		fi = str(inputs[0])
+		fo = output_files[0]
+		ctx2.src_name = fi.split("?", 1)[0].replace("\\", "/").rsplit("/", 1)[-1]
+		ctx2.dest_name = fo.split("?", 1)[0].replace("\\", "/").rsplit("/", 1)[-1]
+		ctx2.song_name = ctx2.dest_name.rsplit(".", 1)[0]
+		outputs = [save_file(results[0], fo, ctx=ctx2)]
 	elif len(inputs):
 		try:
 			thread_count = 16
@@ -298,8 +323,13 @@ def convert_files(**kwargs) -> list:
 			results = process_level(inputs, ctx=ctx, executor=executor)
 			if type(results) is list and len(results) == 1 and len(output_files) > 1:
 				results *= len(output_files)
-			for midi_events, fo in zip(results, output_files):
-				futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx))
+			for fi, midi_events, fo in zip(inputs, results, output_files):
+				ctx2 = copy.copy(ctx)
+				fi = str(fi)
+				ctx2.src_name = fi.split("?", 1)[0].replace("\\", "/").rsplit("/", 1)[-1]
+				ctx2.dest_name = fo.split("?", 1)[0].replace("\\", "/").rsplit("/", 1)[-1]
+				ctx2.song_name = ctx2.dest_name.rsplit(".", 1)[0]
+				futures.append(executor.submit(save_file, midi_events, fo, ctx=ctx2))
 			outputs = [fut.result() for fut in futures]
 		finally:
 			executor.shutdown(cancel_futures=True, wait=False)
