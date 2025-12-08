@@ -1133,7 +1133,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 								delay += 16
 								z2 -= skeleton.length
 						else:
-							if largest_chord <= 48:
+							if largest_chord <= 32:
 								x = 18 if x > 0 else -18
 								xs.insert(0, (x, z2, delay))
 							break
@@ -1328,7 +1328,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 						if not target:
 							break
 					for k, v in tuple(held.items()):
-						if largest_chord > 48 and v[1] < 0.75 or (v[0] < ticks_per_half or v[1] > 0.9 and v[3] < 128):
+						if largest_chord <= 24 and v[1] < 0.75 or (v[0] < ticks_per_half or v[1] > 0.9 and v[3] < 128):
 							held.pop(k)
 							continue
 						v[2] /= ticks_per_half
