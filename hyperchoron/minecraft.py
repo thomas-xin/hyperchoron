@@ -1136,15 +1136,14 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 						else:
 							x = 18 if x > 0 else -18
 							break
-					xs.insert(0, (x, z2, delay))
+						xs.insert(0, (x, z2, delay))
 				y = (not tick & 1) * 16 + yc - 8
 				for k, (x, z2, delay) in enumerate(xs):
 					if x > attenuation_distance_limit - 3:
 						x = attenuation_distance_limit - 3
 					elif x < -attenuation_distance_limit + 3:
 						x = -attenuation_distance_limit + 3
-					swapped = False
-
+					swapped = 0
 					try:
 						ordering = (1, 0, 2) if x > 0 else (1, 2, 0)
 						for attempt in range(96):
@@ -1158,26 +1157,28 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 										taken[pos] = (tick // 2, note)
 										# Pass
 										raise StopIteration
-							if k < len(xs) - 1:
-								if swapped or abs(panning) > 1 / 32:
-									# Continue
-									raise StopAsyncIteration
+							if not swapped and abs(panning) <= 1 / 32:
 								x = -x
-								swapped = True
+								panning = -panning
+								swapped += 1
 								continue
+							if k < len(xs) - 1 and swapped > 1:
+								# Continue
+								raise StopAsyncIteration
+							swapped = max(2, swapped)
 							x += 3 if panning > 0 else -3
 							if x > attenuation_distance_limit:
-								if swapped or (tick & 1 and vel < 0.25):
+								if swapped > 2 or (tick & 1 and vel < 0.25):
 									return
 								x = -attenuation_distance_limit
 								panning = -panning
-								swapped = True
+								swapped += 1
 							elif x < -attenuation_distance_limit:
-								if swapped or (tick & 1 and vel < 0.25):
+								if swapped > 2 or (tick & 1 and vel < 0.25):
 									return
 								x = attenuation_distance_limit
 								panning = -panning
-								swapped = True
+								swapped += 1
 					except StopIteration:
 						pass
 					except StopAsyncIteration:
