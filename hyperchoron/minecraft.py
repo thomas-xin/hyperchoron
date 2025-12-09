@@ -1412,7 +1412,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					leftmost = -mx + extra_n
 					powered_segment = leftmost
 					if powered_segment > 8:
-						powered_segment = max(0, min(powered_segment - 10, 8))
+						powered_segment = max(0, min(powered_segment - 9, 8))
 					for i in range(1, powered_segment + 1):
 						x = 1 - i
 						primary = (x - main.x, y2, z)
@@ -1442,7 +1442,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					leftmost = Mx + extra_p
 					powered_segment = leftmost
 					if powered_segment > 8:
-						powered_segment = max(0, min(powered_segment - 10, 8))
+						powered_segment = max(0, min(powered_segment - 9, 8))
 					for i in range(1, powered_segment + 1):
 						x = i + 1
 						primary = (x - main.x, y2, z)
