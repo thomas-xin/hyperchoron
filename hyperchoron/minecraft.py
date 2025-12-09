@@ -48,6 +48,7 @@ activator_rail = litemapy.BlockState("minecraft:activator_rail", shape="north_so
 trapdoor = litemapy.BlockState("minecraft:bamboo_trapdoor", half="bottom", facing="north")
 utrapdoor = litemapy.BlockState("minecraft:bamboo_trapdoor", half="top", facing="north")
 slab = litemapy.BlockState("minecraft:bamboo_mosaic_slab", type="top")
+copper_slab = litemapy.BlockState("minecraft:waxed_cut_copper_slab", type="top")
 end_rod = litemapy.BlockState("minecraft:end_rod")
 black_carpet = litemapy.BlockState("minecraft:black_carpet")
 
@@ -802,7 +803,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 	skeleton, = litemapy.Schematic.load(f"{base_path}templates/Hyperchoron V2 Skeleton.litematic").regions.values()
 	# For faraway segments that do not need to be as quiet, we can allocate trapdoors to conserve survival mode resources
 	skeleton2 = clone_region(skeleton)
-	froglight = litemapy.BlockState("minecraft:pearlescent_froglight", axis="y")
+	froglight = litemapy.BlockState("minecraft:pearlescent_froglight", axis="z")
 	for y, z in note_locations:
 		if skeleton2[1, y, z] == bedrock:
 			skeleton2[1, y, z] = trapdoor if y > 1 else froglight
@@ -856,7 +857,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 		"Non-essential optimisations to note modules that reduce excess use of materials"
 		nonlocal main, skeleton3
 		taken = skeletons[x, y, z]
-		all_y = set(p[1] for p in taken if p)
+		all_y = set(p[1] for p in taken if isinstance(p, tuple))
 
 		def set_across(xi, yi, zi, block=air):
 			nonlocal main
@@ -937,10 +938,11 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					yi = 1
 					for zi in (8, 6, 4, 2):
 						coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
-						if main[coords] in (sculk, trapdoor, bedrock):
+						if main[coords] in (sculk, trapdoor, bedrock, froglight):
 							main = setblock(main, coords, air)
 							zi -= 1
 							set_across(xi, yi, zi)
+							set_across(xi, yi - 1, zi)
 						else:
 							break
 				else:
@@ -948,7 +950,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 					yi = 3
 					for zi in (1, 3, 5, 7):
 						coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
-						if main[coords] in (sculk, trapdoor, bedrock):
+						if main[coords] in (sculk, trapdoor, bedrock, froglight):
 							main = setblock(main, coords, air)
 							zi += 1
 							set_across(xi, yi, zi)
@@ -959,7 +961,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 				yi = 5
 				for zi in (8, 6, 4, 2):
 					coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
-					if main[coords] in (sculk, trapdoor, bedrock):
+					if main[coords] in (sculk, trapdoor, bedrock, froglight):
 						main = setblock(main, coords, air)
 						zi -= 1
 						set_across(xi, yi, zi)
@@ -970,7 +972,7 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 			yi = 7
 			for zi in (1, 3, 5, 7):
 				coords = (xi + x - main.x, yi + y - main.y, zi + z - main.z)
-				if main[coords] in (sculk, trapdoor, bedrock):
+				if main[coords] in (sculk, trapdoor, bedrock, froglight):
 					main = setblock(main, coords, air)
 					zi += 1
 					set_across(xi, yi, zi)
@@ -1467,86 +1469,123 @@ def build_minecraft(transport, ctx, name="Hyperchoron"):
 						main = setblock(main, secondary, east_trapdoor, no_replace=["minecraft:observer"])
 						main[primary] = litemapy.BlockState("minecraft:activator_rail", shape="east_west", powered="true")
 
-		for x, y, z in skeletons:
+		excluded = set()
+		for x, y, z in sorted(skeletons, key=lambda t: (t[2], -abs(t[0]))):
 			taken = skeletons[x, y, z]
 			predelay = taken.get(None)
-			match predelay:
-				case None | 0:
-					pass
-				case _ if x > 0:
-					offs = (predelay // 16) * 2 - 1
-					main[x + 1 - main.x, y, z] = air
-					main[x + 1 - main.x, y + 1, z] = air
-					main[x - main.x, y + 1, z + 1] = air
-					main[x + 2 - main.x, y + 1, z + 1] = air
-					main[x + 1 - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:redstone_wire", east="side", north="side", west="side", south="side")
-					main[x + 1 - main.x, y, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
-					if x >= 15:
-						main[x + 1 - main.x, y - 1, z + 1] = utrapdoor
-					else:
-						main[x + 1 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:hopper", facing="south")
-					main[x + 1 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:target")
-					main[x - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:redstone_wire", east="side", west="side")
-					main[x - main.x, y - 2, z + 2] = slab
-					main[x - main.x, y - 1, z + 3] = shroomlight
-					for zi in range(1, offs):
-						main[x - main.x, y - 2, z + 3 + zi] = slab
-						main[x - main.x, y - 1, z + 3 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="south")
-					main[x - main.x, y - 2, z + 3 + offs] = slab
-					main[x - main.x, y - 1, z + 3 + offs] = litemapy.BlockState("minecraft:comparator", facing="south")
-					main[x - main.x, y, z + 4 + offs] = black_carpet
-					main[x - main.x, y - 1, z + 4 + offs] = waxed_oxidized_copper_bulb
-					main[x + 1 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:repeater", delay="3", facing="east")
-					main[x + 1 - main.x, y - 2, z + 4 + offs] = utrapdoor
-					main[x + 2 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:redstone_wire", west="side", north="side")
-					main[x + 2 - main.x, y - 2, z + 4 + offs] = slab
-					for zi in range(offs):
-						main[x + 2 - main.x, y - 1, z + 4 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
-						main[x + 2 - main.x, y - 2, z + 4 + zi] = slab
-					main[x + 2 - main.x, y - 1, z + 3] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
-					main[x + 2 - main.x, y - 2, z + 3] = slab
-					main[x + 2 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
-					main[x + 2 - main.x, y - 2, z + 2] = slab
-					main[x + 2 - main.x, y, z + 1] = black_carpet
-					main[x + 2 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="north")
-				case _ if x < 0:
-					offs = (predelay // 16) * 2 - 1
-					main[x + 1 - main.x, y, z] = air
-					main[x + 1 - main.x, y + 1, z] = air
-					main[x - main.x, y + 1, z + 1] = air
-					main[x + 2 - main.x, y + 1, z + 1] = air
-					main[x + 1 - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:redstone_wire", east="side", north="side", west="side", south="side")
-					main[x + 1 - main.x, y, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
-					if x <= -12:
-						main[x + 1 - main.x, y - 1, z + 1] = utrapdoor
-					else:
-						main[x + 1 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:hopper", facing="south")
-					main[x + 1 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:target")
-					main[x + 2 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:redstone_wire", east="side", west="side")
-					main[x + 2 - main.x, y - 2, z + 2] = slab
-					main[x + 2 - main.x, y - 1, z + 3] = shroomlight
-					for zi in range(1, offs):
-						main[x + 2 - main.x, y - 2, z + 3 + zi] = slab
-						main[x + 2 - main.x, y - 1, z + 3 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="south")
-					main[x + 2 - main.x, y - 2, z + 3 + offs] = slab
-					main[x + 2 - main.x, y - 1, z + 3 + offs] = litemapy.BlockState("minecraft:comparator", facing="south")
-					main[x + 2 - main.x, y, z + 4 + offs] = black_carpet
-					main[x + 2 - main.x, y - 1, z + 4 + offs] = waxed_oxidized_copper_bulb
-					main[x + 1 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:repeater", delay="3", facing="west")
-					main[x + 1 - main.x, y - 2, z + 4 + offs] = utrapdoor
-					main[x - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:redstone_wire", east="side", north="side")
-					main[x - main.x, y - 2, z + 4 + offs] = slab
-					for zi in range(offs):
-						main[x - main.x, y - 1, z + 4 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
-						main[x - main.x, y - 2, z + 4 + zi] = slab
-					main[x - main.x, y - 1, z + 3] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
-					main[x - main.x, y - 2, z + 3] = slab
-					main[x - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
-					main[x - main.x, y - 2, z + 2] = slab
-					main[x - main.x, y, z + 1] = black_carpet
-					main[x - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="north")
-				case _:
-					raise NotImplementedError(x, y, z, predelay)
+			for _ in range(1):
+				match predelay:
+					case None | 0:
+						pass
+					case _ if x > 0:
+						# Optimisation: Leech off a previously assigned delay circuit
+						target = None
+						for dx in range(5):
+							adj = (x + (dx + 1) * 3, y, z)
+							taken2 = skeletons.get(adj)
+							if not taken2:
+								continue
+							if taken2.get(None) != predelay or adj in excluded:
+								break
+							target = adj
+							break
+						main[x + 1 - main.x, y, z] = air
+						main[x + 1 - main.x, y + 1, z] = air
+						main[x - main.x, y + 1, z + 1] = air
+						main[x + 2 - main.x, y + 1, z + 1] = air
+						main[x + 1 - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:redstone_wire", east="side", north="side", west="side", south="side")
+						main[x + 1 - main.x, y, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
+						if x >= 15:
+							main[x + 1 - main.x, y - 1, z + 1] = utrapdoor
+						else:
+							main[x + 1 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:hopper", facing="south")
+						if target:
+							for x2 in range(x + 2, target[0]):
+								main[x2 - main.x, y - 2, z + 2] = copper_slab
+								main[x2 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:redstone_wire", east="side", west="side")
+							main[x + 1 - main.x, y - 1, z + 2] = sculk
+							excluded.add((x, y, z))
+							continue
+						main[x + 1 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:target")
+						offs = (predelay // 16) * 2 - 1
+						main[x - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:redstone_wire", east="side", west="side")
+						main[x - main.x, y - 2, z + 2] = slab
+						main[x - main.x, y - 1, z + 3] = shroomlight
+						for zi in range(1, offs):
+							main[x - main.x, y - 2, z + 3 + zi] = slab
+							main[x - main.x, y - 1, z + 3 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="south")
+						main[x - main.x, y - 2, z + 3 + offs] = slab
+						main[x - main.x, y - 1, z + 3 + offs] = litemapy.BlockState("minecraft:comparator", facing="south")
+						main[x - main.x, y, z + 4 + offs] = black_carpet
+						main[x - main.x, y - 1, z + 4 + offs] = waxed_oxidized_copper_bulb
+						main[x + 1 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:repeater", delay="3", facing="east")
+						main[x + 1 - main.x, y - 2, z + 4 + offs] = utrapdoor
+						main[x + 2 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:redstone_wire", west="side", north="side")
+						main[x + 2 - main.x, y - 2, z + 4 + offs] = slab
+						for zi in range(offs):
+							main[x + 2 - main.x, y - 1, z + 4 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
+							main[x + 2 - main.x, y - 2, z + 4 + zi] = slab
+						main[x + 2 - main.x, y - 1, z + 3] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
+						main[x + 2 - main.x, y - 2, z + 3] = slab
+						main[x + 2 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
+						main[x + 2 - main.x, y - 2, z + 2] = slab
+						main[x + 2 - main.x, y, z + 1] = black_carpet
+						main[x + 2 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="north")
+					case _ if x < 0:
+						target = None
+						for dx in range(5):
+							adj = (x - (dx + 1) * 3, y, z)
+							taken2 = skeletons.get(adj)
+							if not taken2:
+								continue
+							if taken2.get(None) != predelay or adj in excluded:
+								break
+							target = adj
+							break
+						main[x + 1 - main.x, y, z] = air
+						main[x + 1 - main.x, y + 1, z] = air
+						main[x - main.x, y + 1, z + 1] = air
+						main[x + 2 - main.x, y + 1, z + 1] = air
+						main[x + 1 - main.x, y + 1, z + 1] = litemapy.BlockState("minecraft:redstone_wire", east="side", north="side", west="side", south="side")
+						main[x + 1 - main.x, y, z + 1] = litemapy.BlockState("minecraft:observer", facing="down")
+						if x <= -15:
+							main[x + 1 - main.x, y - 1, z + 1] = utrapdoor
+						else:
+							main[x + 1 - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:hopper", facing="south")
+						if target:
+							for x2 in range(target[0] + 3, x + 1):
+								main[x2 - main.x, y - 2, z + 2] = copper_slab
+								main[x2 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:redstone_wire", east="side", west="side")
+							main[x + 1 - main.x, y - 1, z + 2] = sculk
+							excluded.add((x, y, z))
+							continue
+						main[x + 1 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:target")
+						offs = (predelay // 16) * 2 - 1
+						main[x + 2 - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:redstone_wire", east="side", west="side")
+						main[x + 2 - main.x, y - 2, z + 2] = slab
+						main[x + 2 - main.x, y - 1, z + 3] = shroomlight
+						for zi in range(1, offs):
+							main[x + 2 - main.x, y - 2, z + 3 + zi] = slab
+							main[x + 2 - main.x, y - 1, z + 3 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="south")
+						main[x + 2 - main.x, y - 2, z + 3 + offs] = slab
+						main[x + 2 - main.x, y - 1, z + 3 + offs] = litemapy.BlockState("minecraft:comparator", facing="south")
+						main[x + 2 - main.x, y, z + 4 + offs] = black_carpet
+						main[x + 2 - main.x, y - 1, z + 4 + offs] = waxed_oxidized_copper_bulb
+						main[x + 1 - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:repeater", delay="3", facing="west")
+						main[x + 1 - main.x, y - 2, z + 4 + offs] = utrapdoor
+						main[x - main.x, y - 1, z + 4 + offs] = litemapy.BlockState("minecraft:redstone_wire", east="side", north="side")
+						main[x - main.x, y - 2, z + 4 + offs] = slab
+						for zi in range(offs):
+							main[x - main.x, y - 1, z + 4 + zi] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
+							main[x - main.x, y - 2, z + 4 + zi] = slab
+						main[x - main.x, y - 1, z + 3] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
+						main[x - main.x, y - 2, z + 3] = slab
+						main[x - main.x, y - 1, z + 2] = litemapy.BlockState("minecraft:repeater", delay="4", facing="north")
+						main[x - main.x, y - 2, z + 2] = slab
+						main[x - main.x, y, z + 1] = black_carpet
+						main[x - main.x, y - 1, z + 1] = litemapy.BlockState("minecraft:observer", facing="north")
+					case _:
+						raise NotImplementedError(x, y, z, predelay)
 			optimise_skeleton(x, y, z)
 			if not predelay and y >= yc and x in range(-3, 4):
 				if main[x + 1 - main.x, y + 1, z].id != "minecraft:waxed_copper_bulb":

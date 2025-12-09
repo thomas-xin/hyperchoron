@@ -552,8 +552,8 @@ def deconstruct(midi_events, speed_info, ctx=None):
 						value = as_int(event[5])
 						pan = max(-1, (value - 64) / 63)
 						channel_stats[channel].pan = pan
-					case event_types.CONTROL_C:
-						print("Unknown control event:", event)
+					# case event_types.CONTROL_C:
+					# 	print("Unknown control event:", event)
 					case event_types.TEMPO:
 						tempo = event[3]
 						ratio = tempo / orig_tempo
